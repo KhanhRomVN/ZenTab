@@ -1,0 +1,34 @@
+{
+  "manifest_version": 2,
+  "name": "ZenTab",
+  "version": "1.0.0",
+  "description": "Minimal container-based tab management with DeepSeek Chat",
+  "permissions": [
+    "tabs",
+    "storage",
+    "contextualIdentities",
+    "tabHide",
+    "cookies",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["serviceWorker.js"],
+    "persistent": true
+  },
+  "sidebar_action": {
+    "default_panel": "sidebar.html",
+    "default_title": "ZenTab - Container Management",
+    "default_icon": {
+      "16": "icon-16.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    },
+    "browser_style": false
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "zentab@example.com",
+      "strict_min_version": "126.0"
+    }
+  }
+}
