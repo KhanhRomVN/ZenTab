@@ -21,6 +21,10 @@ export class MessageHandler {
 
         case "addContainerToZenTab":
           await this.containerManager.addContainerToZenTab(message.containerId);
+          result = { success: true };
+          break;
+
+        case "createZenTab":
           await this.zenTabManager.ensureZenTab(message.containerId);
           result = { success: true };
           break;

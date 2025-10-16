@@ -9,7 +9,6 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        popup: resolve(__dirname, "popup.html"),
         sidebarApp: resolve(__dirname, "sidebar.html"),
         serviceWorker: resolve(__dirname, "src/background/service-worker.ts"),
       },

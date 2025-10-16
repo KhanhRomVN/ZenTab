@@ -49,13 +49,16 @@ const ContainersDrawer: React.FC<ContainersDrawerProps> = ({
       const response = await chrome.runtime.sendMessage({
         action: "getBlacklistedContainers",
       });
-      const blacklistedIds = response || [];
+      const blacklistedIds = Array.isArray(response) ? response : [];
 
       // Get container details for blacklisted IDs
       const allContainers = await chrome.contextualIdentities.query({});
-      const blacklisted = allContainers.filter((container: any) =>
-        blacklistedIds.includes(container.cookieStoreId)
-      );
+      // Kiểm tra allContainers có phải array không
+      const blacklisted = Array.isArray(allContainers)
+        ? allContainers.filter((container: any) =>
+            blacklistedIds.includes(container.cookieStoreId)
+          )
+        : [];
 
       setBlacklistedContainers(blacklisted);
     } catch (error) {
@@ -63,15 +66,19 @@ const ContainersDrawer: React.FC<ContainersDrawerProps> = ({
         "[ContainersDrawer] Failed to load blacklisted containers:",
         error
       );
+      // Set giá trị mặc định khi có lỗi
+      setBlacklistedContainers([]);
     }
   };
 
   const handleUnblacklist = async (containerId: string) => {
     try {
+      console.log("[ContainersDrawer] Unblacklisting container:", containerId);
       await chrome.runtime.sendMessage({
         action: "removeFromBlacklist",
         containerId,
       });
+      console.log("[ContainersDrawer] Reloading containers after unblacklist");
       await loadBlacklistedContainers();
       await loadUnusedContainers();
     } catch (error) {

@@ -78,7 +78,7 @@ export class ZenTabManager {
       // Find existing ZenTab for this container
       const existingTabs = await this.browserAPI.tabs.query({
         cookieStoreId: containerId,
-        url: DEEPSEEK_URL,
+        url: `${DEEPSEEK_URL}/*`,
       });
 
       if (existingTabs.length > 0) {
@@ -113,7 +113,7 @@ export class ZenTabManager {
     try {
       const existingTabs = await this.browserAPI.tabs.query({
         cookieStoreId: containerId,
-        url: DEEPSEEK_URL,
+        url: `${DEEPSEEK_URL}/*`,
       });
 
       for (const tab of existingTabs) {
@@ -132,32 +132,23 @@ export class ZenTabManager {
         await this.browserAPI.tabs.hide([tabId]);
       }
 
-      // Prevent tab from being discarded/slept
-      await this.browserAPI.tabs.update(tabId, {
-        discarded: false,
-      });
+      // Note: Firefox doesn't support 'discarded' property in tabs.update
+      // The tab will be kept alive by regular activity
     } catch (error) {
       console.warn("[ZenTabManager] Could not fully protect tab:", error);
     }
   }
 
   public async handleTabCreated(tab: any): Promise<void> {
-    // If this is a ZenTab container and tab is not the DeepSeek chat, handle it
-    const zenTabContainers = await this.containerManager.getZenTabContainers();
-    const isZenTabContainer = zenTabContainers.some(
-      (container: any) => container.cookieStoreId === tab.cookieStoreId
-    );
+    // Only manage tabs that are explicitly created as DeepSeek chat tabs
+    if (tab.url === DEEPSEEK_URL && !this.managedTabs.has(tab.id)) {
+      const zenTabContainers =
+        await this.containerManager.getZenTabContainers();
+      const isZenTabContainer = zenTabContainers.some(
+        (container: any) => container.cookieStoreId === tab.cookieStoreId
+      );
 
-    if (
-      isZenTabContainer &&
-      !this.managedTabs.has(tab.id) &&
-      !this.isBlacklisted(tab.cookieStoreId)
-    ) {
-      if (tab.url !== DEEPSEEK_URL) {
-        // This is a non-ZenTab tab in ZenTab container - close it
-        await this.browserAPI.tabs.remove(tab.id);
-      } else {
-        // This is a ZenTab - protect it
+      if (isZenTabContainer && !this.isBlacklisted(tab.cookieStoreId)) {
         this.managedTabs.add(tab.id);
         await this.protectZenTab(tab.id);
       }

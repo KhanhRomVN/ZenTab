@@ -1,5 +1,5 @@
 import React from "react";
-import { MoreVertical, Trash2, MessageCircle, Ban } from "lucide-react";
+import { MoreVertical, Trash2, MessageCircle, Ban, Plus } from "lucide-react";
 import CustomDropdown from "../common/CustomDropdown";
 
 interface ContainerCardProps {
@@ -8,23 +8,22 @@ interface ContainerCardProps {
   onBlacklist: (containerId: string) => void;
 }
 
+interface ContainerCardProps {
+  container: any;
+  onRemove: (containerId: string) => void;
+  onBlacklist: (containerId: string) => void;
+  hasActiveTab: boolean;
+  onCreateTab: (containerId: string) => void;
+}
+
 const ContainerCard: React.FC<ContainerCardProps> = ({
   container,
   onRemove,
   onBlacklist,
+  hasActiveTab,
+  onCreateTab,
 }) => {
   const [showDropdown, setShowDropdown] = React.useState(false);
-
-  const handleOpenChat = async () => {
-    try {
-      await chrome.runtime.sendMessage({
-        action: "openZenTab",
-        containerId: container.cookieStoreId,
-      });
-    } catch (error) {
-      console.error("[ContainerCard] Failed to open chat:", error);
-    }
-  };
 
   const handleBlacklist = async () => {
     try {
@@ -38,11 +37,29 @@ const ContainerCard: React.FC<ContainerCardProps> = ({
     }
   };
 
+  const handleOpenChat = async () => {
+    try {
+      await chrome.runtime.sendMessage({
+        action: "openZenTab",
+        containerId: container.cookieStoreId,
+      });
+    } catch (error) {
+      console.error("[ContainerCard] Failed to open chat:", error);
+    }
+  };
+
   const dropdownOptions = [
     {
       value: "open",
       label: "Open DeepSeek Chat",
       icon: <MessageCircle className="w-3.5 h-3.5" />,
+      disabled: !hasActiveTab,
+    },
+    {
+      value: "create",
+      label: "Create DeepSeek Tab",
+      icon: <Plus className="w-3.5 h-3.5" />,
+      disabled: hasActiveTab,
     },
     {
       value: "blacklist",
@@ -64,6 +81,9 @@ const ContainerCard: React.FC<ContainerCardProps> = ({
     switch (value) {
       case "open":
         handleOpenChat();
+        break;
+      case "create":
+        onCreateTab(container.cookieStoreId);
         break;
       case "blacklist":
         handleBlacklist();
@@ -91,10 +111,7 @@ const ContainerCard: React.FC<ContainerCardProps> = ({
 
   return (
     <div className="select-none">
-      <div
-        className="group flex items-center gap-3 px-3 py-3 cursor-pointer transition-all duration-150 rounded-lg hover:bg-sidebar-itemHover"
-        onClick={handleOpenChat}
-      >
+      <div className="group flex items-center gap-3 px-3 py-3 transition-all duration-150 rounded-lg hover:bg-sidebar-itemHover">
         {/* Container Icon */}
         <div
           className={`w-8 h-8 flex items-center justify-center rounded-md ${getContainerColor(

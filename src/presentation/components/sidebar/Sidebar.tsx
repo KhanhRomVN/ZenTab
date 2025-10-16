@@ -1,18 +1,25 @@
 import React, { useState, useEffect } from "react";
 import ContainerCard from "./ContainerCard";
 import ContainersDrawer from "./ContainersDrawer";
+import WebSocketDrawer from "./WebSocketDrawer";
+import SettingDrawer from "./SettingDrawer";
 import CustomButton from "../common/CustomButton";
 import { Settings } from "lucide-react";
+import { getBrowserAPI } from "@/shared/lib/browser-api";
 
 const Sidebar: React.FC = () => {
   const [containers, setContainers] = useState<any[]>([]);
   const [showContainersDrawer, setShowContainersDrawer] = useState(false);
+  const [showSettingDrawer, setShowSettingDrawer] = useState(false);
+  const [showWebSocketDrawer, setShowWebSocketDrawer] = useState(false);
+  const [activeTabs, setActiveTabs] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     const initializeSidebar = async () => {
       await loadContainers();
+      await loadActiveTabs();
 
-      // Connect to service worker to trigger automatic tab creation
+      // Connect to service worker
       const port = chrome.runtime.connect({ name: "zenTab-sidebar" });
 
       return () => {
@@ -29,17 +36,63 @@ const Sidebar: React.FC = () => {
     };
 
     chrome.runtime.onMessage.addListener(messageListener);
+
+    const tabListener = () => {
+      loadActiveTabs();
+    };
+    chrome.tabs.onCreated.addListener(tabListener);
+    chrome.tabs.onRemoved.addListener(tabListener);
+
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
+      chrome.tabs.onCreated.removeListener(tabListener);
+      chrome.tabs.onRemoved.removeListener(tabListener);
     };
   }, []);
 
+  const handleCreateTab = async (containerId: string) => {
+    try {
+      await chrome.runtime.sendMessage({
+        action: "createZenTab",
+        containerId,
+      });
+      await loadActiveTabs();
+    } catch (error) {
+      console.error("[Sidebar] Failed to create tab:", error);
+    }
+  };
+
+  const loadActiveTabs = async () => {
+    try {
+      const tabs = await chrome.tabs.query({
+        url: "https://chat.deepseek.com/*",
+      });
+      const containerIds = new Set(
+        tabs.map((tab: any) => tab.cookieStoreId).filter(Boolean)
+      );
+      setActiveTabs(containerIds);
+    } catch (error) {
+      console.error("[Sidebar] Failed to load active tabs:", error);
+    }
+  };
+
   const loadContainers = async () => {
     try {
-      const result = await chrome.storage.local.get(["zenTabContainers"]);
-      setContainers(result.zenTabContainers || []);
+      const browserAPI = getBrowserAPI();
+
+      if (
+        browserAPI.contextualIdentities &&
+        typeof browserAPI.contextualIdentities.query === "function"
+      ) {
+        const containers = await browserAPI.contextualIdentities.query({});
+        setContainers(containers || []);
+      } else {
+        console.warn("Contextual identities not supported in this browser");
+        setContainers([]);
+      }
     } catch (error) {
-      console.error("[Sidebar] Failed to load containers:", error);
+      console.error("Failed to load containers:", error);
+      setContainers([]);
     }
   };
 
@@ -83,20 +136,6 @@ const Sidebar: React.FC = () => {
     <div className="w-full h-screen overflow-hidden bg-background relative">
       {/* Main content */}
       <div className="flex flex-col h-full">
-        {/* Header */}
-        <div className="flex-shrink-0 p-4 border-b border-border-default">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-semibold text-text-primary">ZenTab</h1>
-            <CustomButton
-              variant="ghost"
-              size="sm"
-              icon={Settings}
-              onClick={() => setShowContainersDrawer(true)}
-              children={undefined}
-            />
-          </div>
-        </div>
-
         {/* Container List */}
         <div className="flex-1 overflow-y-auto p-2">
           {containers.map((container) => (
@@ -105,6 +144,8 @@ const Sidebar: React.FC = () => {
               container={container}
               onRemove={handleContainerRemoved}
               onBlacklist={handleContainerBlacklisted}
+              hasActiveTab={activeTabs.has(container.cookieStoreId)}
+              onCreateTab={handleCreateTab}
             />
           ))}
 
@@ -122,12 +163,39 @@ const Sidebar: React.FC = () => {
         </div>
       </div>
 
+      {/* Floating Action Button - Bottom Right */}
+      <div className="fixed bottom-2 right-2 z-40">
+        <CustomButton
+          variant="ghost"
+          size="sm"
+          icon={Settings}
+          onClick={() => setShowSettingDrawer(!showSettingDrawer)}
+          aria-label="Open settings menu"
+          className="!p-3 !text-lg"
+          children={undefined}
+        />
+      </div>
+
+      {/* Setting Drawer */}
+      <SettingDrawer
+        isOpen={showSettingDrawer}
+        onClose={() => setShowSettingDrawer(false)}
+        onContainers={() => setShowContainersDrawer(true)}
+        onWebSocket={() => setShowWebSocketDrawer(true)}
+      />
+
       {/* Containers Management Drawer */}
       <ContainersDrawer
         isOpen={showContainersDrawer}
         onClose={() => setShowContainersDrawer(false)}
         onContainerAdded={handleContainerAdded}
         onContainerBlacklisted={handleContainerBlacklisted}
+      />
+
+      {/* WebSocket Drawer */}
+      <WebSocketDrawer
+        isOpen={showWebSocketDrawer}
+        onClose={() => setShowWebSocketDrawer(false)}
       />
     </div>
   );
