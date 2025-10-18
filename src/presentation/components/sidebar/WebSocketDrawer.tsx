@@ -7,15 +7,6 @@ import WebSocketCard from "./WebSocketCard";
 import { WSHelper, WSConnectionState } from "@/shared/lib/ws-helper";
 import { Plus, AlertCircle } from "lucide-react";
 
-interface WebSocketConnection {
-  id: string;
-  port: number;
-  url: string;
-  status: "connecting" | "connected" | "disconnected" | "error";
-  lastConnected?: number;
-  reconnectAttempts: number;
-}
-
 interface WebSocketDrawerProps {
   isOpen: boolean;
   onClose: () => void;
@@ -34,17 +25,75 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
     if (isOpen) {
       loadConnections();
 
-      // Listen for status changes
-      const messageListener = (message: any) => {
-        if (message.action === "websocketStatusChanged") {
-          updateConnectionStatus(message.connection);
+      // Load initial wsStates - wrapped in Promise for Firefox compatibility
+      const loadInitialStates = async () => {
+        try {
+          const result = await new Promise<any>((resolve) => {
+            chrome.storage.local.get(["wsStates"], (data) => {
+              resolve(data || {});
+            });
+          });
+
+          const states = result?.wsStates || {};
+          console.debug("[WebSocketDrawer] Initial wsStates loaded:", states);
+
+          setConnections((prev) =>
+            prev.map((conn) => {
+              const newState = states[conn.id];
+              if (newState) {
+                console.debug(
+                  "[WebSocketDrawer] Applying initial state:",
+                  conn.id,
+                  newState.status
+                );
+                return { ...conn, ...newState };
+              }
+              return conn;
+            })
+          );
+        } catch (error) {
+          console.warn(
+            "[WebSocketDrawer] Failed to load initial wsStates:",
+            error
+          );
         }
       };
 
-      chrome.runtime.onMessage.addListener(messageListener);
+      loadInitialStates();
+
+      // Listen for status changes via storage
+      const storageListener = (
+        changes: { [key: string]: chrome.storage.StorageChange },
+        areaName: string
+      ) => {
+        if (areaName !== "local") return;
+
+        if (changes.wsStates) {
+          const states = changes.wsStates.newValue || {};
+          console.debug("[WebSocketDrawer] wsStates changed:", states);
+
+          // Update connections với states mới nhất
+          setConnections((prev) =>
+            prev.map((conn) => {
+              const newState = states[conn.id];
+              if (newState) {
+                console.debug(
+                  "[WebSocketDrawer] Updating connection:",
+                  conn.id,
+                  newState.status
+                );
+                return { ...conn, ...newState };
+              }
+              return conn;
+            })
+          );
+        }
+      };
+
+      chrome.storage.onChanged.addListener(storageListener);
 
       return () => {
-        chrome.runtime.onMessage.removeListener(messageListener);
+        chrome.storage.onChanged.removeListener(storageListener);
       };
     }
   }, [isOpen]);
@@ -52,19 +101,42 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
   const loadConnections = async () => {
     try {
       const conns = await WSHelper.getAllConnections();
-      setConnections(conns);
+
+      // Sync với wsStates từ storage - with proper error handling
+      try {
+        const result = await new Promise<any>((resolve) => {
+          chrome.storage.local.get(["wsStates"], (data) => {
+            resolve(data || {});
+          });
+        });
+
+        const states = result?.wsStates || {};
+
+        const mergedConns = conns.map((conn: WSConnectionState) => {
+          const state = states[conn.id];
+          if (state) {
+            console.debug(
+              "[WebSocketDrawer] Syncing connection with state:",
+              conn.id,
+              state.status
+            );
+            return { ...conn, ...state };
+          }
+          return conn;
+        });
+
+        setConnections(mergedConns);
+      } catch (storageError) {
+        console.warn(
+          "[WebSocketDrawer] Failed to sync with wsStates, using connections as-is:",
+          storageError
+        );
+        setConnections(conns);
+      }
     } catch (error) {
       console.error("[WebSocketDrawer] Failed to load connections:", error);
       setConnections([]);
     }
-  };
-
-  const updateConnectionStatus = (updatedConnection: WebSocketConnection) => {
-    setConnections((prev) =>
-      prev.map((conn) =>
-        conn.id === updatedConnection.id ? updatedConnection : conn
-      )
-    );
   };
 
   const handleAddConnection = async () => {
@@ -211,12 +283,8 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
   const handleConnect = async (id: string) => {
     console.debug("[WebSocketDrawer] Attempting to connect:", id);
 
-    // Update UI optimistically
-    setConnections((prev) =>
-      prev.map((conn) =>
-        conn.id === id ? { ...conn, status: "connecting" as const } : conn
-      )
-    );
+    // KHÔNG update optimistically - để storage listener xử lý
+    // UI sẽ tự động update qua storageListener
 
     try {
       const response = await WSHelper.connect(id);
@@ -227,12 +295,10 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
         setError(response.error || "Failed to connect");
       }
 
-      // Reload connections để cập nhật status thật
-      await loadConnections();
+      // Không cần reload - storage listener sẽ tự động update
     } catch (error) {
       console.error("[WebSocketDrawer] Failed to connect:", error);
       setError(error instanceof Error ? error.message : "Connection failed");
-      await loadConnections();
     }
   };
 
@@ -248,11 +314,10 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
         setError(response.error || "Failed to disconnect");
       }
 
-      await loadConnections();
+      // Không cần reload - storage listener sẽ tự động update
     } catch (error) {
       console.error("[WebSocketDrawer] Failed to disconnect:", error);
       setError(error instanceof Error ? error.message : "Disconnection failed");
-      await loadConnections();
     }
   };
 

@@ -117,13 +117,20 @@ const WebSocketCard: React.FC<WebSocketCardProps> = ({
             onClick={() => onDisconnect(connection.id)}
             children={undefined}
           />
+        ) : connection.status === "connecting" ? (
+          <CustomButton
+            variant="loading"
+            size="sm"
+            icon={Wifi}
+            disabled={true}
+            children={undefined}
+          />
         ) : (
           <CustomButton
             variant="success"
             size="sm"
             icon={Power}
             onClick={() => onConnect(connection.id)}
-            disabled={connection.status === "connecting"}
             children={undefined}
           />
         )}

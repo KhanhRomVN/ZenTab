@@ -67,8 +67,12 @@ export class WSConnection {
       this.retryStartTime = Date.now();
     }
 
+    console.debug(
+      "[WSConnection] Setting status to connecting:",
+      this.state.id
+    );
     this.state.status = "connecting";
-    this.notifyStateChange();
+    this.notifyStateChange(); // Notify ngay lập tức
 
     return new Promise<void>((resolve) => {
       try {
@@ -143,9 +147,19 @@ export class WSConnection {
 
   private scheduleReconnect(): void {
     this.state.reconnectAttempts++;
+    console.debug(
+      "[WSConnection] Scheduling reconnect attempt:",
+      this.state.reconnectAttempts,
+      this.state.id
+    );
 
     this.reconnectTimer = setTimeout(() => {
-      console.log("[WSConnection] Reconnecting:", this.state.url);
+      console.log(
+        "[WSConnection] Reconnecting (attempt",
+        this.state.reconnectAttempts,
+        "):",
+        this.state.url
+      );
       this.connect();
     }, this.reconnectDelay) as any;
   }
@@ -179,11 +193,17 @@ export class WSConnection {
   }
 
   private notifyStateChange(): void {
-    // Save state to chrome.storage
+    // Save state to chrome.storage - sẽ trigger onChanged listener
     chrome.storage.local.get(["wsStates"], (result) => {
       const states = result.wsStates || {};
       states[this.state.id] = { ...this.state };
-      chrome.storage.local.set({ wsStates: states });
+      chrome.storage.local.set({ wsStates: states }, () => {
+        console.debug(
+          "[WSConnection] State change notified:",
+          this.state.id,
+          this.state.status
+        );
+      });
     });
   }
 

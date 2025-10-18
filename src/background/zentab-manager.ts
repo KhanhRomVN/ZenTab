@@ -182,7 +182,7 @@ export class ZenTabManager {
   public async handleTabUpdated(
     tabId: number,
     changeInfo: any,
-    tab: any
+    _tab: any
   ): Promise<void> {
     // If a ZenTab URL changes, restore it to DeepSeek
     if (
