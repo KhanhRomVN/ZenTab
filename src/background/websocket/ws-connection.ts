@@ -21,6 +21,7 @@ export class WSConnection {
   private reconnectDelay = 2000; // 2s mỗi lần retry
   private retryStartTime?: number; // Thời điểm bắt đầu retry
   private readonly MAX_RETRY_DURATION = 10000; // 10s tối đa
+  private manualDisconnect = false; // Flag để track ngắt kết nối thủ công
 
   public state: WSConnectionState;
 
@@ -35,6 +36,9 @@ export class WSConnection {
   }
 
   public disconnect(): void {
+    // Đánh dấu đây là manual disconnect
+    this.manualDisconnect = true;
+
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = undefined;
@@ -46,7 +50,7 @@ export class WSConnection {
     }
 
     this.state.status = "disconnected";
-    this.retryStartTime = undefined; // Reset retry timer khi disconnect thủ công
+    this.retryStartTime = undefined;
     this.notifyStateChange();
   }
 
@@ -61,6 +65,9 @@ export class WSConnection {
       );
       return;
     }
+
+    // Reset manual disconnect flag khi user chủ động connect lại
+    this.manualDisconnect = false;
 
     // Khởi tạo thời điểm bắt đầu retry nếu chưa có
     if (!this.retryStartTime) {
@@ -101,22 +108,29 @@ export class WSConnection {
           this.ws = undefined;
           this.notifyStateChange();
 
-          // Auto reconnect chỉ trong vòng 10s
-          const elapsedTime = this.retryStartTime
-            ? Date.now() - this.retryStartTime
-            : 0;
+          // CHỈ auto reconnect nếu KHÔNG phải manual disconnect
+          if (!this.manualDisconnect) {
+            // Auto reconnect chỉ trong vòng 10s
+            const elapsedTime = this.retryStartTime
+              ? Date.now() - this.retryStartTime
+              : 0;
 
-          if (
-            elapsedTime < this.MAX_RETRY_DURATION &&
-            this.state.reconnectAttempts < this.maxReconnectAttempts
-          ) {
-            this.scheduleReconnect();
+            if (
+              elapsedTime < this.MAX_RETRY_DURATION &&
+              this.state.reconnectAttempts < this.maxReconnectAttempts
+            ) {
+              this.scheduleReconnect();
+            } else {
+              // Quá 10s hoặc hết số lần retry, dừng hoàn toàn
+              this.state.status = "error";
+              this.retryStartTime = undefined;
+              this.notifyStateChange();
+              console.warn("[WSConnection] Stopped retrying:", this.state.url);
+            }
           } else {
-            // Quá 10s hoặc hết số lần retry, dừng hoàn toàn
-            this.state.status = "error";
-            this.retryStartTime = undefined;
-            this.notifyStateChange();
-            console.warn("[WSConnection] Stopped retrying:", this.state.url);
+            console.debug(
+              "[WSConnection] Manual disconnect, no auto-reconnect"
+            );
           }
 
           resolve(); // Resolve ngay cả khi disconnect

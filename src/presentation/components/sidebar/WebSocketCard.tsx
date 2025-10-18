@@ -1,6 +1,6 @@
 import React from "react";
 import CustomButton from "../common/CustomButton";
-import { Trash2, Power, PowerOff, Wifi, WifiOff } from "lucide-react";
+import { Trash2, Power, PowerOff, Wifi, WifiOff, Loader2 } from "lucide-react";
 
 interface WSConnectionState {
   id: string;
@@ -42,7 +42,7 @@ const WebSocketCard: React.FC<WebSocketCardProps> = ({
       case "connected":
         return <Wifi className="w-4 h-4" />;
       case "connecting":
-        return <Wifi className="w-4 h-4 animate-pulse" />;
+        return <Loader2 className="w-4 h-4 animate-spin" />; // Sử dụng spinner cho connecting
       case "error":
         return <WifiOff className="w-4 h-4" />;
       default:
@@ -55,7 +55,9 @@ const WebSocketCard: React.FC<WebSocketCardProps> = ({
       case "connected":
         return "Connected";
       case "connecting":
-        return "Connecting...";
+        return connection.reconnectAttempts > 0
+          ? `Connecting... (${connection.reconnectAttempts})`
+          : "Connecting...";
       case "error":
         return `Error (${connection.reconnectAttempts} retries)`;
       default:
@@ -121,7 +123,7 @@ const WebSocketCard: React.FC<WebSocketCardProps> = ({
           <CustomButton
             variant="loading"
             size="sm"
-            icon={Wifi}
+            icon={Loader2}
             disabled={true}
             children={undefined}
           />
