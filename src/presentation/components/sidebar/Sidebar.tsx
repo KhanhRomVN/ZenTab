@@ -67,12 +67,14 @@ const Sidebar: React.FC = () => {
       const tabs = await chrome.tabs.query({
         url: "https://chat.deepseek.com/*",
       });
+      const safeTabs = Array.isArray(tabs) ? tabs : [];
       const containerIds = new Set(
-        tabs.map((tab: any) => tab.cookieStoreId).filter(Boolean)
+        safeTabs.map((tab: any) => tab.cookieStoreId).filter(Boolean)
       );
       setActiveTabs(containerIds);
     } catch (error) {
       console.error("[Sidebar] Failed to load active tabs:", error);
+      setActiveTabs(new Set());
     }
   };
 
@@ -85,7 +87,8 @@ const Sidebar: React.FC = () => {
         typeof browserAPI.contextualIdentities.query === "function"
       ) {
         const containers = await browserAPI.contextualIdentities.query({});
-        setContainers(containers || []);
+        const safeContainers = Array.isArray(containers) ? containers : [];
+        setContainers(safeContainers);
       } else {
         console.warn("Contextual identities not supported in this browser");
         setContainers([]);

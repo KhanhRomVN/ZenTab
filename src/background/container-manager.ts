@@ -13,12 +13,22 @@ export class ContainerManager {
         await this.saveContainers();
 
         // Notify UI about containers update
-        this.browserAPI.runtime
-          .sendMessage({
+        try {
+          const promise = this.browserAPI.runtime.sendMessage({
             action: "containersUpdated",
             containers: this.containers,
-          })
-          .catch(() => {}); // Ignore errors if no receivers
+          });
+
+          // Only handle promise if it exists
+          if (promise && typeof promise.catch === "function") {
+            promise.catch(() => {}); // Ignore errors if no receivers
+          }
+        } catch (error) {
+          // Ignore errors if no receivers
+          console.debug(
+            "[ContainerManager] No receivers for containers update"
+          );
+        }
       }
     } catch (error) {
       console.error(

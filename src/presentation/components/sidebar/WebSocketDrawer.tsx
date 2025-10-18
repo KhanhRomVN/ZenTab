@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import MotionCustomDrawer from "../common/CustomDrawer";
 import CustomButton from "../common/CustomButton";
 import CustomInput from "../common/CustomInput";
+import { WSHelper, WSConnectionState } from "@/shared/lib/ws-helper";
 import {
   Plus,
   Trash2,
@@ -31,7 +32,7 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
   isOpen,
   onClose,
 }) => {
-  const [connections, setConnections] = useState<WebSocketConnection[]>([]);
+  const [connections, setConnections] = useState<WSConnectionState[]>([]);
   const [newPort, setNewPort] = useState("");
   const [error, setError] = useState("");
   const [isAdding, setIsAdding] = useState(false);
@@ -57,12 +58,11 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
 
   const loadConnections = async () => {
     try {
-      const response = await chrome.runtime.sendMessage({
-        action: "getWebSocketConnections",
-      });
-      setConnections(response || []);
+      const conns = await WSHelper.getAllConnections();
+      setConnections(conns);
     } catch (error) {
       console.error("[WebSocketDrawer] Failed to load connections:", error);
+      setConnections([]);
     }
   };
 
@@ -75,40 +75,131 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
   };
 
   const handleAddConnection = async () => {
-    setError("");
+    const fnStartTime = Date.now();
+    console.debug("[WebSocketDrawer] ===== START handleAddConnection =====");
+    console.debug("[WebSocketDrawer] Function start time:", fnStartTime);
+    console.debug("[WebSocketDrawer] Current time:", new Date().toISOString());
+    console.debug("[WebSocketDrawer] newPort value:", newPort);
+    console.debug("[WebSocketDrawer] newPort type:", typeof newPort);
+    console.debug("[WebSocketDrawer] newPort length:", newPort.length);
+    console.debug(
+      "[WebSocketDrawer] Current connections count:",
+      connections.length
+    );
+    console.debug("[WebSocketDrawer] Current error state:", error);
+    console.debug("[WebSocketDrawer] Current isAdding state:", isAdding);
 
-    // Validate port
+    setError("");
+    console.debug("[WebSocketDrawer] Error state cleared");
+
     const port = parseInt(newPort);
+    console.debug("[WebSocketDrawer] Parsed port:", port);
+    console.debug("[WebSocketDrawer] Port type:", typeof port);
+    console.debug("[WebSocketDrawer] Port is valid number?", !isNaN(port));
+    console.debug("[WebSocketDrawer] Port validation:", {
+      isNaN: isNaN(port),
+      lessThan1: port < 1,
+      greaterThan65535: port > 65535,
+      inValidRange: port >= 1 && port <= 65535,
+    });
+
     if (isNaN(port) || port < 1 || port > 65535) {
+      console.debug("[WebSocketDrawer] ❌ Port validation failed");
       setError("Invalid port number (1-65535)");
       return;
     }
 
-    // Check if port already exists
-    if (connections.some((conn) => conn.port === port)) {
+    const existingPort = connections.some((conn) => conn.port === port);
+    console.debug("[WebSocketDrawer] Existing port check:", {
+      port,
+      existingPort,
+      currentConnectionsCount: connections.length,
+      allPorts: connections.map((c) => c.port),
+    });
+
+    if (existingPort) {
+      console.debug("[WebSocketDrawer] ❌ Port already exists");
       setError("Connection with this port already exists");
       return;
     }
 
+    console.debug("[WebSocketDrawer] ✅ Validation passed");
+    console.debug("[WebSocketDrawer] Setting isAdding to true");
     setIsAdding(true);
+    console.debug("[WebSocketDrawer] isAdding state updated");
 
     try {
-      const response = await chrome.runtime.sendMessage({
-        action: "addWebSocketConnection",
-        port,
-      });
+      console.debug(
+        "[WebSocketDrawer] Calling WSHelper.addConnection with port:",
+        port
+      );
 
-      if (response.success) {
+      const response = await WSHelper.addConnection(port);
+
+      console.debug("[WebSocketDrawer] WSHelper response:", response);
+      console.debug("[WebSocketDrawer] Response type:", typeof response);
+      console.debug(
+        "[WebSocketDrawer] Response keys:",
+        response ? Object.keys(response) : "null"
+      );
+
+      if (response && response.success) {
+        console.debug(
+          "[WebSocketDrawer] ✅ Success! Connection ID:",
+          response.connectionId
+        );
         setNewPort("");
         await loadConnections();
       } else {
-        setError(response.error || "Failed to add connection");
+        const errorMsg =
+          (response && response.error) || "Failed to add connection";
+        console.debug("[WebSocketDrawer] ❌ Error:", errorMsg);
+        setError(errorMsg);
       }
     } catch (error) {
-      console.error("[WebSocketDrawer] Failed to add connection:", error);
+      console.error(
+        "[WebSocketDrawer] ❌ Exception caught in try block:",
+        error
+      );
+      console.debug("[WebSocketDrawer] Exception details:");
+      console.debug("[WebSocketDrawer]   Type:", typeof error);
+      console.debug(
+        "[WebSocketDrawer]   Constructor:",
+        error?.constructor?.name
+      );
+      console.debug(
+        "[WebSocketDrawer]   Message:",
+        error instanceof Error ? error.message : String(error)
+      );
+      console.debug(
+        "[WebSocketDrawer]   Stack:",
+        error instanceof Error ? error.stack : "N/A"
+      );
+      console.debug(
+        "[WebSocketDrawer]   Name:",
+        error instanceof Error ? error.name : "N/A"
+      );
+      console.debug("[WebSocketDrawer]   toString:", error?.toString?.());
+
+      console.debug(
+        "[WebSocketDrawer] Setting error state to 'Failed to add connection'"
+      );
       setError("Failed to add connection");
+      console.debug("[WebSocketDrawer] Error state set");
     } finally {
+      console.debug("[WebSocketDrawer] Entering finally block");
+      console.debug("[WebSocketDrawer] Setting isAdding to false");
       setIsAdding(false);
+      console.debug("[WebSocketDrawer] isAdding state updated");
+
+      const fnEndTime = Date.now();
+      console.debug("[WebSocketDrawer] Function end time:", fnEndTime);
+      console.debug(
+        "[WebSocketDrawer] Total function duration:",
+        fnEndTime - fnStartTime,
+        "ms"
+      );
+      console.debug("[WebSocketDrawer] ===== END handleAddConnection =====");
     }
   };
 
@@ -125,24 +216,38 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
   };
 
   const handleConnect = async (id: string) => {
+    console.debug("[WebSocketDrawer] Attempting to connect:", id);
     try {
-      await chrome.runtime.sendMessage({
+      const response = await chrome.runtime.sendMessage({
         action: "connectWebSocket",
         connectionId: id,
       });
+      console.debug("[WebSocketDrawer] Connect response:", response);
     } catch (error) {
       console.error("[WebSocketDrawer] Failed to connect:", error);
+      console.debug("[WebSocketDrawer] Connect error details:", {
+        connectionId: id,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
     }
   };
 
   const handleDisconnect = async (id: string) => {
+    console.debug("[WebSocketDrawer] Attempting to disconnect:", id);
     try {
-      await chrome.runtime.sendMessage({
+      const response = await chrome.runtime.sendMessage({
         action: "disconnectWebSocket",
         connectionId: id,
       });
+      console.debug("[WebSocketDrawer] Disconnect response:", response);
     } catch (error) {
       console.error("[WebSocketDrawer] Failed to disconnect:", error);
+      console.debug("[WebSocketDrawer] Disconnect error details:", {
+        connectionId: id,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
     }
   };
 
@@ -213,14 +318,13 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
     >
       <div className="h-full overflow-y-auto bg-drawer-background">
         {/* Add Connection Form */}
-        <div className="p-4 border-b border-border-default bg-card-background">
+        <div className="p-4 border-b border-border-default">
           <h3 className="text-sm font-medium text-text-primary mb-3">
             Add New Connection
           </h3>
           <div className="flex gap-2">
             <div className="flex-1">
               <CustomInput
-                type="number"
                 placeholder="Port number (e.g., 8080)"
                 value={newPort}
                 onChange={setNewPort}

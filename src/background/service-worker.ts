@@ -1,7 +1,7 @@
 import { ContainerManager } from "./container-manager";
 import { ZenTabManager } from "./zentab-manager";
 import { MessageHandler } from "./message-handler";
-import { WebSocketManager } from "./websocket-manager";
+import { WSManagerNew } from "./websocket/ws-manager-new";
 import { DeepSeekController } from "./deepseek-controller";
 
 declare const browser: typeof chrome & any;
@@ -15,7 +15,8 @@ declare const browser: typeof chrome & any;
     throw new Error("No browser API available");
   })();
 
-  const wsManager = new WebSocketManager();
+  // Initialize WebSocket Manager (no need to store reference, it auto-handles via storage)
+  new WSManagerNew();
 
   // Initialize managers
   const containerManager = new ContainerManager(browserAPI);
@@ -56,70 +57,32 @@ declare const browser: typeof chrome & any;
     }
   });
 
-  // Message listener
+  // Unified Message Listener - handles all actions
   browserAPI.runtime.onMessage.addListener(
     (message: any, _sender: any, sendResponse: any) => {
-      messageHandler.handleMessage(message, sendResponse);
-      return true;
-    }
-  );
+      console.debug("[ServiceWorker] Message received:", message.action);
 
-  // WebSocket message handlers
-  browserAPI.runtime.onMessage.addListener(
-    (message: any, _sender: any, sendResponse: any) => {
-      // Existing handler
-      messageHandler.handleMessage(message, sendResponse);
+      // WebSocket actions - ignore, handled via storage
+      if (
+        (message.action &&
+          message.action.startsWith("addWebSocketConnection")) ||
+        message.action === "removeWebSocketConnection" ||
+        message.action === "connectWebSocket" ||
+        message.action === "disconnectWebSocket"
+      ) {
+        console.debug(
+          "[ServiceWorker] WebSocket action - handled via storage, ignoring message"
+        );
+        // Return empty response to prevent UI from hanging
+        sendResponse({
+          success: true,
+          note: "WebSocket actions use storage-based communication",
+        });
+        return true;
+      }
 
-      // WebSocket handlers
+      // DeepSeek controller handlers
       switch (message.action) {
-        case "getWebSocketConnections":
-          sendResponse(wsManager.getAllConnections());
-          break;
-
-        case "addWebSocketConnection":
-          wsManager
-            .addConnection(message.port)
-            .then((id) => {
-              sendResponse({ success: true, connectionId: id });
-            })
-            .catch((error: Error) => {
-              sendResponse({ success: false, error: error.message });
-            });
-          return true;
-
-        case "removeWebSocketConnection":
-          wsManager
-            .removeConnection(message.connectionId)
-            .then(() => {
-              sendResponse({ success: true });
-            })
-            .catch((error: Error) => {
-              sendResponse({ success: false, error: error.message });
-            });
-          return true;
-
-        case "connectWebSocket":
-          wsManager
-            .connect(message.connectionId)
-            .then(() => {
-              sendResponse({ success: true });
-            })
-            .catch((error: Error) => {
-              sendResponse({ success: false, error: error.message });
-            });
-          return true;
-
-        case "disconnectWebSocket":
-          wsManager.disconnect(message.connectionId);
-          sendResponse({ success: true });
-          break;
-
-        case "sendWebSocketMessage":
-          wsManager.sendMessage(message.connectionId, message.data);
-          sendResponse({ success: true });
-          break;
-
-        // DeepSeek controller handlers
         case "deepseek.isDeepThinkEnabled":
           DeepSeekController.isDeepThinkEnabled(message.tabId).then(
             (enabled) => {
@@ -182,9 +145,11 @@ declare const browser: typeof chrome & any;
             sendResponse({ input });
           });
           return true;
-      }
 
-      return true;
+        default:
+          messageHandler.handleMessage(message, sendResponse);
+          return true;
+      }
     }
   );
 
