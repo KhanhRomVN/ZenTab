@@ -9,54 +9,35 @@ export class MessageHandler {
       let result: any;
 
       switch (message.action) {
-        case "getUnusedContainers":
-          const unusedContainers =
-            await this.containerManager.getUnusedContainers();
-          // Filter out blacklisted containers
-          result = unusedContainers.filter(
-            (container: any) =>
-              !this.zenTabManager.isBlacklisted(container.cookieStoreId)
-          );
-          break;
-
-        case "addContainerToZenTab":
-          await this.containerManager.addContainerToZenTab(message.containerId);
-          result = { success: true };
-          break;
-
-        case "createZenTab":
-          await this.zenTabManager.ensureZenTab(message.containerId);
-          result = { success: true };
-          break;
-
-        case "removeContainerFromZenTab":
-          await this.containerManager.removeContainerFromZenTab(
-            message.containerId
+        case "selectTab":
+          await this.zenTabManager.selectTab(
+            message.containerId,
+            message.tabId
           );
           result = { success: true };
           break;
 
-        case "openZenTab":
-          await this.zenTabManager.openZenTab(message.containerId);
+        case "unselectTab":
+          await this.zenTabManager.unselectTab(message.containerId);
           result = { success: true };
           break;
 
-        case "getZenTabContainers":
-          result = await this.containerManager.getZenTabContainers();
+        case "getSelectedTab":
+          result = this.zenTabManager.getSelectedTab(message.containerId);
           break;
 
-        case "addToBlacklist":
-          await this.zenTabManager.addToBlacklist(message.containerId);
+        case "getAllSelectedTabs":
+          result = Object.fromEntries(this.zenTabManager.getAllSelectedTabs());
+          break;
+
+        case "openSelectedTab":
+          await this.zenTabManager.openSelectedTab(message.containerId);
           result = { success: true };
           break;
 
-        case "removeFromBlacklist":
-          await this.zenTabManager.removeFromBlacklist(message.containerId);
-          result = { success: true };
-          break;
-
-        case "getBlacklistedContainers":
-          result = Array.from(this.zenTabManager.blacklistedContainers || []);
+        case "containersUpdated":
+          // Broadcast to all connected ports (sidebar)
+          result = { success: true, broadcast: true };
           break;
 
         default:

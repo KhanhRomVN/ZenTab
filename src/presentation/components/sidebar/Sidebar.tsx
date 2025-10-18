@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from "react";
 import ContainerCard from "./ContainerCard";
-import ContainersDrawer from "./ContainersDrawer";
+import TabSelectionDrawer from "./TabSelectionDrawer";
 import WebSocketDrawer from "./WebSocketDrawer";
 import SettingDrawer from "./SettingDrawer";
 import CustomButton from "../common/CustomButton";
-import { Settings } from "lucide-react";
+import { Settings, List } from "lucide-react";
 import { getBrowserAPI } from "@/shared/lib/browser-api";
 
 const Sidebar: React.FC = () => {
   const [containers, setContainers] = useState<any[]>([]);
-  const [showContainersDrawer, setShowContainersDrawer] = useState(false);
+  const [showTabSelectionDrawer, setShowTabSelectionDrawer] = useState(false);
   const [showSettingDrawer, setShowSettingDrawer] = useState(false);
   const [showWebSocketDrawer, setShowWebSocketDrawer] = useState(false);
   const [activeTabs, setActiveTabs] = useState<Set<string>>(new Set());
@@ -30,12 +30,31 @@ const Sidebar: React.FC = () => {
     initializeSidebar();
 
     const messageListener = (message: any) => {
+      console.debug("[Sidebar] Message received:", message.action);
       if (message.action === "containersUpdated") {
+        console.debug("[Sidebar] Reloading containers...");
         loadContainers();
       }
     };
 
     chrome.runtime.onMessage.addListener(messageListener);
+
+    // Listen for storage changes (zenTabSelectedTabs)
+    const storageListener = (
+      changes: { [key: string]: chrome.storage.StorageChange },
+      areaName: string
+    ) => {
+      if (areaName !== "local") return;
+
+      if (changes.zenTabSelectedTabs) {
+        console.debug(
+          "[Sidebar] zenTabSelectedTabs changed, reloading containers..."
+        );
+        loadContainers();
+      }
+    };
+
+    chrome.storage.onChanged.addListener(storageListener);
 
     const tabListener = () => {
       loadActiveTabs();
@@ -45,6 +64,7 @@ const Sidebar: React.FC = () => {
 
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
+      chrome.storage.onChanged.removeListener(storageListener);
       chrome.tabs.onCreated.removeListener(tabListener);
       chrome.tabs.onRemoved.removeListener(tabListener);
     };
@@ -86,9 +106,49 @@ const Sidebar: React.FC = () => {
         browserAPI.contextualIdentities &&
         typeof browserAPI.contextualIdentities.query === "function"
       ) {
-        const containers = await browserAPI.contextualIdentities.query({});
-        const safeContainers = Array.isArray(containers) ? containers : [];
-        setContainers(safeContainers);
+        // Đọc trực tiếp từ storage với proper error handling cho Firefox
+        let selectedTabs: Record<string, number> = {};
+        try {
+          const result = await new Promise<any>((resolve) => {
+            chrome.storage.local.get(["zenTabSelectedTabs"], (data) => {
+              resolve(data || {});
+            });
+          });
+          selectedTabs = result?.zenTabSelectedTabs || {};
+        } catch (storageError) {
+          console.warn(
+            "[Sidebar] Failed to read from storage, using empty object:",
+            storageError
+          );
+          selectedTabs = {};
+        }
+
+        console.debug("[Sidebar] Selected tabs from storage:", selectedTabs);
+
+        // Lấy tất cả containers
+        const allContainers = await browserAPI.contextualIdentities.query({});
+        const safeContainers = Array.isArray(allContainers)
+          ? allContainers
+          : [];
+
+        console.debug("[Sidebar] All containers:", safeContainers.length);
+
+        // Filter: chỉ giữ container có cookieStoreId trong selectedTabs
+        const containersWithSelection = safeContainers.filter((container) => {
+          const hasSelection =
+            selectedTabs[container.cookieStoreId] !== undefined;
+          console.debug(
+            `[Sidebar] Container ${container.name} (${container.cookieStoreId}): hasSelection=${hasSelection}`
+          );
+          return hasSelection;
+        });
+
+        console.debug(
+          "[Sidebar] Containers with selection:",
+          containersWithSelection.length
+        );
+
+        setContainers(containersWithSelection);
       } else {
         console.warn("Contextual identities not supported in this browser");
         setContainers([]);
@@ -123,18 +183,6 @@ const Sidebar: React.FC = () => {
     }
   };
 
-  const handleContainerAdded = async (containerId: string) => {
-    try {
-      await chrome.runtime.sendMessage({
-        action: "addContainerToZenTab",
-        containerId,
-      });
-      await loadContainers();
-    } catch (error) {
-      console.error("[Sidebar] Failed to add container:", error);
-    }
-  };
-
   return (
     <div className="w-full h-screen overflow-hidden bg-background relative">
       {/* Main content */}
@@ -166,8 +214,17 @@ const Sidebar: React.FC = () => {
         </div>
       </div>
 
-      {/* Floating Action Button - Bottom Right */}
-      <div className="fixed bottom-2 right-2 z-40">
+      {/* Floating Action Buttons - Bottom Right */}
+      <div className="fixed bottom-2 right-2 z-40 flex flex-col gap-2">
+        <CustomButton
+          variant="ghost"
+          size="sm"
+          icon={List}
+          onClick={() => setShowTabSelectionDrawer(!showTabSelectionDrawer)}
+          aria-label="Select tabs"
+          className="!p-3 !text-lg"
+          children={undefined}
+        />
         <CustomButton
           variant="ghost"
           size="sm"
@@ -179,20 +236,17 @@ const Sidebar: React.FC = () => {
         />
       </div>
 
+      {/* Tab Selection Drawer */}
+      <TabSelectionDrawer
+        isOpen={showTabSelectionDrawer}
+        onClose={() => setShowTabSelectionDrawer(false)}
+      />
+
       {/* Setting Drawer */}
       <SettingDrawer
         isOpen={showSettingDrawer}
         onClose={() => setShowSettingDrawer(false)}
-        onContainers={() => setShowContainersDrawer(true)}
         onWebSocket={() => setShowWebSocketDrawer(true)}
-      />
-
-      {/* Containers Management Drawer */}
-      <ContainersDrawer
-        isOpen={showContainersDrawer}
-        onClose={() => setShowContainersDrawer(false)}
-        onContainerAdded={handleContainerAdded}
-        onContainerBlacklisted={handleContainerBlacklisted}
       />
 
       {/* WebSocket Drawer */}

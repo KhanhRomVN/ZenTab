@@ -32,19 +32,9 @@ declare const browser: typeof chrome & any;
     containerManager.initializeContainers();
   });
 
-  browserAPI.tabs.onCreated.addListener((tab: any) => {
-    zenTabManager.handleTabCreated(tab);
-  });
-
   browserAPI.tabs.onRemoved.addListener((tabId: number) => {
     zenTabManager.handleTabRemoved(tabId);
   });
-
-  browserAPI.tabs.onUpdated.addListener(
-    (tabId: number, changeInfo: any, tab: any) => {
-      zenTabManager.handleTabUpdated(tabId, changeInfo, tab);
-    }
-  );
 
   // Listen for sidebar opening
   browserAPI.runtime.onConnect.addListener((port: any) => {

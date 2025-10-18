@@ -1,26 +1,19 @@
 import React from "react";
-import { Network, Box, X } from "lucide-react";
+import { Network, X } from "lucide-react";
 import MotionCustomDrawer from "../common/CustomDrawer";
 import CustomButton from "../common/CustomButton";
 
 interface SettingDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  onContainers: () => void;
   onWebSocket: () => void;
 }
 
 const SettingDrawer: React.FC<SettingDrawerProps> = ({
   isOpen,
   onClose,
-  onContainers,
   onWebSocket,
 }) => {
-  const handleContainers = () => {
-    onContainers();
-    onClose();
-  };
-
   const handleWebSocket = () => {
     onWebSocket();
     onClose();
@@ -56,17 +49,6 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           <div className="p-4 space-y-2">
-            {/* Containers Button */}
-            <CustomButton
-              variant="ghost"
-              size="md"
-              align="left"
-              icon={Box}
-              onClick={handleContainers}
-            >
-              Manage Containers
-            </CustomButton>
-
             {/* WebSocket Button */}
             <CustomButton
               variant="ghost"
