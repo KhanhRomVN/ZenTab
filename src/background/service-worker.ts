@@ -2,6 +2,7 @@ import { ContainerManager } from "./container-manager";
 import { ZenTabManager } from "./zentab-manager";
 import { MessageHandler } from "./message-handler";
 import { WSManagerNew } from "./websocket/ws-manager-new";
+import { TabBroadcaster } from "./websocket/tab-broadcaster";
 import { DeepSeekController } from "./deepseek-controller";
 
 declare const browser: typeof chrome & any;
@@ -15,8 +16,11 @@ declare const browser: typeof chrome & any;
     throw new Error("No browser API available");
   })();
 
-  // Initialize WebSocket Manager (no need to store reference, it auto-handles via storage)
-  new WSManagerNew();
+  // Initialize WebSocket Manager
+  const wsManager = new WSManagerNew();
+
+  // Initialize Tab Broadcaster
+  const tabBroadcaster = new TabBroadcaster(wsManager);
 
   // Initialize managers
   const containerManager = new ContainerManager(browserAPI);

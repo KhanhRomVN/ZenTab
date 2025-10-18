@@ -92,6 +92,16 @@ export class WSConnection {
           this.state.reconnectAttempts = 0;
           this.retryStartTime = undefined;
           this.notifyStateChange();
+
+          // Trigger broadcast focused tabs khi kết nối thành công
+          console.debug(
+            "[WSConnection] Triggering initial focused tabs broadcast"
+          );
+          chrome.storage.local.set({
+            wsConnectionEstablished: Date.now(),
+            triggerFocusedTabsBroadcast: Date.now(), // THÊM KEY MỚI
+          });
+
           resolve(); // Resolve khi kết nối thành công
         };
 

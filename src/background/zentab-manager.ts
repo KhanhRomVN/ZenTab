@@ -48,7 +48,8 @@ export class ZenTabManager {
 
   public async handleTabRemoved(tabId: number): Promise<void> {
     // Tìm container có tab bị xóa và bỏ chọn
-    for (const [containerId, selectedTabId] of this.selectedTabs.entries()) {
+    const entries = Array.from(this.selectedTabs.entries());
+    for (const [containerId, selectedTabId] of entries) {
       if (selectedTabId === tabId) {
         await this.unselectTab(containerId);
         break;

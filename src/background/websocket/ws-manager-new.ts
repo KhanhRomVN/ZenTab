@@ -9,6 +9,32 @@ export class WSManagerNew {
     this.setupStorageListener();
   }
 
+  /**
+   * Broadcast message to all connected WebSocket clients
+   */
+  public broadcastToAll(message: any): void {
+    console.debug(
+      "[WSManagerNew] Broadcasting to all connections:",
+      message.type
+    );
+
+    const connectionsArray = Array.from(this.connections.values());
+    for (const conn of connectionsArray) {
+      if (conn.state.status === "connected") {
+        try {
+          conn.send(message);
+          console.debug("[WSManagerNew] Sent to:", conn.state.id);
+        } catch (error) {
+          console.error(
+            "[WSManagerNew] Failed to send to:",
+            conn.state.id,
+            error
+          );
+        }
+      }
+    }
+  }
+
   private async loadConnections(): Promise<void> {
     try {
       const result = await chrome.storage.local.get(["wsConnections"]);
@@ -138,7 +164,8 @@ export class WSManagerNew {
     }
 
     // Check if port already exists
-    for (const conn of this.connections.values()) {
+    const connectionsArray = Array.from(this.connections.values());
+    for (const conn of connectionsArray) {
       if (conn.state.port === port) {
         return { success: false, error: "Port already exists" };
       }
@@ -201,7 +228,8 @@ export class WSManagerNew {
 
   private getAllConnections(): any {
     const states: WSConnectionState[] = [];
-    for (const conn of this.connections.values()) {
+    const connectionsArray = Array.from(this.connections.values());
+    for (const conn of connectionsArray) {
       states.push(conn.getState());
     }
     return { success: true, connections: states };
