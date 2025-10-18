@@ -18,18 +18,13 @@ export class WSHelper {
       .toString(36)
       .substr(2, 9)}`;
 
-    // Write command to storage
-    await chrome.storage.local.set({
-      wsCommand: {
-        ...command,
-        commandId,
-      },
-    });
+    console.debug("[WSHelper] Sending command:", { ...command, commandId });
 
-    // Wait for result
-    return new Promise((resolve, reject) => {
+    // Setup listener TRƯỚC KHI ghi command
+    return new Promise(async (resolve, reject) => {
       const timeout = setTimeout(() => {
         chrome.storage.onChanged.removeListener(listener);
+        console.error("[WSHelper] Command timeout:", commandId);
         reject(new Error("Command timeout"));
       }, 10000); // 10s timeout
 
@@ -41,12 +36,23 @@ export class WSHelper {
           if (result && result.commandId === commandId) {
             clearTimeout(timeout);
             chrome.storage.onChanged.removeListener(listener);
+            console.debug("[WSHelper] Command result received:", result);
             resolve(result.result);
           }
         }
       };
 
+      // Đăng ký listener TRƯỚC
       chrome.storage.onChanged.addListener(listener);
+
+      // Ghi command SAU khi listener đã sẵn sàng
+      await chrome.storage.local.set({
+        wsCommand: {
+          ...command,
+          commandId,
+          timestamp: Date.now(),
+        },
+      });
     });
   }
 

@@ -18,7 +18,9 @@ export class WSConnection {
   private ws?: WebSocket;
   private reconnectTimer?: number;
   private maxReconnectAttempts = 5;
-  private reconnectDelay = 3000;
+  private reconnectDelay = 2000; // 2s mỗi lần retry
+  private retryStartTime?: number; // Thời điểm bắt đầu retry
+  private readonly MAX_RETRY_DURATION = 10000; // 10s tối đa
 
   public state: WSConnectionState;
 
@@ -30,60 +32,6 @@ export class WSConnection {
       status: "disconnected",
       reconnectAttempts: 0,
     };
-  }
-
-  public async connect(): Promise<void> {
-    if (
-      this.state.status === "connected" ||
-      this.state.status === "connecting"
-    ) {
-      console.debug(
-        "[WSConnection] Already connected/connecting:",
-        this.state.id
-      );
-      return;
-    }
-
-    this.state.status = "connecting";
-    this.notifyStateChange();
-
-    try {
-      this.ws = new WebSocket(this.state.url);
-
-      this.ws.onopen = () => {
-        console.log("[WSConnection] Connected:", this.state.url);
-        this.state.status = "connected";
-        this.state.lastConnected = Date.now();
-        this.state.reconnectAttempts = 0;
-        this.notifyStateChange();
-      };
-
-      this.ws.onerror = (error) => {
-        console.error("[WSConnection] Error:", this.state.url, error);
-        this.state.status = "error";
-        this.notifyStateChange();
-      };
-
-      this.ws.onclose = () => {
-        console.log("[WSConnection] Disconnected:", this.state.url);
-        this.state.status = "disconnected";
-        this.ws = undefined;
-        this.notifyStateChange();
-
-        // Auto reconnect
-        if (this.state.reconnectAttempts < this.maxReconnectAttempts) {
-          this.scheduleReconnect();
-        }
-      };
-
-      this.ws.onmessage = (event) => {
-        this.handleMessage(event.data);
-      };
-    } catch (error) {
-      console.error("[WSConnection] Connect failed:", error);
-      this.state.status = "error";
-      this.notifyStateChange();
-    }
   }
 
   public disconnect(): void {
@@ -98,7 +46,88 @@ export class WSConnection {
     }
 
     this.state.status = "disconnected";
+    this.retryStartTime = undefined; // Reset retry timer khi disconnect thủ công
     this.notifyStateChange();
+  }
+
+  public async connect(): Promise<void> {
+    if (
+      this.state.status === "connected" ||
+      this.state.status === "connecting"
+    ) {
+      console.debug(
+        "[WSConnection] Already connected/connecting:",
+        this.state.id
+      );
+      return;
+    }
+
+    // Khởi tạo thời điểm bắt đầu retry nếu chưa có
+    if (!this.retryStartTime) {
+      this.retryStartTime = Date.now();
+    }
+
+    this.state.status = "connecting";
+    this.notifyStateChange();
+
+    return new Promise<void>((resolve) => {
+      try {
+        this.ws = new WebSocket(this.state.url);
+
+        this.ws.onopen = () => {
+          console.log("[WSConnection] Connected:", this.state.url);
+          this.state.status = "connected";
+          this.state.lastConnected = Date.now();
+          this.state.reconnectAttempts = 0;
+          this.retryStartTime = undefined;
+          this.notifyStateChange();
+          resolve(); // Resolve khi kết nối thành công
+        };
+
+        this.ws.onerror = (error) => {
+          console.error("[WSConnection] Error:", this.state.url, error);
+          this.state.status = "error";
+          this.notifyStateChange();
+          // KHÔNG reject, vì onerror sẽ trigger onclose
+        };
+
+        this.ws.onclose = () => {
+          console.log("[WSConnection] Disconnected:", this.state.url);
+          this.state.status = "disconnected";
+          this.ws = undefined;
+          this.notifyStateChange();
+
+          // Auto reconnect chỉ trong vòng 10s
+          const elapsedTime = this.retryStartTime
+            ? Date.now() - this.retryStartTime
+            : 0;
+
+          if (
+            elapsedTime < this.MAX_RETRY_DURATION &&
+            this.state.reconnectAttempts < this.maxReconnectAttempts
+          ) {
+            this.scheduleReconnect();
+          } else {
+            // Quá 10s hoặc hết số lần retry, dừng hoàn toàn
+            this.state.status = "error";
+            this.retryStartTime = undefined;
+            this.notifyStateChange();
+            console.warn("[WSConnection] Stopped retrying:", this.state.url);
+          }
+
+          resolve(); // Resolve ngay cả khi disconnect
+        };
+
+        this.ws.onmessage = (event) => {
+          this.handleMessage(event.data);
+        };
+      } catch (error) {
+        console.error("[WSConnection] Connect failed:", error);
+        this.state.status = "error";
+        this.notifyStateChange();
+        resolve(); // Resolve ngay cả khi có exception
+      }
+    });
   }
 
   public send(data: any): void {

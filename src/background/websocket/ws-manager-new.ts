@@ -99,6 +99,8 @@ export class WSManagerNew {
           result = { success: false, error: "Unknown command" };
       }
 
+      console.debug("[WSManagerNew] Command result:", result);
+
       // Write result back to storage
       await chrome.storage.local.set({
         wsCommandResult: {
@@ -108,7 +110,9 @@ export class WSManagerNew {
         },
       });
 
-      // Clear command
+      console.debug("[WSManagerNew] Result written to storage");
+
+      // Clear command SAU KHI đã ghi result
       await chrome.storage.local.remove(["wsCommand"]);
     } catch (error) {
       console.error("[WSManagerNew] Command failed:", error);
@@ -122,6 +126,9 @@ export class WSManagerNew {
           timestamp: Date.now(),
         },
       });
+
+      // Clear command ngay cả khi lỗi
+      await chrome.storage.local.remove(["wsCommand"]);
     }
   }
 
@@ -144,11 +151,6 @@ export class WSManagerNew {
     this.connections.set(id, wsConn);
 
     await this.saveConnections();
-
-    // Auto connect
-    wsConn.connect().catch((error) => {
-      console.error("[WSManagerNew] Auto-connect failed:", error);
-    });
 
     return { success: true, connectionId: id };
   }

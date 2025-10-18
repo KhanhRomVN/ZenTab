@@ -3,16 +3,9 @@ import { createPortal } from "react-dom";
 import MotionCustomDrawer from "../common/CustomDrawer";
 import CustomButton from "../common/CustomButton";
 import CustomInput from "../common/CustomInput";
+import WebSocketCard from "./WebSocketCard";
 import { WSHelper, WSConnectionState } from "@/shared/lib/ws-helper";
-import {
-  Plus,
-  Trash2,
-  Power,
-  PowerOff,
-  Wifi,
-  WifiOff,
-  AlertCircle,
-} from "lucide-react";
+import { Plus, AlertCircle } from "lucide-react";
 
 interface WebSocketConnection {
   id: string;
@@ -217,90 +210,50 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
 
   const handleConnect = async (id: string) => {
     console.debug("[WebSocketDrawer] Attempting to connect:", id);
+
+    // Update UI optimistically
+    setConnections((prev) =>
+      prev.map((conn) =>
+        conn.id === id ? { ...conn, status: "connecting" as const } : conn
+      )
+    );
+
     try {
-      const response = await chrome.runtime.sendMessage({
-        action: "connectWebSocket",
-        connectionId: id,
-      });
+      const response = await WSHelper.connect(id);
       console.debug("[WebSocketDrawer] Connect response:", response);
+
+      if (!response.success) {
+        console.error("[WebSocketDrawer] Connect failed:", response.error);
+        setError(response.error || "Failed to connect");
+      }
+
+      // Reload connections để cập nhật status thật
+      await loadConnections();
     } catch (error) {
       console.error("[WebSocketDrawer] Failed to connect:", error);
-      console.debug("[WebSocketDrawer] Connect error details:", {
-        connectionId: id,
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
+      setError(error instanceof Error ? error.message : "Connection failed");
+      await loadConnections();
     }
   };
 
   const handleDisconnect = async (id: string) => {
     console.debug("[WebSocketDrawer] Attempting to disconnect:", id);
+
     try {
-      const response = await chrome.runtime.sendMessage({
-        action: "disconnectWebSocket",
-        connectionId: id,
-      });
+      const response = await WSHelper.disconnect(id);
       console.debug("[WebSocketDrawer] Disconnect response:", response);
+
+      if (!response.success) {
+        console.error("[WebSocketDrawer] Disconnect failed:", response.error);
+        setError(response.error || "Failed to disconnect");
+      }
+
+      await loadConnections();
     } catch (error) {
       console.error("[WebSocketDrawer] Failed to disconnect:", error);
-      console.debug("[WebSocketDrawer] Disconnect error details:", {
-        connectionId: id,
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
+      setError(error instanceof Error ? error.message : "Disconnection failed");
+      await loadConnections();
     }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "connected":
-        return "text-green-600 dark:text-green-400";
-      case "connecting":
-        return "text-yellow-600 dark:text-yellow-400";
-      case "error":
-        return "text-red-600 dark:text-red-400";
-      default:
-        return "text-gray-600 dark:text-gray-400";
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "connected":
-        return <Wifi className="w-4 h-4" />;
-      case "connecting":
-        return <Wifi className="w-4 h-4 animate-pulse" />;
-      case "error":
-        return <WifiOff className="w-4 h-4" />;
-      default:
-        return <WifiOff className="w-4 h-4" />;
-    }
-  };
-
-  const getStatusText = (connection: WebSocketConnection) => {
-    switch (connection.status) {
-      case "connected":
-        return "Connected";
-      case "connecting":
-        return "Connecting...";
-      case "error":
-        return `Error (${connection.reconnectAttempts} retries)`;
-      default:
-        return "Disconnected";
-    }
-  };
-
-  const formatLastConnected = (timestamp?: number) => {
-    if (!timestamp) return "Never";
-
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
-
-    if (diff < 60000) return "Just now";
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    return date.toLocaleDateString();
   };
 
   const drawerContent = (
@@ -350,74 +303,13 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
         {/* Connections List */}
         <div className="p-4 space-y-3">
           {connections.map((connection) => (
-            <div
+            <WebSocketCard
               key={connection.id}
-              className="flex items-center gap-3 p-3 rounded-lg border border-border-default hover:border-primary transition-colors"
-            >
-              {/* Status Icon */}
-              <div
-                className={`w-10 h-10 flex items-center justify-center rounded-md ${getStatusColor(
-                  connection.status
-                )} bg-gray-100 dark:bg-gray-800`}
-              >
-                {getStatusIcon(connection.status)}
-              </div>
-
-              {/* Connection Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-medium text-text-primary truncate">
-                    Port {connection.port}
-                  </h3>
-                  <span
-                    className={`text-xs font-medium ${getStatusColor(
-                      connection.status
-                    )}`}
-                  >
-                    {getStatusText(connection)}
-                  </span>
-                </div>
-                <p className="text-xs text-text-secondary truncate">
-                  {connection.url}
-                </p>
-                <p className="text-xs text-text-secondary/70 mt-0.5">
-                  Last connected:{" "}
-                  {formatLastConnected(connection.lastConnected)}
-                </p>
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-1 flex-shrink-0">
-                {connection.status === "connected" ? (
-                  <CustomButton
-                    variant="warning"
-                    size="sm"
-                    icon={PowerOff}
-                    onClick={() => handleDisconnect(connection.id)}
-                  >
-                    Disconnect
-                  </CustomButton>
-                ) : (
-                  <CustomButton
-                    variant="success"
-                    size="sm"
-                    icon={Power}
-                    onClick={() => handleConnect(connection.id)}
-                    disabled={connection.status === "connecting"}
-                  >
-                    Connect
-                  </CustomButton>
-                )}
-
-                <CustomButton
-                  variant="error"
-                  size="sm"
-                  icon={Trash2}
-                  onClick={() => handleRemoveConnection(connection.id)}
-                  children={undefined}
-                />
-              </div>
-            </div>
+              connection={connection}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+              onRemove={handleRemoveConnection}
+            />
           ))}
 
           {connections.length === 0 && (
