@@ -18,8 +18,6 @@ export class WSHelper {
       .toString(36)
       .substr(2, 9)}`;
 
-    console.debug("[WSHelper] Sending command:", { ...command, commandId });
-
     // Setup listener TRƯỚC KHI ghi command
     return new Promise(async (resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -36,7 +34,6 @@ export class WSHelper {
           if (result && result.commandId === commandId) {
             clearTimeout(timeout);
             chrome.storage.onChanged.removeListener(listener);
-            console.debug("[WSHelper] Command result received:", result);
             resolve(result.result);
           }
         }

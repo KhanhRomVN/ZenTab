@@ -35,17 +35,11 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
           });
 
           const states = result?.wsStates || {};
-          console.debug("[WebSocketDrawer] Initial wsStates loaded:", states);
 
           setConnections((prev) =>
             prev.map((conn) => {
               const newState = states[conn.id];
               if (newState) {
-                console.debug(
-                  "[WebSocketDrawer] Applying initial state:",
-                  conn.id,
-                  newState.status
-                );
                 return { ...conn, ...newState };
               }
               return conn;
@@ -70,18 +64,11 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
 
         if (changes.wsStates) {
           const states = changes.wsStates.newValue || {};
-          console.debug("[WebSocketDrawer] wsStates changed:", states);
-
           // Update connections với states mới nhất
           setConnections((prev) =>
             prev.map((conn) => {
               const newState = states[conn.id];
               if (newState) {
-                console.debug(
-                  "[WebSocketDrawer] Updating connection:",
-                  conn.id,
-                  newState.status
-                );
                 return { ...conn, ...newState };
               }
               return conn;
@@ -115,11 +102,6 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
         const mergedConns = conns.map((conn: WSConnectionState) => {
           const state = states[conn.id];
           if (state) {
-            console.debug(
-              "[WebSocketDrawer] Syncing connection with state:",
-              conn.id,
-              state.status
-            );
             return { ...conn, ...state };
           }
           return conn;
@@ -141,84 +123,32 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
 
   const handleAddConnection = async () => {
     const fnStartTime = Date.now();
-    console.debug("[WebSocketDrawer] ===== START handleAddConnection =====");
-    console.debug("[WebSocketDrawer] Function start time:", fnStartTime);
-    console.debug("[WebSocketDrawer] Current time:", new Date().toISOString());
-    console.debug("[WebSocketDrawer] newPort value:", newPort);
-    console.debug("[WebSocketDrawer] newPort type:", typeof newPort);
-    console.debug("[WebSocketDrawer] newPort length:", newPort.length);
-    console.debug(
-      "[WebSocketDrawer] Current connections count:",
-      connections.length
-    );
-    console.debug("[WebSocketDrawer] Current error state:", error);
-    console.debug("[WebSocketDrawer] Current isAdding state:", isAdding);
-
     setError("");
-    console.debug("[WebSocketDrawer] Error state cleared");
 
     const port = parseInt(newPort);
-    console.debug("[WebSocketDrawer] Parsed port:", port);
-    console.debug("[WebSocketDrawer] Port type:", typeof port);
-    console.debug("[WebSocketDrawer] Port is valid number?", !isNaN(port));
-    console.debug("[WebSocketDrawer] Port validation:", {
-      isNaN: isNaN(port),
-      lessThan1: port < 1,
-      greaterThan65535: port > 65535,
-      inValidRange: port >= 1 && port <= 65535,
-    });
 
     if (isNaN(port) || port < 1 || port > 65535) {
-      console.debug("[WebSocketDrawer] ❌ Port validation failed");
       setError("Invalid port number (1-65535)");
       return;
     }
 
     const existingPort = connections.some((conn) => conn.port === port);
-    console.debug("[WebSocketDrawer] Existing port check:", {
-      port,
-      existingPort,
-      currentConnectionsCount: connections.length,
-      allPorts: connections.map((c) => c.port),
-    });
 
     if (existingPort) {
-      console.debug("[WebSocketDrawer] ❌ Port already exists");
       setError("Connection with this port already exists");
       return;
     }
 
-    console.debug("[WebSocketDrawer] ✅ Validation passed");
-    console.debug("[WebSocketDrawer] Setting isAdding to true");
     setIsAdding(true);
-    console.debug("[WebSocketDrawer] isAdding state updated");
 
     try {
-      console.debug(
-        "[WebSocketDrawer] Calling WSHelper.addConnection with port:",
-        port
-      );
-
       const response = await WSHelper.addConnection(port);
-
-      console.debug("[WebSocketDrawer] WSHelper response:", response);
-      console.debug("[WebSocketDrawer] Response type:", typeof response);
-      console.debug(
-        "[WebSocketDrawer] Response keys:",
-        response ? Object.keys(response) : "null"
-      );
-
       if (response && response.success) {
-        console.debug(
-          "[WebSocketDrawer] ✅ Success! Connection ID:",
-          response.connectionId
-        );
         setNewPort("");
         await loadConnections();
       } else {
         const errorMsg =
           (response && response.error) || "Failed to add connection";
-        console.debug("[WebSocketDrawer] ❌ Error:", errorMsg);
         setError(errorMsg);
       }
     } catch (error) {
@@ -226,45 +156,9 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
         "[WebSocketDrawer] ❌ Exception caught in try block:",
         error
       );
-      console.debug("[WebSocketDrawer] Exception details:");
-      console.debug("[WebSocketDrawer]   Type:", typeof error);
-      console.debug(
-        "[WebSocketDrawer]   Constructor:",
-        error?.constructor?.name
-      );
-      console.debug(
-        "[WebSocketDrawer]   Message:",
-        error instanceof Error ? error.message : String(error)
-      );
-      console.debug(
-        "[WebSocketDrawer]   Stack:",
-        error instanceof Error ? error.stack : "N/A"
-      );
-      console.debug(
-        "[WebSocketDrawer]   Name:",
-        error instanceof Error ? error.name : "N/A"
-      );
-      console.debug("[WebSocketDrawer]   toString:", error?.toString?.());
-
-      console.debug(
-        "[WebSocketDrawer] Setting error state to 'Failed to add connection'"
-      );
       setError("Failed to add connection");
-      console.debug("[WebSocketDrawer] Error state set");
     } finally {
-      console.debug("[WebSocketDrawer] Entering finally block");
-      console.debug("[WebSocketDrawer] Setting isAdding to false");
       setIsAdding(false);
-      console.debug("[WebSocketDrawer] isAdding state updated");
-
-      const fnEndTime = Date.now();
-      console.debug("[WebSocketDrawer] Function end time:", fnEndTime);
-      console.debug(
-        "[WebSocketDrawer] Total function duration:",
-        fnEndTime - fnStartTime,
-        "ms"
-      );
-      console.debug("[WebSocketDrawer] ===== END handleAddConnection =====");
     }
   };
 
@@ -281,15 +175,8 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
   };
 
   const handleConnect = async (id: string) => {
-    console.debug("[WebSocketDrawer] Attempting to connect:", id);
-
-    // KHÔNG update optimistically - để storage listener xử lý
-    // UI sẽ tự động update qua storageListener
-
     try {
       const response = await WSHelper.connect(id);
-      console.debug("[WebSocketDrawer] Connect response:", response);
-
       if (!response.success) {
         console.error("[WebSocketDrawer] Connect failed:", response.error);
         setError(response.error || "Failed to connect");
@@ -303,12 +190,8 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
   };
 
   const handleDisconnect = async (id: string) => {
-    console.debug("[WebSocketDrawer] Attempting to disconnect:", id);
-
     try {
       const response = await WSHelper.disconnect(id);
-      console.debug("[WebSocketDrawer] Disconnect response:", response);
-
       if (!response.success) {
         console.error("[WebSocketDrawer] Disconnect failed:", response.error);
         setError(response.error || "Failed to disconnect");

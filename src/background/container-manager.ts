@@ -25,9 +25,6 @@ export class ContainerManager {
           }
         } catch (error) {
           // Ignore errors if no receivers
-          console.debug(
-            "[ContainerManager] No receivers for containers update"
-          );
         }
       }
     } catch (error) {

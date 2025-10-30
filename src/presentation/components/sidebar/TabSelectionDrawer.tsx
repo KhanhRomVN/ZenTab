@@ -54,11 +54,6 @@ const TabSelectionDrawer: React.FC<TabSelectionDrawerProps> = ({
         ? containersResult
         : [];
 
-      console.debug(
-        "[TabSelectionDrawer] Containers found:",
-        containers.length
-      );
-
       if (containers.length === 0) {
         console.warn("[TabSelectionDrawer] No containers available");
         setContainersWithTabs([]);
@@ -73,26 +68,11 @@ const TabSelectionDrawer: React.FC<TabSelectionDrawerProps> = ({
         Array.isArray(allTabsResult) ? allTabsResult : []
       ) as Array<chrome.tabs.Tab & { cookieStoreId?: string }>;
 
-      console.debug(
-        "[TabSelectionDrawer] DeepSeek tabs found:",
-        allTabs.length
-      );
-      console.debug(
-        "[TabSelectionDrawer] Tab details:",
-        allTabs.map((tab) => ({
-          id: tab.id,
-          title: tab.title,
-          cookieStoreId: tab.cookieStoreId,
-        }))
-      );
-
       // Lấy danh sách tab đã chọn
       const selectedTabsResponse = await browserAPI.runtime.sendMessage({
         action: "getAllSelectedTabs",
       });
       const selectedTabs = selectedTabsResponse || {};
-
-      console.debug("[TabSelectionDrawer] Selected tabs:", selectedTabs);
 
       // Gom nhóm theo container
       const grouped: ContainerWithTabs[] = containers.map((container) => ({
@@ -102,15 +82,6 @@ const TabSelectionDrawer: React.FC<TabSelectionDrawerProps> = ({
         ),
         selectedTabId: selectedTabs[container.cookieStoreId],
       }));
-
-      console.debug(
-        "[TabSelectionDrawer] Grouped result:",
-        grouped.map((g) => ({
-          containerName: g.container.name,
-          containerID: g.container.cookieStoreId,
-          tabsCount: g.tabs.length,
-        }))
-      );
 
       setContainersWithTabs(grouped);
     } catch (error) {
@@ -153,12 +124,7 @@ const TabSelectionDrawer: React.FC<TabSelectionDrawerProps> = ({
         if (promise && typeof promise.catch === "function") {
           promise.catch(() => {}); // Ignore error if no receiver
         }
-      } catch (error) {
-        // Ignore error if no receiver
-        console.debug(
-          "[TabSelectionDrawer] No receivers for containers update"
-        );
-      }
+      } catch (error) {}
     } catch (error) {
       console.error("[TabSelectionDrawer] Failed to select tab:", error);
     }
@@ -182,12 +148,7 @@ const TabSelectionDrawer: React.FC<TabSelectionDrawerProps> = ({
         if (promise && typeof promise.catch === "function") {
           promise.catch(() => {}); // Ignore error if no receiver
         }
-      } catch (error) {
-        // Ignore error if no receiver
-        console.debug(
-          "[TabSelectionDrawer] No receivers for containers update"
-        );
-      }
+      } catch (error) {}
     } catch (error) {
       console.error("[TabSelectionDrawer] Failed to unselect tab:", error);
     }

@@ -62,10 +62,6 @@ export class WSConnection {
       this.state.status === "connected" ||
       this.state.status === "connecting"
     ) {
-      console.debug(
-        "[WSConnection] Already connected/connecting:",
-        this.state.id
-      );
       return;
     }
 
@@ -76,11 +72,6 @@ export class WSConnection {
     if (!this.retryStartTime) {
       this.retryStartTime = Date.now();
     }
-
-    console.debug(
-      "[WSConnection] Setting status to connecting:",
-      this.state.id
-    );
     this.state.status = "connecting";
     this.notifyStateChange(); // Notify ngay lập tức
 
@@ -95,10 +86,6 @@ export class WSConnection {
           this.retryStartTime = undefined;
           this.notifyStateChange();
 
-          // Trigger broadcast focused tabs khi kết nối thành công
-          console.debug(
-            "[WSConnection] Triggering initial focused tabs broadcast"
-          );
           chrome.storage.local.set({
             wsConnectionEstablished: Date.now(),
             triggerFocusedTabsBroadcast: Date.now(), // THÊM KEY MỚI
@@ -138,10 +125,6 @@ export class WSConnection {
               this.notifyStateChange();
               console.warn("[WSConnection] Stopped retrying:", this.state.url);
             }
-          } else {
-            console.debug(
-              "[WSConnection] Manual disconnect, no auto-reconnect"
-            );
           }
 
           resolve(); // Resolve ngay cả khi disconnect
@@ -172,12 +155,6 @@ export class WSConnection {
 
   private scheduleReconnect(): void {
     this.state.reconnectAttempts++;
-    console.debug(
-      "[WSConnection] Scheduling reconnect attempt:",
-      this.state.reconnectAttempts,
-      this.state.id
-    );
-
     this.reconnectTimer = setTimeout(() => {
       this.connect();
     }, this.reconnectDelay) as any;
@@ -186,7 +163,6 @@ export class WSConnection {
   private handleMessage(data: string): void {
     try {
       const message = JSON.parse(data);
-      console.debug("[WSConnection] Message received:", this.state.id, message);
 
       // Store message in chrome.storage for UI to read
       chrome.storage.local.get(["wsMessages"], (result) => {
@@ -219,29 +195,8 @@ export class WSConnection {
       if (changes.wsOutgoingMessage) {
         const msg = changes.wsOutgoingMessage.newValue;
 
-        console.debug("[WSConnection] wsOutgoingMessage changed:", {
-          hasMessage: !!msg,
-          messageConnectionId: msg?.connectionId,
-          thisConnectionId: this.state.id,
-          messageType: msg?.data?.type,
-          match: msg?.connectionId === this.state.id,
-        });
-
         if (msg && msg.connectionId === this.state.id) {
-          console.debug(
-            "[WSConnection] ✅ Sending outgoing message:",
-            msg.data
-          );
           this.send(msg.data);
-
-          // Clear message after sending
-          chrome.storage.local.remove(["wsOutgoingMessage"], () => {
-            console.debug("[WSConnection] ✅ wsOutgoingMessage cleared");
-          });
-        } else {
-          console.debug(
-            "[WSConnection] ⏭️ Message not for this connection, skipping"
-          );
         }
       }
     });
@@ -252,13 +207,6 @@ export class WSConnection {
     chrome.storage.local.get(["wsStates"], (result) => {
       const states = result.wsStates || {};
       states[this.state.id] = { ...this.state };
-      chrome.storage.local.set({ wsStates: states }, () => {
-        console.debug(
-          "[WSConnection] State change notified:",
-          this.state.id,
-          this.state.status
-        );
-      });
     });
   }
 

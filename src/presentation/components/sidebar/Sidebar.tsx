@@ -30,9 +30,7 @@ const Sidebar: React.FC = () => {
     initializeSidebar();
 
     const messageListener = (message: any) => {
-      console.debug("[Sidebar] Message received:", message.action);
       if (message.action === "containersUpdated") {
-        console.debug("[Sidebar] Reloading containers...");
         loadContainers();
       }
     };
@@ -47,9 +45,6 @@ const Sidebar: React.FC = () => {
       if (areaName !== "local") return;
 
       if (changes.zenTabSelectedTabs) {
-        console.debug(
-          "[Sidebar] zenTabSelectedTabs changed, reloading containers..."
-        );
         loadContainers();
       }
     };
@@ -123,30 +118,18 @@ const Sidebar: React.FC = () => {
           selectedTabs = {};
         }
 
-        console.debug("[Sidebar] Selected tabs from storage:", selectedTabs);
-
         // Lấy tất cả containers
         const allContainers = await browserAPI.contextualIdentities.query({});
         const safeContainers = Array.isArray(allContainers)
           ? allContainers
           : [];
 
-        console.debug("[Sidebar] All containers:", safeContainers.length);
-
         // Filter: chỉ giữ container có cookieStoreId trong selectedTabs
         const containersWithSelection = safeContainers.filter((container) => {
           const hasSelection =
             selectedTabs[container.cookieStoreId] !== undefined;
-          console.debug(
-            `[Sidebar] Container ${container.name} (${container.cookieStoreId}): hasSelection=${hasSelection}`
-          );
           return hasSelection;
         });
-
-        console.debug(
-          "[Sidebar] Containers with selection:",
-          containersWithSelection.length
-        );
 
         setContainers(containersWithSelection);
       } else {

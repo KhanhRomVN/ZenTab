@@ -13,17 +13,11 @@ export class WSManagerNew {
    * Broadcast message to all connected WebSocket clients
    */
   public broadcastToAll(message: any): void {
-    console.debug(
-      "[WSManagerNew] Broadcasting to all connections:",
-      message.type
-    );
-
     const connectionsArray = Array.from(this.connections.values());
     for (const conn of connectionsArray) {
       if (conn.state.status === "connected") {
         try {
           conn.send(message);
-          console.debug("[WSManagerNew] Sent to:", conn.state.id);
         } catch (error) {
           console.error(
             "[WSManagerNew] Failed to send to:",
@@ -95,8 +89,6 @@ export class WSManagerNew {
   }
 
   private async handleCommand(command: any): Promise<void> {
-    console.debug("[WSManagerNew] Handling command:", command);
-
     try {
       let result: any;
 
@@ -123,8 +115,6 @@ export class WSManagerNew {
           result = { success: false, error: "Unknown command" };
       }
 
-      console.debug("[WSManagerNew] Command result:", result);
-
       // Write result back to storage
       await chrome.storage.local.set({
         wsCommandResult: {
@@ -133,8 +123,6 @@ export class WSManagerNew {
           timestamp: Date.now(),
         },
       });
-
-      console.debug("[WSManagerNew] Result written to storage");
 
       // Clear command SAU KHI đã ghi result
       await chrome.storage.local.remove(["wsCommand"]);

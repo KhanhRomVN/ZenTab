@@ -47,27 +47,13 @@ declare const browser: typeof chrome & any;
     // Process incoming WebSocket messages
     if (changes.wsMessages) {
       const messages = changes.wsMessages.newValue || {};
-      console.debug(
-        "[ServiceWorker] 📨 wsMessages changed:",
-        Object.keys(messages)
-      );
-
       // Process each connection's messages
       for (const [connectionId, msgArray] of Object.entries(messages)) {
         const msgs = msgArray as Array<{ timestamp: number; data: any }>;
-        console.debug(
-          `[ServiceWorker] 🔍 Processing connection: ${connectionId}, messages: ${msgs.length}`
-        );
 
         // Get latest message
         if (msgs.length > 0) {
           const latestMsg = msgs[msgs.length - 1];
-          console.debug("[ServiceWorker] 📬 Latest message:", {
-            type: latestMsg.data.type,
-            timestamp: new Date(latestMsg.timestamp).toISOString(),
-            data: latestMsg.data,
-          });
-
           // Handle sendPrompt type
           if (latestMsg.data.type === "sendPrompt") {
             const { tabId, prompt, requestId } = latestMsg.data;
@@ -133,8 +119,6 @@ declare const browser: typeof chrome & any;
   // Unified Message Listener - handles all actions
   browserAPI.runtime.onMessage.addListener(
     (message: any, _sender: any, sendResponse: any) => {
-      console.debug("[ServiceWorker] Message received:", message.action);
-
       // WebSocket actions - ignore, handled via storage
       if (
         (message.action &&
@@ -143,9 +127,6 @@ declare const browser: typeof chrome & any;
         message.action === "connectWebSocket" ||
         message.action === "disconnectWebSocket"
       ) {
-        console.debug(
-          "[ServiceWorker] WebSocket action - handled via storage, ignoring message"
-        );
         // Return empty response to prevent UI from hanging
         sendResponse({
           success: true,
@@ -156,7 +137,6 @@ declare const browser: typeof chrome & any;
 
       // 🆕 Handle WebSocket incoming prompts (fallback method)
       if (message.action === "ws.incomingPrompt") {
-        console.debug("[ServiceWorker] Processing WebSocket prompt:", message);
         DeepSeekController.sendPrompt(
           message.tabId,
           message.prompt,

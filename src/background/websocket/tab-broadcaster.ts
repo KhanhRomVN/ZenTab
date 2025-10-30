@@ -1,18 +1,6 @@
 // src/background/websocket/tab-broadcaster.ts
 import { WSManagerNew } from "./ws-manager-new";
 
-const getBrowserAPI = () => {
-  if (typeof (globalThis as any).browser !== "undefined") {
-    console.debug("[TabBroadcaster] Using Firefox browser API");
-    return (globalThis as any).browser;
-  }
-  if (typeof chrome !== "undefined") {
-    console.debug("[TabBroadcaster] Using Chrome API");
-    return chrome;
-  }
-  throw new Error("[TabBroadcaster] No browser API available!");
-};
-
 interface FocusedTab {
   tabId: number;
   containerName: string;
@@ -36,15 +24,11 @@ export class TabBroadcaster {
       if (areaName !== "local") return;
 
       if (changes.zenTabSelectedTabs) {
-        console.debug("[TabBroadcaster] Selected tabs changed");
         this.broadcastFocusedTabs();
       }
 
       // THÊM: Listen for WebSocket connection established
       if (changes.triggerFocusedTabsBroadcast) {
-        console.debug(
-          "[TabBroadcaster] WebSocket connected, broadcasting initial state"
-        );
         this.broadcastFocusedTabs();
       }
     });
@@ -76,11 +60,6 @@ export class TabBroadcaster {
     try {
       const focusedTabs = await this.getFocusedTabs();
 
-      console.debug(
-        "[TabBroadcaster] Broadcasting focused tabs:",
-        focusedTabs.length
-      );
-
       // Send to all connected WebSocket clients
       const message = {
         type: "focusedTabsUpdate",
@@ -98,33 +77,15 @@ export class TabBroadcaster {
    * Get all focused tabs with their details
    */
   private async getFocusedTabs(): Promise<FocusedTab[]> {
-    console.debug("[TabBroadcaster] ===== START getFocusedTabs =====");
-
     try {
-      // ✅ Step 1: Get selected tabs - Firefox-compatible
-      console.debug(
-        "[TabBroadcaster] 🔍 Step 1: Reading zenTabSelectedTabs from storage..."
-      );
-
       let selectedTabs: Record<string, number> = {};
 
       try {
-        // ✅ Firefox-compatible Promise wrapper - PROPER WAY
         const browserAPI =
           typeof (globalThis as any).browser !== "undefined"
             ? (globalThis as any).browser
             : chrome;
 
-        console.debug(
-          "[TabBroadcaster] 📦 Browser API type:",
-          typeof browserAPI
-        );
-        console.debug(
-          "[TabBroadcaster] 📦 storage.local.get type:",
-          typeof browserAPI.storage?.local?.get
-        );
-
-        // ✅ CRITICAL FIX: Wrap trong Promise constructor để handle Firefox callback
         const result = await new Promise<any>((resolve, reject) => {
           try {
             browserAPI.storage.local.get(
@@ -140,7 +101,6 @@ export class TabBroadcaster {
                   return;
                 }
 
-                console.debug("[TabBroadcaster] 📦 Raw storage data:", data);
                 resolve(data || {});
               }
             );
@@ -154,20 +114,6 @@ export class TabBroadcaster {
         });
 
         selectedTabs = result?.zenTabSelectedTabs || {};
-
-        console.debug("[TabBroadcaster] ✅ Storage read successful");
-        console.debug(
-          "[TabBroadcaster] Selected tabs from storage:",
-          JSON.stringify(selectedTabs)
-        );
-        console.debug(
-          "[TabBroadcaster] Selected tabs keys:",
-          Object.keys(selectedTabs)
-        );
-        console.debug(
-          "[TabBroadcaster] Selected tabs count:",
-          Object.keys(selectedTabs).length
-        );
       } catch (storageError) {
         console.error(
           "[TabBroadcaster] ❌ CRITICAL: Failed to read storage:",
@@ -185,7 +131,6 @@ export class TabBroadcaster {
         return [];
       }
 
-      // ✅ Early return nếu không có tab nào được chọn
       if (Object.keys(selectedTabs).length === 0) {
         console.warn("[TabBroadcaster] ⚠️ No selected tabs found in storage!");
         console.warn(
@@ -193,9 +138,6 @@ export class TabBroadcaster {
         );
         return [];
       }
-
-      // ✅ Step 2: Get all containers - Firefox-compatible
-      console.debug("[TabBroadcaster] 🔍 Step 2: Loading containers...");
 
       let containers: any[] = [];
       let retries = 3;
@@ -206,12 +148,6 @@ export class TabBroadcaster {
             typeof (globalThis as any).browser !== "undefined"
               ? (globalThis as any).browser
               : chrome;
-
-          console.debug(
-            "[TabBroadcaster] Attempting to load containers (attempt",
-            4 - retries,
-            ")"
-          );
 
           if (
             !browserAPI.contextualIdentities ||
@@ -228,25 +164,8 @@ export class TabBroadcaster {
 
           const result = await browserAPI.contextualIdentities.query({});
 
-          console.debug(
-            "[TabBroadcaster] contextualIdentities.query result type:",
-            typeof result
-          );
-          console.debug(
-            "[TabBroadcaster] contextualIdentities.query result:",
-            result
-          );
-
           if (Array.isArray(result)) {
             containers = result;
-            console.debug(
-              "[TabBroadcaster] ✅ Containers loaded successfully:",
-              containers.length
-            );
-            console.debug(
-              "[TabBroadcaster] Container IDs:",
-              containers.map((c) => c.cookieStoreId)
-            );
           } else {
             console.warn(
               "[TabBroadcaster] ⚠️ Query returned non-array:",
@@ -276,7 +195,6 @@ export class TabBroadcaster {
           retries--;
 
           if (retries > 0) {
-            console.debug("[TabBroadcaster] Waiting 500ms before retry...");
             await new Promise((resolve) => setTimeout(resolve, 500));
           }
         }
@@ -293,11 +211,6 @@ export class TabBroadcaster {
       const focusedTabs: FocusedTab[] = [];
 
       for (const [cookieStoreId, tabId] of Object.entries(selectedTabs)) {
-        console.debug("[TabBroadcaster] 🔄 Processing:", {
-          cookieStoreId,
-          tabId,
-        });
-
         try {
           // ✅ Step 3.1: Validate tabId type
           const tabIdNum =
@@ -307,11 +220,6 @@ export class TabBroadcaster {
             console.error("[TabBroadcaster] ❌ Invalid tabId:", tabId);
             continue;
           }
-
-          console.debug(
-            "[TabBroadcaster] 🔍 Getting tab details for tabId:",
-            tabIdNum
-          );
 
           // ✅ Step 3.2: Get tab details với Firefox-compatible approach
           let tab: chrome.tabs.Tab;
@@ -338,13 +246,6 @@ export class TabBroadcaster {
               } catch (callError) {
                 reject(callError);
               }
-            });
-
-            console.debug("[TabBroadcaster] ✅ Tab found:", {
-              id: tab.id,
-              title: tab.title,
-              url: tab.url,
-              cookieStoreId: (tab as any).cookieStoreId,
             });
           } catch (tabError) {
             console.error(
@@ -409,11 +310,6 @@ export class TabBroadcaster {
             continue;
           }
 
-          console.debug(
-            "[TabBroadcaster] 🔍 Finding container for:",
-            cookieStoreId
-          );
-
           // ✅ Step 3.4: Find matching container
           const container = containers.find(
             (c) => c && c.cookieStoreId === cookieStoreId
@@ -432,11 +328,6 @@ export class TabBroadcaster {
             continue;
           }
 
-          console.debug("[TabBroadcaster] ✅ Container found:", {
-            id: container.cookieStoreId,
-            name: container.name,
-          });
-
           // ✅ Step 3.5: Add to focused tabs
           const focusedTab = {
             tabId: tab.id,
@@ -446,13 +337,6 @@ export class TabBroadcaster {
           };
 
           focusedTabs.push(focusedTab);
-
-          console.debug("[TabBroadcaster] ✅ Successfully added focused tab:", {
-            tabId: focusedTab.tabId,
-            container: focusedTab.containerName,
-            title: focusedTab.title,
-            currentCount: focusedTabs.length,
-          });
         } catch (error) {
           console.error(
             "[TabBroadcaster] ❌ CRITICAL: Unexpected error processing tab:",
@@ -465,12 +349,6 @@ export class TabBroadcaster {
           );
         }
       }
-
-      console.debug("[TabBroadcaster] ===== FINAL RESULT =====", {
-        inputTabsCount: Object.keys(selectedTabs).length,
-        outputTabsCount: focusedTabs.length,
-        tabs: focusedTabs,
-      });
 
       return focusedTabs;
     } catch (error) {
