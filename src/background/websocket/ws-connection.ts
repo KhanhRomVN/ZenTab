@@ -89,7 +89,6 @@ export class WSConnection {
         this.ws = new WebSocket(this.state.url);
 
         this.ws.onopen = () => {
-          console.log("[WSConnection] Connected:", this.state.url);
           this.state.status = "connected";
           this.state.lastConnected = Date.now();
           this.state.reconnectAttempts = 0;
@@ -116,7 +115,6 @@ export class WSConnection {
         };
 
         this.ws.onclose = () => {
-          console.log("[WSConnection] Disconnected:", this.state.url);
           this.state.status = "disconnected";
           this.ws = undefined;
           this.notifyStateChange();
@@ -181,12 +179,6 @@ export class WSConnection {
     );
 
     this.reconnectTimer = setTimeout(() => {
-      console.log(
-        "[WSConnection] Reconnecting (attempt",
-        this.state.reconnectAttempts,
-        "):",
-        this.state.url
-      );
       this.connect();
     }, this.reconnectDelay) as any;
   }
@@ -227,12 +219,29 @@ export class WSConnection {
       if (changes.wsOutgoingMessage) {
         const msg = changes.wsOutgoingMessage.newValue;
 
+        console.debug("[WSConnection] wsOutgoingMessage changed:", {
+          hasMessage: !!msg,
+          messageConnectionId: msg?.connectionId,
+          thisConnectionId: this.state.id,
+          messageType: msg?.data?.type,
+          match: msg?.connectionId === this.state.id,
+        });
+
         if (msg && msg.connectionId === this.state.id) {
-          console.debug("[WSConnection] Sending outgoing message:", msg.data);
+          console.debug(
+            "[WSConnection] ✅ Sending outgoing message:",
+            msg.data
+          );
           this.send(msg.data);
 
           // Clear message after sending
-          chrome.storage.local.remove(["wsOutgoingMessage"]);
+          chrome.storage.local.remove(["wsOutgoingMessage"], () => {
+            console.debug("[WSConnection] ✅ wsOutgoingMessage cleared");
+          });
+        } else {
+          console.debug(
+            "[WSConnection] ⏭️ Message not for this connection, skipping"
+          );
         }
       }
     });

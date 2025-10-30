@@ -47,79 +47,86 @@ declare const browser: typeof chrome & any;
     // Process incoming WebSocket messages
     if (changes.wsMessages) {
       const messages = changes.wsMessages.newValue || {};
+      console.debug(
+        "[ServiceWorker] 📨 wsMessages changed:",
+        Object.keys(messages)
+      );
 
       // Process each connection's messages
       for (const [connectionId, msgArray] of Object.entries(messages)) {
         const msgs = msgArray as Array<{ timestamp: number; data: any }>;
+        console.debug(
+          `[ServiceWorker] 🔍 Processing connection: ${connectionId}, messages: ${msgs.length}`
+        );
 
         // Get latest message
         if (msgs.length > 0) {
           const latestMsg = msgs[msgs.length - 1];
+          console.debug("[ServiceWorker] 📬 Latest message:", {
+            type: latestMsg.data.type,
+            timestamp: new Date(latestMsg.timestamp).toISOString(),
+            data: latestMsg.data,
+          });
 
           // Handle sendPrompt type
           if (latestMsg.data.type === "sendPrompt") {
-            console.debug(
-              "[ServiceWorker] Processing sendPrompt from WebSocket:",
-              latestMsg.data
-            );
-
             const { tabId, prompt, requestId } = latestMsg.data;
 
             // Send prompt to DeepSeek tab
-            DeepSeekController.sendPrompt(tabId, prompt)
+            DeepSeekController.sendPrompt(tabId, prompt, requestId)
               .then((success) => {
-                console.debug(
-                  "[ServiceWorker] Prompt sent successfully:",
-                  success
-                );
-
-                // 🆕 Send response back via WebSocket
                 if (success) {
-                  // Get the response after a delay (adjust timing as needed)
-                  setTimeout(async () => {
-                    const response = await DeepSeekController.getLatestResponse(
-                      tabId
-                    );
+                } else {
+                  console.error(
+                    "[ServiceWorker] ❌ Failed to send prompt to DeepSeek"
+                  );
 
-                    if (response) {
-                      // Store response to be sent back via WebSocket
-                      const responseData = {
+                  // Send error back to ZenChat
+                  browserAPI.storage.local.set({
+                    wsOutgoingMessage: {
+                      connectionId: connectionId,
+                      data: {
                         type: "promptResponse",
                         requestId: requestId,
                         tabId: tabId,
-                        success: true,
-                        response: response,
-                      };
-
-                      // Trigger sending via storage (will be picked up by ws-connection)
-                      browserAPI.storage.local.set({
-                        wsOutgoingMessage: {
-                          connectionId: connectionId,
-                          data: responseData,
-                          timestamp: Date.now(),
-                        },
-                      });
-                    }
-                  }, 2000); // Đợi 2s để AI trả lời (điều chỉnh nếu cần)
+                        success: false,
+                        error: "Failed to send prompt to DeepSeek tab",
+                      },
+                      timestamp: Date.now(),
+                    },
+                  });
                 }
               })
               .catch((error) => {
-                console.error("[ServiceWorker] Failed to send prompt:", error);
+                console.error(
+                  "[ServiceWorker] ❌ Exception while sending prompt:",
+                  error
+                );
+                console.error("[ServiceWorker] Error details:", {
+                  name: error?.name,
+                  message: error?.message,
+                  stack: error?.stack,
+                });
+
+                // Send error back to ZenChat
+                browserAPI.storage.local.set({
+                  wsOutgoingMessage: {
+                    connectionId: connectionId,
+                    data: {
+                      type: "promptResponse",
+                      requestId: requestId,
+                      tabId: tabId,
+                      success: false,
+                      error:
+                        error instanceof Error ? error.message : String(error),
+                    },
+                    timestamp: Date.now(),
+                  },
+                });
               });
           }
         }
       }
-    }
-  });
-
-  // Listen for sidebar opening
-  browserAPI.runtime.onConnect.addListener((port: any) => {
-    if (port.name === "zenTab-sidebar") {
-      console.log("[ServiceWorker] Sidebar connected");
-
-      port.onDisconnect.addListener(() => {
-        console.log("[ServiceWorker] Sidebar disconnected");
-      });
     }
   });
 
@@ -150,11 +157,13 @@ declare const browser: typeof chrome & any;
       // 🆕 Handle WebSocket incoming prompts (fallback method)
       if (message.action === "ws.incomingPrompt") {
         console.debug("[ServiceWorker] Processing WebSocket prompt:", message);
-        DeepSeekController.sendPrompt(message.tabId, message.prompt).then(
-          (success) => {
-            sendResponse({ success });
-          }
-        );
+        DeepSeekController.sendPrompt(
+          message.tabId,
+          message.prompt,
+          message.requestId
+        ).then((success) => {
+          sendResponse({ success });
+        });
         return true;
       }
 
@@ -178,11 +187,13 @@ declare const browser: typeof chrome & any;
           return true;
 
         case "deepseek.sendPrompt":
-          DeepSeekController.sendPrompt(message.tabId, message.prompt).then(
-            (success) => {
-              sendResponse({ success });
-            }
-          );
+          DeepSeekController.sendPrompt(
+            message.tabId,
+            message.prompt,
+            message.requestId
+          ).then((success) => {
+            sendResponse({ success });
+          });
           return true;
 
         case "deepseek.stopGeneration":

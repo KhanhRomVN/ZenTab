@@ -66,8 +66,6 @@ export class WSManagerNew {
         });
         this.connections.set(conn.id, wsConn);
       }
-
-      console.log("[WSManagerNew] Loaded connections:", this.connections.size);
     } catch (error) {
       console.error("[WSManagerNew] Failed to load connections:", error);
       // Initialize empty array on error

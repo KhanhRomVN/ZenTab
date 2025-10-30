@@ -114,160 +114,422 @@ export class DeepSeekController {
    */
   public static async sendPrompt(
     tabId: number,
-    prompt: string
+    prompt: string,
+    requestId: string
   ): Promise<boolean> {
     try {
-      console.debug("[DeepSeekController] Sending prompt to tab:", tabId);
-      console.debug("[DeepSeekController] Prompt content:", prompt);
+      // 🆕 STEP 1: Kiểm tra tab có tồn tại không
+      const browserAPI = getBrowserAPI();
 
-      const result = await executeScript(
-        tabId,
-        (text: string) => {
-          console.log("=== DeepSeek DOM Debug ===");
-
-          // 🆕 FIXED: Dùng placeholder selector (stable selector)
-          const textarea = document.querySelector(
-            'textarea[placeholder="Message DeepSeek"]'
-          ) as HTMLTextAreaElement;
-
-          console.log("1. Textarea found:", !!textarea);
-
-          if (!textarea) {
-            console.error("   ✗ Textarea not found!");
-
-            // Fallback: tìm bất kỳ textarea nào
-            const anyTextarea = document.querySelector("textarea");
-            console.log("   Fallback textarea found:", !!anyTextarea);
-
-            if (!anyTextarea) {
-              console.error("   ✗ No textarea on page at all!");
-              return false;
-            }
-
-            // Dùng fallback textarea
-            const fallbackTextarea = anyTextarea as HTMLTextAreaElement;
-            fallbackTextarea.value = text;
-            fallbackTextarea.dispatchEvent(
-              new Event("input", { bubbles: true })
-            );
-            fallbackTextarea.dispatchEvent(
-              new Event("change", { bubbles: true })
-            );
-            fallbackTextarea.focus();
-            console.log("   ✓ Used fallback textarea");
-
-            // Tìm send button
-            setTimeout(() => {
-              const buttons = Array.from(document.querySelectorAll("button"));
-              const sendButton = buttons.find((btn) => {
-                const hasIcon = btn.querySelector("svg");
-                const isNotDisabled = !btn.disabled;
-                const isVisible = btn.offsetParent !== null;
-                return hasIcon && isNotDisabled && isVisible;
-              });
-
-              if (sendButton) {
-                console.log("   ✓ Send button found (fallback), clicking...");
-                sendButton.click();
-              } else {
-                console.error("   ✗ Send button not found (fallback)");
-              }
-            }, 300);
-
-            return true;
-          }
-
-          // Main path: textarea found
-          textarea.value = text;
-          console.log("2. Textarea value set:", textarea.value);
-
-          // Trigger events
-          textarea.dispatchEvent(new Event("input", { bubbles: true }));
-          textarea.dispatchEvent(new Event("change", { bubbles: true }));
-          textarea.dispatchEvent(
-            new KeyboardEvent("keydown", { bubbles: true, key: "Enter" })
-          );
-          textarea.focus();
-          console.log("3. Input events dispatched");
-
-          // Tìm send button sau khi UI update
-          setTimeout(() => {
-            console.log("4. Looking for send button...");
-
-            // Tìm tất cả buttons có icon
-            const buttons = Array.from(document.querySelectorAll("button"));
-            console.log("   Total buttons:", buttons.length);
-
-            // Filter: buttons có SVG icon, không disabled, và visible
-            const iconButtons = buttons.filter((btn) => {
-              const hasIcon = btn.querySelector("svg");
-              const isNotDisabled = !btn.disabled;
-              const isVisible = btn.offsetParent !== null;
-              return hasIcon && isNotDisabled && isVisible;
-            });
-
-            console.log("   Icon buttons (not disabled):", iconButtons.length);
-
-            if (iconButtons.length === 0) {
-              console.error("   ✗ No icon buttons found!");
+      let tabExists = false;
+      try {
+        const tab = await new Promise<chrome.tabs.Tab>((resolve, reject) => {
+          browserAPI.tabs.get(tabId, (result: chrome.tabs.Tab) => {
+            if (browserAPI.runtime.lastError) {
+              reject(browserAPI.runtime.lastError);
               return;
             }
+            resolve(result);
+          });
+        });
 
-            // Thử tìm button có arrow icon (send icon)
-            let sendButton = iconButtons.find((btn) => {
-              const svg = btn.querySelector("svg");
-              if (!svg) return false;
+        tabExists = !!tab && tab.id === tabId;
 
-              // Check for common send icon patterns
-              const paths = svg.querySelectorAll("path");
-              for (const path of paths) {
-                const d = path.getAttribute("d") || "";
-                // Arrow icon thường có path data chứa các giá trị này
-                if (d.includes("M2") || d.includes("L23") || d.includes("12")) {
-                  return true;
-                }
+        if (!tabExists) {
+          console.error("[DeepSeekController] ❌ Tab not found:", tabId);
+          return false;
+        }
+
+        // 🆕 STEP 2: Kiểm tra URL có đúng DeepSeek không
+        if (!tab.url?.startsWith("https://chat.deepseek.com")) {
+          console.error(
+            "[DeepSeekController] ❌ Tab is not DeepSeek page:",
+            tab.url
+          );
+          return false;
+        }
+      } catch (tabError) {
+        console.error(
+          "[DeepSeekController] ❌ Failed to validate tab:",
+          tabError
+        );
+        return false;
+      }
+
+      // 🆕 STEP 3: Thử inject script với retry mechanism
+      let retries = 3;
+      let result: any = null;
+
+      while (retries > 0 && !result) {
+        try {
+          result = await executeScript(
+            tabId,
+            (text: string) => {
+              const textarea = document.querySelector(
+                'textarea[placeholder="Message DeepSeek"]'
+              ) as HTMLTextAreaElement;
+
+              if (!textarea) {
+                console.error("[DeepSeek Page] ❌ Textarea not found!");
+                return false;
               }
 
-              return false;
-            });
+              // Set value
+              textarea.value = text;
 
-            // Nếu không tìm thấy send button bằng icon, lấy button cuối cùng
-            if (!sendButton && iconButtons.length > 0) {
-              sendButton = iconButtons[iconButtons.length - 1];
-              console.log("   Using last icon button as fallback");
-            }
+              // Trigger input event
+              const inputEvent = new Event("input", { bubbles: true });
+              textarea.dispatchEvent(inputEvent);
 
-            if (sendButton) {
-              console.log("   ✓ Send button found, clicking...");
-              console.log("   Button class:", sendButton.className);
-              sendButton.click();
-              console.log("   ✓ Send button clicked!");
-            } else {
-              console.error("   ✗ Send button not found!");
+              // Wait a bit for button to enable
+              setTimeout(() => {
+                const sendButton = document.querySelector(
+                  ".ds-icon-button._7436101"
+                ) as HTMLButtonElement;
 
-              // Debug: list all buttons
-              console.log("   Available buttons:");
-              buttons.forEach((btn, index) => {
-                console.log(
-                  `     [${index}] disabled:${btn.disabled}, ` +
-                    `hasIcon:${!!btn.querySelector("svg")}, ` +
-                    `visible:${btn.offsetParent !== null}, ` +
-                    `class:${btn.className}`
-                );
-              });
-            }
-          }, 300);
+                if (
+                  !sendButton ||
+                  sendButton.classList.contains("ds-icon-button--disabled")
+                ) {
+                  console.error(
+                    "[DeepSeek Page] ❌ Send button not found or disabled!"
+                  );
+                  return;
+                }
 
-          return true;
-        },
-        [prompt]
-      );
+                sendButton.click();
+              }, 500);
 
-      console.debug("[DeepSeekController] Script execution result:", result);
+              return true;
+            },
+            [prompt]
+          );
+
+          if (result) {
+            break;
+          }
+        } catch (injectError) {
+          console.error(
+            `[DeepSeekController] ❌ Script injection failed (attempt ${
+              4 - retries
+            }):`,
+            injectError
+          );
+          retries--;
+
+          if (retries > 0) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+        }
+      }
+
+      if (!result) {
+        console.error(
+          "[DeepSeekController] ❌ All script injection attempts failed!"
+        );
+        return false;
+      }
+
+      if (result) {
+        this.startResponsePolling(tabId, requestId);
+      } else {
+        console.error(
+          "[DeepSeekController] ❌ Script execution returned false"
+        );
+      }
+
       return result ?? false;
     } catch (error) {
-      console.error("[DeepSeekController] Failed to send prompt:", error);
+      console.error("[DeepSeekController] ❌ EXCEPTION in sendPrompt:", error);
+      console.error("[DeepSeekController] Error details:", {
+        name: error instanceof Error ? error.name : "unknown",
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       return false;
+    }
+  }
+
+  // 🆕 THÊM FUNCTION MỚI: Polling để đợi AI trả lời xong
+  private static async startResponsePolling(
+    tabId: number,
+    requestId: string
+  ): Promise<void> {
+    const browserAPI = getBrowserAPI();
+    let pollCount = 0;
+    const maxPolls = 180;
+    const pollInterval = 1000;
+
+    const poll = async () => {
+      pollCount++;
+      try {
+        const isGenerating = await this.isGenerating(tabId);
+        if (!isGenerating && pollCount >= 3) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const response = await this.getLatestResponseByClickingCopy(tabId);
+
+          if (response) {
+            // 🆕 CRITICAL FIX: Đọc wsMessages để lấy connection ID thực tế
+            let targetConnectionId: string | null = null;
+
+            try {
+              // Đọc từ wsMessages (chứa tất cả messages từ connections)
+              const messagesResult = await new Promise<any>(
+                (resolve, reject) => {
+                  browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+                    if (browserAPI.runtime.lastError) {
+                      reject(browserAPI.runtime.lastError);
+                      return;
+                    }
+                    resolve(data || {});
+                  });
+                }
+              );
+
+              const wsMessages = messagesResult?.wsMessages || {};
+
+              // Lấy connection ID đầu tiên có messages (connection đang hoạt động)
+              const messageConnectionIds = Object.keys(wsMessages);
+
+              if (messageConnectionIds.length > 0) {
+                // Lấy connection cuối cùng (mới nhất)
+                targetConnectionId =
+                  messageConnectionIds[messageConnectionIds.length - 1];
+              } else {
+                console.warn(
+                  "[DeepSeekController] ⚠️ No connections found in wsMessages"
+                );
+              }
+            } catch (storageError) {
+              console.error(
+                "[DeepSeekController] ❌ Failed to read wsMessages:",
+                storageError
+              );
+            }
+
+            // Nếu không tìm thấy connection nào → báo lỗi
+            if (!targetConnectionId) {
+              console.error(
+                "[DeepSeekController] ❌ CRITICAL: No active WebSocket connection found!"
+              );
+              console.error(
+                "[DeepSeekController] Cannot send response back to ZenChat"
+              );
+
+              // Vẫn gửi error message về storage để debug
+              await browserAPI.storage.local.set({
+                wsOutgoingMessage: {
+                  connectionId: "unknown",
+                  data: {
+                    type: "promptResponse",
+                    requestId: requestId,
+                    tabId: tabId,
+                    success: false,
+                    error: "No active WebSocket connection found",
+                    errorType: "NO_CONNECTION",
+                  },
+                  timestamp: Date.now(),
+                },
+              });
+
+              return; // Dừng ngay, không tiếp tục
+            }
+
+            // Build message payload với connection ID đúng
+            const messagePayload = {
+              connectionId: targetConnectionId,
+              data: {
+                type: "promptResponse",
+                requestId: requestId,
+                tabId: tabId,
+                success: true,
+                response: response,
+              },
+              timestamp: Date.now(),
+            };
+
+            // Ghi vào storage
+            await browserAPI.storage.local.set({
+              wsOutgoingMessage: messagePayload,
+            });
+          } else {
+            console.error(
+              "[DeepSeekController] ❌ Failed to fetch response content"
+            );
+
+            await browserAPI.storage.local.set({
+              wsOutgoingMessage: {
+                connectionId: "primary",
+                data: {
+                  type: "promptResponse",
+                  requestId: requestId,
+                  tabId: tabId,
+                  success: false,
+                  error: "Failed to fetch response from DeepSeek",
+                },
+                timestamp: Date.now(),
+              },
+            });
+          }
+
+          return;
+        }
+
+        if (pollCount < maxPolls) {
+          const nextPollDelay = pollInterval;
+          setTimeout(poll, nextPollDelay);
+        } else {
+          console.error("[DeepSeekController] ❌ POLLING TIMEOUT!");
+          console.error("[DeepSeekController] Timeout details:", {
+            totalPolls: pollCount,
+            maxPolls,
+            lastStatus: "AI may still be generating",
+            timestamp: new Date().toISOString(),
+          });
+
+          await browserAPI.storage.local.set({
+            wsOutgoingMessage: {
+              connectionId: "primary",
+              data: {
+                type: "promptResponse",
+                requestId: requestId,
+                tabId: tabId,
+                success: false,
+                error: "Response timeout - AI took too long to respond",
+                errorType: "TIMEOUT",
+              },
+              timestamp: Date.now(),
+            },
+          });
+        }
+      } catch (error) {
+        console.error(
+          `[DeepSeekController] ❌ Poll #${pollCount} failed:`,
+          error
+        );
+        console.error("[DeepSeekController] Error details:", {
+          name: error instanceof Error ? error.name : "unknown",
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+        });
+
+        await browserAPI.storage.local.set({
+          wsOutgoingMessage: {
+            connectionId: "primary",
+            data: {
+              type: "promptResponse",
+              requestId: requestId,
+              tabId: tabId,
+              success: false,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Unknown polling error",
+            },
+            timestamp: Date.now(),
+          },
+        });
+      }
+    };
+    setTimeout(poll, 3000);
+  }
+
+  // 🆕 THÊM FUNCTION MỚI: Click vào copy button và lấy content
+  private static async getLatestResponseByClickingCopy(
+    tabId: number
+  ): Promise<string | null> {
+    try {
+      const result = await executeScript(tabId, () => {
+        // Lấy TẤT CẢ button có class ds-icon-button
+        const allButtons = Array.from(
+          document.querySelectorAll(".ds-icon-button")
+        ) as HTMLElement[];
+
+        // 🆕 Lọc chỉ lấy copy button CÓ REGENERATE BUTTON BÊN CẠNH
+        const aiResponseCopyButtons = allButtons.filter((btn) => {
+          // Kiểm tra có icon copy không
+          const svg = btn.querySelector("svg");
+          if (!svg) return false;
+
+          const path = svg.querySelector("path");
+          if (!path) return false;
+
+          const pathData = path.getAttribute("d") || "";
+
+          // Copy button có path bắt đầu bằng "M6.14926 4.02039"
+          if (!pathData.includes("M6.14926 4.02039")) return false;
+
+          // 🆕 Kiểm tra xem có regenerate button bên cạnh không
+          const parent = btn.parentElement;
+          if (!parent) return false;
+
+          // Tìm tất cả button siblings
+          const siblings = Array.from(
+            parent.querySelectorAll(".ds-icon-button")
+          );
+
+          // Kiểm tra xem có button nào chứa icon regenerate không
+          const hasRegenerateButton = siblings.some((sibling) => {
+            const siblingPath = sibling.querySelector("svg path");
+            if (!siblingPath) return false;
+
+            const siblingPathData = siblingPath.getAttribute("d") || "";
+            // Regenerate button có path chứa "M7.92142 0.349213C10.3745"
+            return siblingPathData.includes("M7.92142 0.349213");
+          });
+          return hasRegenerateButton;
+        });
+
+        if (aiResponseCopyButtons.length === 0) {
+          console.error(
+            "[DeepSeek Page] ❌ No AI response copy buttons found!"
+          );
+          return null;
+        }
+
+        // Lấy button cuối cùng (response mới nhất)
+        const lastCopyButton =
+          aiResponseCopyButtons[aiResponseCopyButtons.length - 1];
+
+        lastCopyButton.click();
+
+        return new Promise<string | null>((resolve) => {
+          setTimeout(async () => {
+            try {
+              const clipboardText = await navigator.clipboard.readText();
+              resolve(clipboardText);
+            } catch (error) {
+              console.error(
+                "[DeepSeek Page] ❌ Failed to read clipboard:",
+                error
+              );
+              console.error("[DeepSeek Page] Error details:", {
+                name: error instanceof Error ? error.name : "unknown",
+                message: error instanceof Error ? error.message : String(error),
+              });
+              resolve(null);
+            }
+          }, 500);
+        });
+      });
+
+      if (result) {
+      } else {
+        console.error("[DeepSeekController] ❌ Failed to copy response");
+      }
+
+      return result ?? null;
+    } catch (error) {
+      console.error(
+        "[DeepSeekController] ❌ EXCEPTION in getLatestResponseByClickingCopy:",
+        error
+      );
+      console.error("[DeepSeekController] Error details:", {
+        name: error instanceof Error ? error.name : "unknown",
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      return null;
     }
   }
 
@@ -377,26 +639,35 @@ export class DeepSeekController {
 
   /**
    * Kiểm tra xem AI có đang trả lời không
+   * Check bằng cách xem button có icon hình vuông (stop) không
    */
   public static async isGenerating(tabId: number): Promise<boolean> {
     try {
       const result = await executeScript(tabId, () => {
-        // Kiểm tra có stop button không (button với icon hình vuông)
-        const stopButton = document.querySelector(
-          '.ds-icon-button._7436101 svg path[d*="M2 4.88006"]'
-        );
-        if (!stopButton) return false;
+        const button = document.querySelector(".ds-icon-button._7436101");
 
-        const button = stopButton.closest("button");
-        return button
-          ? !button.classList.contains("ds-icon-button--disabled")
-          : false;
+        if (!button) {
+          return false;
+        }
+
+        const svg = button.querySelector("svg");
+        if (!svg) {
+          return false;
+        }
+
+        const path = svg.querySelector("path");
+        if (!path) {
+          return false;
+        }
+
+        const pathData = path.getAttribute("d") || "";
+        const isStopIcon = pathData.includes("M2 4.88");
+        return isStopIcon;
       });
-
       return result ?? false;
     } catch (error) {
       console.error(
-        "[DeepSeekController] Failed to check generation status:",
+        "[DeepSeekController] ❌ Failed to check generation status:",
         error
       );
       return false;
