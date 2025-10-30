@@ -1,4 +1,4 @@
-// src/background/ws-connection.ts
+// src/background/websocket/ws-connection.ts
 export interface WSConnectionConfig {
   id: string;
   port: number;
@@ -33,6 +33,9 @@ export class WSConnection {
       status: "disconnected",
       reconnectAttempts: 0,
     };
+
+    // 🆕 Setup listener cho outgoing messages
+    this.setupOutgoingListener();
   }
 
   public disconnect(): void {
@@ -214,6 +217,25 @@ export class WSConnection {
     } catch (error) {
       console.error("[WSConnection] Failed to parse message:", error);
     }
+  }
+
+  // 🆕 Setup listener for outgoing messages
+  private setupOutgoingListener(): void {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local") return;
+
+      if (changes.wsOutgoingMessage) {
+        const msg = changes.wsOutgoingMessage.newValue;
+
+        if (msg && msg.connectionId === this.state.id) {
+          console.debug("[WSConnection] Sending outgoing message:", msg.data);
+          this.send(msg.data);
+
+          // Clear message after sending
+          chrome.storage.local.remove(["wsOutgoingMessage"]);
+        }
+      }
+    });
   }
 
   private notifyStateChange(): void {

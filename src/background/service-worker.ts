@@ -40,6 +40,78 @@ declare const browser: typeof chrome & any;
     zenTabManager.handleTabRemoved(tabId);
   });
 
+  // 🆕 Listen for WebSocket messages from storage
+  browserAPI.storage.onChanged.addListener((changes: any, areaName: string) => {
+    if (areaName !== "local") return;
+
+    // Process incoming WebSocket messages
+    if (changes.wsMessages) {
+      const messages = changes.wsMessages.newValue || {};
+
+      // Process each connection's messages
+      for (const [connectionId, msgArray] of Object.entries(messages)) {
+        const msgs = msgArray as Array<{ timestamp: number; data: any }>;
+
+        // Get latest message
+        if (msgs.length > 0) {
+          const latestMsg = msgs[msgs.length - 1];
+
+          // Handle sendPrompt type
+          if (latestMsg.data.type === "sendPrompt") {
+            console.debug(
+              "[ServiceWorker] Processing sendPrompt from WebSocket:",
+              latestMsg.data
+            );
+
+            const { tabId, prompt, requestId } = latestMsg.data;
+
+            // Send prompt to DeepSeek tab
+            DeepSeekController.sendPrompt(tabId, prompt)
+              .then((success) => {
+                console.debug(
+                  "[ServiceWorker] Prompt sent successfully:",
+                  success
+                );
+
+                // 🆕 Send response back via WebSocket
+                if (success) {
+                  // Get the response after a delay (adjust timing as needed)
+                  setTimeout(async () => {
+                    const response = await DeepSeekController.getLatestResponse(
+                      tabId
+                    );
+
+                    if (response) {
+                      // Store response to be sent back via WebSocket
+                      const responseData = {
+                        type: "promptResponse",
+                        requestId: requestId,
+                        tabId: tabId,
+                        success: true,
+                        response: response,
+                      };
+
+                      // Trigger sending via storage (will be picked up by ws-connection)
+                      browserAPI.storage.local.set({
+                        wsOutgoingMessage: {
+                          connectionId: connectionId,
+                          data: responseData,
+                          timestamp: Date.now(),
+                        },
+                      });
+                    }
+                  }, 2000); // Đợi 2s để AI trả lời (điều chỉnh nếu cần)
+                }
+              })
+              .catch((error) => {
+                console.error("[ServiceWorker] Failed to send prompt:", error);
+              });
+          }
+        }
+      }
+    }
+  });
+
   // Listen for sidebar opening
   browserAPI.runtime.onConnect.addListener((port: any) => {
     if (port.name === "zenTab-sidebar") {
@@ -72,6 +144,17 @@ declare const browser: typeof chrome & any;
           success: true,
           note: "WebSocket actions use storage-based communication",
         });
+        return true;
+      }
+
+      // 🆕 Handle WebSocket incoming prompts (fallback method)
+      if (message.action === "ws.incomingPrompt") {
+        console.debug("[ServiceWorker] Processing WebSocket prompt:", message);
+        DeepSeekController.sendPrompt(message.tabId, message.prompt).then(
+          (success) => {
+            sendResponse({ success });
+          }
+        );
         return true;
       }
 
