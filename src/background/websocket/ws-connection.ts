@@ -88,17 +88,19 @@ export class WSConnection {
 
           chrome.storage.local.set({
             wsConnectionEstablished: Date.now(),
-            triggerFocusedTabsBroadcast: Date.now(), // THÊM KEY MỚI
+            triggerFocusedTabsBroadcast: Date.now(),
           });
 
-          resolve(); // Resolve khi kết nối thành công
+          resolve();
         };
 
         this.ws.onerror = (error) => {
-          console.error("[WSConnection] Error:", this.state.url, error);
+          console.error(
+            `[WSConnection] ❌ WebSocket ERROR for ${this.state.id}:`,
+            error
+          );
           this.state.status = "error";
           this.notifyStateChange();
-          // KHÔNG reject, vì onerror sẽ trigger onclose
         };
 
         this.ws.onclose = () => {
@@ -207,6 +209,7 @@ export class WSConnection {
     chrome.storage.local.get(["wsStates"], (result) => {
       const states = result.wsStates || {};
       states[this.state.id] = { ...this.state };
+      chrome.storage.local.set({ wsStates: states }, () => {});
     });
   }
 

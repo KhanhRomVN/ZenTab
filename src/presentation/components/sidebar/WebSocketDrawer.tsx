@@ -64,16 +64,19 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
 
         if (changes.wsStates) {
           const states = changes.wsStates.newValue || {};
+
           // Update connections với states mới nhất
-          setConnections((prev) =>
-            prev.map((conn) => {
+          setConnections((prev) => {
+            const updated = prev.map((conn) => {
               const newState = states[conn.id];
               if (newState) {
                 return { ...conn, ...newState };
               }
               return conn;
-            })
-          );
+            });
+
+            return updated;
+          });
         }
       };
 
@@ -178,13 +181,14 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
     try {
       const response = await WSHelper.connect(id);
       if (!response.success) {
-        console.error("[WebSocketDrawer] Connect failed:", response.error);
+        console.error("[WebSocketDrawer] ❌ Connect failed:", response.error);
         setError(response.error || "Failed to connect");
+      } else {
       }
 
       // Không cần reload - storage listener sẽ tự động update
     } catch (error) {
-      console.error("[WebSocketDrawer] Failed to connect:", error);
+      console.error("[WebSocketDrawer] ❌ Exception in handleConnect:", error);
       setError(error instanceof Error ? error.message : "Connection failed");
     }
   };
@@ -274,22 +278,6 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
             </div>
           )}
         </div>
-
-        {/* Info Section */}
-        {connections.length > 0 && (
-          <div className="p-4 border-t border-border-default">
-            <div className="flex items-start gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <AlertCircle className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-blue-700 dark:text-blue-300">
-                  WebSocket connections will automatically reconnect if
-                  disconnected. Make sure your local server is running on the
-                  specified port.
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </MotionCustomDrawer>
   );
