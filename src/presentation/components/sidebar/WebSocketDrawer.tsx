@@ -2,10 +2,9 @@ import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import MotionCustomDrawer from "../common/CustomDrawer";
 import CustomButton from "../common/CustomButton";
-import CustomInput from "../common/CustomInput";
 import WebSocketCard from "./WebSocketCard";
 import { WSHelper, WSConnectionState } from "@/shared/lib/ws-helper";
-import { Plus, AlertCircle } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 
 interface WebSocketDrawerProps {
   isOpen: boolean;
@@ -17,13 +16,42 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
   onClose,
 }) => {
   const [connections, setConnections] = useState<WSConnectionState[]>([]);
-  const [newPort, setNewPort] = useState("");
   const [error, setError] = useState("");
-  const [isAdding, setIsAdding] = useState(false);
+  const [isReloading, setIsReloading] = useState(false);
+
+  const initializeDefaultPorts = async () => {
+    try {
+      const DEFAULT_PORTS = [
+        1501, 1502, 1503, 1504, 1505, 1506, 1507, 1508, 1509, 1510,
+      ];
+
+      // Load existing connections
+      const existingConns = await WSHelper.getAllConnections();
+      const existingPorts = existingConns.map(
+        (conn: WSConnectionState) => conn.port
+      );
+
+      // Add missing ports
+      for (const port of DEFAULT_PORTS) {
+        if (!existingPorts.includes(port)) {
+          await WSHelper.addConnection(port);
+        }
+      }
+
+      // Reload all connections
+      await loadConnections();
+    } catch (error) {
+      console.error(
+        "[WebSocketDrawer] Failed to initialize default ports:",
+        error
+      );
+      setError("Failed to initialize default ports");
+    }
+  };
 
   useEffect(() => {
     if (isOpen) {
-      loadConnections();
+      initializeDefaultPorts();
 
       // Load initial wsStates - wrapped in Promise for Firefox compatibility
       const loadInitialStates = async () => {
@@ -92,6 +120,11 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
     try {
       const conns = await WSHelper.getAllConnections();
 
+      // Sort by port number
+      const sortedConns = conns.sort(
+        (a: WSConnectionState, b: WSConnectionState) => a.port - b.port
+      );
+
       // Sync với wsStates từ storage - with proper error handling
       try {
         const result = await new Promise<any>((resolve) => {
@@ -102,7 +135,7 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
 
         const states = result?.wsStates || {};
 
-        const mergedConns = conns.map((conn: WSConnectionState) => {
+        const mergedConns = sortedConns.map((conn: WSConnectionState) => {
           const state = states[conn.id];
           if (state) {
             return { ...conn, ...state };
@@ -116,7 +149,7 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
           "[WebSocketDrawer] Failed to sync with wsStates, using connections as-is:",
           storageError
         );
-        setConnections(conns);
+        setConnections(sortedConns);
       }
     } catch (error) {
       console.error("[WebSocketDrawer] Failed to load connections:", error);
@@ -124,44 +157,32 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
     }
   };
 
-  const handleAddConnection = async () => {
-    const fnStartTime = Date.now();
+  const handleReloadAll = async () => {
     setError("");
-
-    const port = parseInt(newPort);
-
-    if (isNaN(port) || port < 1 || port > 65535) {
-      setError("Invalid port number (1-65535)");
-      return;
-    }
-
-    const existingPort = connections.some((conn) => conn.port === port);
-
-    if (existingPort) {
-      setError("Connection with this port already exists");
-      return;
-    }
-
-    setIsAdding(true);
+    setIsReloading(true);
 
     try {
-      const response = await WSHelper.addConnection(port);
-      if (response && response.success) {
-        setNewPort("");
-        await loadConnections();
-      } else {
-        const errorMsg =
-          (response && response.error) || "Failed to add connection";
-        setError(errorMsg);
+      // Disconnect all first
+      for (const conn of connections) {
+        if (conn.status === "connected" || conn.status === "connecting") {
+          await WSHelper.disconnect(conn.id);
+        }
+      }
+
+      // Wait a bit for disconnections to complete
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Connect all
+      for (const conn of connections) {
+        await WSHelper.connect(conn.id);
+        // Small delay between connections
+        await new Promise((resolve) => setTimeout(resolve, 200));
       }
     } catch (error) {
-      console.error(
-        "[WebSocketDrawer] ❌ Exception caught in try block:",
-        error
-      );
-      setError("Failed to add connection");
+      console.error("[WebSocketDrawer] Failed to reload all:", error);
+      setError("Failed to reload all connections");
     } finally {
-      setIsAdding(false);
+      setIsReloading(false);
     }
   };
 
@@ -222,34 +243,27 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
       showCloseButton={true}
     >
       <div className="h-full overflow-y-auto bg-drawer-background">
-        {/* Add Connection Form */}
+        {/* Reload All Button */}
         <div className="p-4 border-b border-border-default">
           <h3 className="text-sm font-medium text-text-primary mb-3">
-            Add New Connection
+            WebSocket Connections (Ports 1501-1510)
           </h3>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <CustomInput
-                placeholder="Port number (e.g., 8080)"
-                value={newPort}
-                onChange={setNewPort}
-                error={error}
-                size="sm"
-                min={1}
-                max={65535}
-              />
+          <CustomButton
+            variant="primary"
+            size="sm"
+            icon={RefreshCw}
+            onClick={handleReloadAll}
+            loading={isReloading}
+            disabled={isReloading || connections.length === 0}
+            className="w-full"
+          >
+            {isReloading ? "Reloading..." : "Reload All Connections"}
+          </CustomButton>
+          {error && (
+            <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded">
+              <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
             </div>
-            <CustomButton
-              variant="primary"
-              size="sm"
-              icon={Plus}
-              onClick={handleAddConnection}
-              loading={isAdding}
-              disabled={!newPort || isAdding}
-            >
-              Add
-            </CustomButton>
-          </div>
+          )}
         </div>
 
         {/* Connections List */}
