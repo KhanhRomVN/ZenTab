@@ -69,15 +69,6 @@ export function parseAPIResponse(rawResponse: string): {
   fullResponse?: any;
   error?: string;
 } {
-  console.log(
-    "[parseAPIResponse] 🔍 Starting parse with response length:",
-    rawResponse.length
-  );
-  console.log(
-    "[parseAPIResponse] 📄 Raw response preview:",
-    rawResponse.substring(0, 300)
-  );
-
   // LAYER 1: Try direct JSON parse
   try {
     let cleaned = rawResponse.trim();
@@ -93,31 +84,13 @@ export function parseAPIResponse(rawResponse: string): {
 
     if (firstBrace !== -1 && lastBrace !== -1 && firstBrace < lastBrace) {
       cleaned = cleaned.substring(firstBrace, lastBrace + 1);
-      console.log(
-        "[parseAPIResponse] 🔍 Extracted JSON from position",
-        firstBrace,
-        "to",
-        lastBrace
-      );
     }
-
-    console.log(
-      "[parseAPIResponse] 🧹 Cleaned response preview:",
-      cleaned.substring(0, 300)
-    );
 
     // Try parse
     let parsed: any;
     try {
       parsed = JSON.parse(cleaned);
-      console.log(
-        "[parseAPIResponse] ✅ Layer 1: Direct JSON parse successful"
-      );
     } catch (parseError) {
-      console.warn(
-        "[parseAPIResponse] ⚠️ Layer 1 failed, trying regex extraction..."
-      );
-
       // LAYER 2: Try regex to find JSON object
       const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -155,11 +128,6 @@ export function parseAPIResponse(rawResponse: string): {
       console.warn("[parseAPIResponse] ⚠️ Invalid structure: empty content");
       throw new Error("Invalid API response: content is empty");
     }
-
-    console.log(
-      "[parseAPIResponse] ✅ Successfully parsed JSON with content length:",
-      content.length
-    );
 
     return {
       success: true,
