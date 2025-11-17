@@ -172,6 +172,14 @@ declare const browser: typeof chrome & any;
 
       // DeepSeek controller handlers
       switch (message.action) {
+        case "deepseek.clickNewChat":
+          DeepSeekController.clickNewChatButton(message.tabId).then(
+            (success) => {
+              sendResponse({ success });
+            }
+          );
+          return true;
+
         case "deepseek.isDeepThinkEnabled":
           DeepSeekController.isDeepThinkEnabled(message.tabId).then(
             (enabled) => {

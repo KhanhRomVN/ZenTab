@@ -113,6 +113,76 @@ export class DeepSeekController {
   }
 
   /**
+   * Click vào button "New Chat" để tạo cuộc trò chuyện mới
+   */
+  public static async clickNewChatButton(tabId: number): Promise<boolean> {
+    try {
+      const result = await executeScript(tabId, () => {
+        console.log("[DeepSeek Page] 🔍 Searching for New Chat button...");
+
+        // TRY 1: Tìm button có class _4f3769f (button có icon + hover effect)
+        const button1 = document.querySelector(
+          '.ds-icon-button._4f3769f[role="button"]'
+        ) as HTMLElement;
+
+        if (button1 && !button1.getAttribute("aria-disabled")) {
+          console.log(
+            "[DeepSeek Page] ✅ Found New Chat button (type 1), clicking..."
+          );
+          button1.click();
+          return true;
+        }
+
+        // TRY 2: Tìm button có class _5a8ac7a (button có text "Trò chuyện mới" hoặc "New Chat")
+        const allButtons = Array.from(
+          document.querySelectorAll("._5a8ac7a")
+        ) as HTMLElement[];
+
+        for (const btn of allButtons) {
+          const svg = btn.querySelector("svg");
+          const pathD = svg?.querySelector("path")?.getAttribute("d");
+
+          // Verify SVG path để chắc chắn đây là button "New Chat"
+          if (
+            pathD &&
+            pathD.includes("M8 0.599609C3.91309 0.599609") &&
+            pathD.includes("M7.34473 4.93945V7.34961")
+          ) {
+            console.log(
+              "[DeepSeek Page] ✅ Found New Chat button (type 2), clicking..."
+            );
+            btn.click();
+            return true;
+          }
+        }
+
+        console.error("[DeepSeek Page] ❌ New Chat button not found!");
+        return false;
+      });
+
+      if (result) {
+        console.log(
+          "[DeepSeekController] ✅ New Chat button clicked successfully"
+        );
+        // Chờ 1s để page load xong chat mới
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        return true;
+      } else {
+        console.error(
+          "[DeepSeekController] ❌ Failed to click New Chat button"
+        );
+        return false;
+      }
+    } catch (error) {
+      console.error(
+        "[DeepSeekController] ❌ Exception while clicking New Chat button:",
+        error
+      );
+      return false;
+    }
+  }
+
+  /**
    * Gửi prompt tới DeepSeek
    */
   public static async sendPrompt(
@@ -157,6 +227,18 @@ export class DeepSeekController {
           tabError
         );
         return false;
+      }
+
+      // 🆕 STEP 2.5: Click New Chat button để tạo cuộc trò chuyện mới
+      console.log(
+        "[DeepSeekController] 🔄 Creating new chat before sending prompt..."
+      );
+      const newChatClicked = await this.clickNewChatButton(tabId);
+
+      if (!newChatClicked) {
+        console.warn(
+          "[DeepSeekController] ⚠️ Failed to create new chat, continuing anyway..."
+        );
       }
 
       // 🆕 STEP 3: Thử inject script với retry mechanism
