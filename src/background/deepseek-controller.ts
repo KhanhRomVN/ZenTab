@@ -16,7 +16,10 @@ export class DeepSeekController {
     return ChatController.isDeepThinkEnabled(tabId);
   }
 
-  static async toggleDeepThink(tabId: number, enable: boolean): Promise<boolean> {
+  static async toggleDeepThink(
+    tabId: number,
+    enable: boolean
+  ): Promise<boolean> {
     return ChatController.toggleDeepThink(tabId, enable);
   }
 

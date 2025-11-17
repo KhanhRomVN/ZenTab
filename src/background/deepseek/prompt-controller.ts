@@ -3,6 +3,7 @@ import { executeScript, getBrowserAPI } from "../utils/browser-helper";
 import { StateController } from "./state-controller";
 import { ChatController } from "./chat-controller";
 import { DEFAULT_CONFIG, DeepSeekConfig } from "./types";
+import { wrapPromptWithAPIFormat, parseAPIResponse } from "./prompt-template";
 
 export class PromptController {
   private static activePollingTasks: Map<number, string> = new Map();
@@ -63,6 +64,23 @@ export class PromptController {
 
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
+      const wrappedPrompt = wrapPromptWithAPIFormat(prompt);
+
+      console.log(
+        `[PromptController] 📝 Original prompt length: ${prompt.length} chars`
+      );
+      console.log(
+        `[PromptController] 📝 Wrapped prompt length: ${wrappedPrompt.length} chars`
+      );
+      console.log(
+        `[PromptController] 📝 Wrapped prompt preview (first 500 chars):`,
+        wrappedPrompt.substring(0, 500)
+      );
+      console.log(
+        `[PromptController] 📝 Wrapped prompt preview (last 200 chars):`,
+        wrappedPrompt.substring(wrappedPrompt.length - 200)
+      );
+
       let retries = 3;
       let result: any = null;
 
@@ -106,7 +124,7 @@ export class PromptController {
                 },
               };
             },
-            [prompt]
+            [wrappedPrompt]
           );
 
           if (result && result.success) {
@@ -421,6 +439,220 @@ export class PromptController {
             )}ms)`
           );
 
+          // Kiểm tra icon copy của AI
+          try {
+            const copyIconResult = await executeScript(tabId, () => {
+              // Tìm tất cả các nhóm icon buttons
+              const allIconGroups = document.querySelectorAll(
+                ".ds-flex._965abe9._54866f7, .ds-flex._78e0558._0bbda35"
+              );
+
+              console.log(
+                `[DeepSeek Page] 🔍 Tổng số nhóm icon tìm thấy: ${allIconGroups.length}`
+              );
+
+              let aiCopyButton: HTMLElement | null = null;
+              let foundGroupIndex = -1;
+
+              // Duyệt qua từng nhóm để tìm NHÓM 5 ICON CUỐI CÙNG (nhóm của AI response mới nhất)
+              const groupsArray = Array.from(allIconGroups);
+              for (let i = groupsArray.length - 1; i >= 0; i--) {
+                const group = groupsArray[i];
+                const iconButtons = group.querySelectorAll(
+                  ".ds-icon-button.db183363"
+                );
+                console.log(
+                  `[DeepSeek Page] 📊 Nhóm #${i} có ${iconButtons.length} icon`
+                );
+
+                // Nhóm của AI có 5 icon
+                if (iconButtons.length === 5) {
+                  console.log(
+                    `[DeepSeek Page] ✅ Phát hiện nhóm 5 icon tại index ${i} (AI)`
+                  );
+
+                  // Icon copy là icon đầu tiên trong nhóm 5 icon
+                  aiCopyButton = iconButtons[0] as HTMLElement;
+
+                  // Kiểm tra xem có phải icon copy không bằng cách check SVG path
+                  const svg = aiCopyButton.querySelector("svg");
+                  const path = svg?.querySelector("path");
+                  const pathData = path?.getAttribute("d") || "";
+
+                  // Path của icon copy bắt đầu với "M6.14926 4.02039"
+                  const isCopyIcon = pathData.includes("M6.14926 4.02039");
+
+                  if (isCopyIcon) {
+                    console.log(
+                      `[DeepSeek Page] ✅ Xác nhận đây là ICON COPY của AI (nhóm cuối cùng có 5 icon)`
+                    );
+                    foundGroupIndex = i;
+                    break;
+                  } else {
+                    console.log(
+                      `[DeepSeek Page] ⚠️ Icon đầu tiên trong nhóm #${i} không phải icon copy`
+                    );
+                    aiCopyButton = null;
+                  }
+                }
+              }
+
+              if (!aiCopyButton) {
+                return {
+                  found: false,
+                  error: "Không tìm thấy icon copy của AI",
+                };
+              }
+
+              console.log(
+                `[DeepSeek Page] 🎯 Đã tìm thấy icon copy của AI tại nhóm #${foundGroupIndex}, chuẩn bị click...`
+              );
+
+              // Thử click vào icon copy
+              try {
+                aiCopyButton.click();
+                console.log(
+                  `[DeepSeek Page] ✅ Đã click vào icon copy thành công`
+                );
+
+                return {
+                  found: true,
+                  clicked: true,
+                  groupIndex: foundGroupIndex,
+                };
+              } catch (clickError) {
+                console.error(
+                  `[DeepSeek Page] ❌ Lỗi khi click vào icon copy:`,
+                  clickError
+                );
+                return {
+                  found: true,
+                  clicked: false,
+                  error:
+                    clickError instanceof Error
+                      ? clickError.message
+                      : String(clickError),
+                };
+              }
+            });
+
+            if (copyIconResult && copyIconResult.found) {
+              console.log(`[PromptController] ✅ Tìm thấy icon copy của AI`);
+
+              if (copyIconResult.clicked) {
+                console.log(
+                  `[PromptController] ✅ Đã click vào icon copy thành công`
+                );
+
+                // Lưu prompt hiện tại để so sánh
+                const currentPrompt = prompt;
+
+                // Đợi và kiểm tra clipboard nhiều lần để đảm bảo nội dung đã được copy
+                let clipboardSuccess = false;
+                let finalClipboardContent = "";
+                const maxRetries = 8; // Tăng số lần retry
+
+                for (let retry = 0; retry < maxRetries; retry++) {
+                  // Thời gian chờ: 1000ms, 1500ms, 2000ms, 2500ms, 3000ms, 3500ms, 4000ms, 4500ms
+                  const waitTime = 10000 + retry * 500; // Bắt đầu từ 1000ms thay vì 500ms
+                  await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+                  try {
+                    const clipboardContent = await executeScript(
+                      tabId,
+                      async () => {
+                        try {
+                          const text = await navigator.clipboard.readText();
+                          return {
+                            success: true,
+                            content: text,
+                            contentPreview: text.substring(0, 200),
+                          };
+                        } catch (error) {
+                          return {
+                            success: false,
+                            error:
+                              error instanceof Error
+                                ? error.message
+                                : String(error),
+                          };
+                        }
+                      }
+                    );
+
+                    if (clipboardContent && clipboardContent.success) {
+                      const clipboardText = clipboardContent.content;
+
+                      // Kiểm tra xem clipboard có khác với prompt không
+                      if (
+                        clipboardText !== currentPrompt &&
+                        clipboardText.length > 0
+                      ) {
+                        console.log(
+                          `[PromptController] ✅ Clipboard đã được cập nhật sau ${
+                            retry + 1
+                          } lần thử (${waitTime}ms)`
+                        );
+                        console.log(
+                          `[PromptController] 📋 Nội dung clipboard (200 ký tự đầu):`,
+                          clipboardContent.contentPreview
+                        );
+                        clipboardSuccess = true;
+                        finalClipboardContent = clipboardText;
+                        break;
+                      } else {
+                        console.log(
+                          `[PromptController] ⏳ Lần thử ${
+                            retry + 1
+                          }/${maxRetries}: Clipboard chưa thay đổi, chờ thêm...`
+                        );
+                      }
+                    } else {
+                      console.warn(
+                        `[PromptController] ⚠️ Lần thử ${
+                          retry + 1
+                        }/${maxRetries}: Không thể đọc clipboard:`,
+                        clipboardContent?.error
+                      );
+                    }
+                  } catch (clipboardError) {
+                    console.error(
+                      `[PromptController] ❌ Lỗi khi đọc clipboard (lần thử ${
+                        retry + 1
+                      }):`,
+                      clipboardError
+                    );
+                  }
+                }
+
+                if (!clipboardSuccess) {
+                  console.error(
+                    `[PromptController] ❌ Không thể đọc được nội dung AI response từ clipboard sau ${maxRetries} lần thử`
+                  );
+                } else {
+                  console.log(
+                    `[PromptController] ✅ Đã lấy được nội dung AI response từ clipboard (${finalClipboardContent.length} ký tự)`
+                  );
+                }
+              } else {
+                console.error(
+                  `[PromptController] ❌ Không thể click vào icon copy:`,
+                  copyIconResult.error
+                );
+              }
+            } else {
+              console.warn(
+                `[PromptController] ⚠️ Không tìm thấy icon copy của AI:`,
+                copyIconResult?.error
+              );
+            }
+          } catch (copyCheckError) {
+            console.error(
+              `[PromptController] ❌ Lỗi khi kiểm tra icon copy:`,
+              copyCheckError
+            );
+          }
+
           // Hoàn thành monitoring
           return;
         }
@@ -711,7 +943,48 @@ export class PromptController {
       });
 
       if (result) {
-        return result;
+        console.log(
+          `[PromptController] 📦 Raw response length: ${result.length} chars`
+        );
+        console.log(
+          `[PromptController] 📦 Raw response preview (first 200 chars):`,
+          result.substring(0, 200)
+        );
+
+        const parsed = parseAPIResponse(result);
+
+        if (parsed.success && parsed.content) {
+          console.log(
+            `[PromptController] ✅ Successfully parsed JSON API response`
+          );
+          console.log(
+            `[PromptController] 📝 Extracted content length: ${parsed.content.length} chars`
+          );
+          console.log(
+            `[PromptController] 📝 Content preview:`,
+            parsed.content.substring(0, 200)
+          );
+
+          if (parsed.fullResponse) {
+            console.log(`[PromptController] 📊 Full API response:`, {
+              id: parsed.fullResponse.id,
+              model: parsed.fullResponse.model,
+              usage: parsed.fullResponse.usage,
+              finish_reason: parsed.fullResponse.choices[0]?.finish_reason,
+            });
+          }
+
+          return parsed.content;
+        } else {
+          console.error(
+            `[PromptController] ❌ Failed to parse JSON response:`,
+            parsed.error
+          );
+          console.error(`[PromptController] 📄 Raw response:`, result);
+
+          console.warn(`[PromptController] ⚠️ Falling back to raw response`);
+          return result;
+        }
       } else {
         return null;
       }
