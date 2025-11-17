@@ -46,17 +46,40 @@ declare const browser: typeof chrome & any;
 
     // Process incoming WebSocket messages
     if (changes.wsMessages) {
+      console.log("[ServiceWorker] 📨 Received WebSocket messages update");
       const messages = changes.wsMessages.newValue || {};
+      console.log(
+        "[ServiceWorker] 📊 Total connections with messages:",
+        Object.keys(messages).length
+      );
+
       // Process each connection's messages
       for (const [connectionId, msgArray] of Object.entries(messages)) {
         const msgs = msgArray as Array<{ timestamp: number; data: any }>;
+        console.log(
+          `[ServiceWorker] 🔍 Processing connection: ${connectionId}, Messages count: ${msgs.length}`
+        );
 
         // Get latest message
         if (msgs.length > 0) {
           const latestMsg = msgs[msgs.length - 1];
+          console.log(
+            `[ServiceWorker] 📩 Latest message type: ${latestMsg.data.type}`
+          );
+
           // Handle sendPrompt type
           if (latestMsg.data.type === "sendPrompt") {
             const { tabId, prompt, requestId } = latestMsg.data;
+            console.log("[ServiceWorker] ✅ Received sendPrompt command");
+            console.log("[ServiceWorker] 📝 Prompt details:", {
+              connectionId,
+              tabId,
+              requestId,
+              promptLength: prompt?.length || 0,
+              promptPreview:
+                prompt?.substring(0, 100) + (prompt?.length > 100 ? "..." : ""),
+              timestamp: new Date(latestMsg.timestamp).toISOString(),
+            });
 
             // Send prompt to DeepSeek tab
             DeepSeekController.sendPrompt(tabId, prompt, requestId)

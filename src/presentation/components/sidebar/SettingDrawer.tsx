@@ -1,5 +1,5 @@
 import React from "react";
-import { Network, X } from "lucide-react";
+import { Network, X, MessageCircle } from "lucide-react";
 import MotionCustomDrawer from "../common/CustomDrawer";
 import CustomButton from "../common/CustomButton";
 
@@ -7,15 +7,22 @@ interface SettingDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   onWebSocket: () => void;
+  onTest: () => void;
 }
 
 const SettingDrawer: React.FC<SettingDrawerProps> = ({
   isOpen,
   onClose,
   onWebSocket,
+  onTest,
 }) => {
   const handleWebSocket = () => {
     onWebSocket();
+    onClose();
+  };
+
+  const handleTest = () => {
+    onTest();
     onClose();
   };
 
@@ -58,6 +65,17 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
               onClick={handleWebSocket}
             >
               WebSocket Connections
+            </CustomButton>
+
+            {/* Test Button */}
+            <CustomButton
+              variant="ghost"
+              size="md"
+              align="left"
+              icon={MessageCircle}
+              onClick={handleTest}
+            >
+              Test DeepSeek Chat
             </CustomButton>
           </div>
         </div>

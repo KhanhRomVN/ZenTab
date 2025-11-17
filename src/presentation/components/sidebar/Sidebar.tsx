@@ -3,6 +3,7 @@ import ContainerCard from "./ContainerCard";
 import TabSelectionDrawer from "./TabSelectionDrawer";
 import WebSocketDrawer from "./WebSocketDrawer";
 import SettingDrawer from "./SettingDrawer";
+import TestDrawer from "./TestDrawer";
 import CustomButton from "../common/CustomButton";
 import { Settings, List } from "lucide-react";
 import { getBrowserAPI } from "@/shared/lib/browser-api";
@@ -12,6 +13,7 @@ const Sidebar: React.FC = () => {
   const [showTabSelectionDrawer, setShowTabSelectionDrawer] = useState(false);
   const [showSettingDrawer, setShowSettingDrawer] = useState(false);
   const [showWebSocketDrawer, setShowWebSocketDrawer] = useState(false);
+  const [showTestDrawer, setShowTestDrawer] = useState(false);
   const [activeTabs, setActiveTabs] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -230,12 +232,19 @@ const Sidebar: React.FC = () => {
         isOpen={showSettingDrawer}
         onClose={() => setShowSettingDrawer(false)}
         onWebSocket={() => setShowWebSocketDrawer(true)}
+        onTest={() => setShowTestDrawer(true)}
       />
 
       {/* WebSocket Drawer */}
       <WebSocketDrawer
         isOpen={showWebSocketDrawer}
         onClose={() => setShowWebSocketDrawer(false)}
+      />
+
+      {/* Test Drawer */}
+      <TestDrawer
+        isOpen={showTestDrawer}
+        onClose={() => setShowTestDrawer(false)}
       />
     </div>
   );

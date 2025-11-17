@@ -9,7 +9,8 @@
     "contextualIdentities",
     "tabHide",
     "cookies",
-    "<all_urls>"
+    "<all_urls>",
+    "clipboardRead"
   ],
   "background": {
     "scripts": ["serviceWorker.js"],
