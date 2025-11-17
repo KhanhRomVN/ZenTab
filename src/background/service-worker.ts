@@ -20,7 +20,7 @@ declare const browser: typeof chrome & any;
   const wsManager = new WSManagerNew();
 
   // Initialize Tab Broadcaster
-  const tabBroadcaster = new TabBroadcaster(wsManager);
+  new TabBroadcaster(wsManager);
 
   // Initialize managers
   const containerManager = new ContainerManager(browserAPI);
@@ -46,44 +46,19 @@ declare const browser: typeof chrome & any;
 
     // Process incoming WebSocket messages
     if (changes.wsMessages) {
-      console.log("[ServiceWorker] 📨 Received WebSocket messages update");
       const messages = changes.wsMessages.newValue || {};
-      console.log(
-        "[ServiceWorker] 📊 Total connections with messages:",
-        Object.keys(messages).length
-      );
-
       // Process each connection's messages
       for (const [connectionId, msgArray] of Object.entries(messages)) {
         const msgs = msgArray as Array<{ timestamp: number; data: any }>;
-        console.log(
-          `[ServiceWorker] 🔍 Processing connection: ${connectionId}, Messages count: ${msgs.length}`
-        );
-
         // Get latest message
         if (msgs.length > 0) {
           const latestMsg = msgs[msgs.length - 1];
-          console.log(
-            `[ServiceWorker] 📩 Latest message type: ${latestMsg.data.type}`
-          );
-
           // Handle sendPrompt type
           if (latestMsg.data.type === "sendPrompt") {
             const { tabId, prompt, requestId } = latestMsg.data;
-            console.log("[ServiceWorker] ✅ Received sendPrompt command");
-            console.log("[ServiceWorker] 📝 Prompt details:", {
-              connectionId,
-              tabId,
-              requestId,
-              promptLength: prompt?.length || 0,
-              promptPreview:
-                prompt?.substring(0, 100) + (prompt?.length > 100 ? "..." : ""),
-              timestamp: new Date(latestMsg.timestamp).toISOString(),
-            });
-
             // Send prompt to DeepSeek tab
             DeepSeekController.sendPrompt(tabId, prompt, requestId)
-              .then((success) => {
+              .then((success: boolean) => {
                 if (success) {
                 } else {
                   console.error(
@@ -106,15 +81,16 @@ declare const browser: typeof chrome & any;
                   });
                 }
               })
-              .catch((error) => {
+              .catch((error: unknown) => {
                 console.error(
                   "[ServiceWorker] ❌ Exception while sending prompt:",
                   error
                 );
                 console.error("[ServiceWorker] Error details:", {
-                  name: error?.name,
-                  message: error?.message,
-                  stack: error?.stack,
+                  name: error instanceof Error ? error.name : "unknown",
+                  message:
+                    error instanceof Error ? error.message : String(error),
+                  stack: error instanceof Error ? error.stack : undefined,
                 });
 
                 // Send error back to ZenChat
@@ -164,7 +140,7 @@ declare const browser: typeof chrome & any;
           message.tabId,
           message.prompt,
           message.requestId
-        ).then((success) => {
+        ).then((success: boolean) => {
           sendResponse({ success });
         });
         return true;
@@ -174,7 +150,7 @@ declare const browser: typeof chrome & any;
       switch (message.action) {
         case "deepseek.clickNewChat":
           DeepSeekController.clickNewChatButton(message.tabId).then(
-            (success) => {
+            (success: boolean) => {
               sendResponse({ success });
             }
           );
@@ -182,7 +158,7 @@ declare const browser: typeof chrome & any;
 
         case "deepseek.isDeepThinkEnabled":
           DeepSeekController.isDeepThinkEnabled(message.tabId).then(
-            (enabled) => {
+            (enabled: any) => {
               sendResponse({ enabled });
             }
           );
@@ -192,7 +168,7 @@ declare const browser: typeof chrome & any;
           DeepSeekController.toggleDeepThink(
             message.tabId,
             message.enable
-          ).then((success) => {
+          ).then((success: boolean) => {
             sendResponse({ success });
           });
           return true;
@@ -202,47 +178,55 @@ declare const browser: typeof chrome & any;
             message.tabId,
             message.prompt,
             message.requestId
-          ).then((success) => {
+          ).then((success: boolean) => {
             sendResponse({ success });
           });
           return true;
 
         case "deepseek.stopGeneration":
-          DeepSeekController.stopGeneration(message.tabId).then((success) => {
-            sendResponse({ success });
-          });
+          DeepSeekController.stopGeneration(message.tabId).then(
+            (success: boolean) => {
+              sendResponse({ success });
+            }
+          );
           return true;
 
         case "deepseek.getLatestResponse":
           DeepSeekController.getLatestResponse(message.tabId).then(
-            (response) => {
+            (response: any) => {
               sendResponse({ response });
             }
           );
           return true;
 
         case "deepseek.createNewChat":
-          DeepSeekController.createNewChat(message.tabId).then((success) => {
-            sendResponse({ success });
-          });
+          DeepSeekController.createNewChat(message.tabId).then(
+            (success: any) => {
+              sendResponse({ success });
+            }
+          );
           return true;
 
         case "deepseek.getChatTitle":
-          DeepSeekController.getChatTitle(message.tabId).then((title) => {
+          DeepSeekController.getChatTitle(message.tabId).then((title: any) => {
             sendResponse({ title });
           });
           return true;
 
         case "deepseek.isGenerating":
-          DeepSeekController.isGenerating(message.tabId).then((generating) => {
-            sendResponse({ generating });
-          });
+          DeepSeekController.isGenerating(message.tabId).then(
+            (generating: any) => {
+              sendResponse({ generating });
+            }
+          );
           return true;
 
         case "deepseek.getCurrentInput":
-          DeepSeekController.getCurrentInput(message.tabId).then((input) => {
-            sendResponse({ input });
-          });
+          DeepSeekController.getCurrentInput(message.tabId).then(
+            (input: any) => {
+              sendResponse({ input });
+            }
+          );
           return true;
 
         default:

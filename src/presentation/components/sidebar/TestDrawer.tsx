@@ -105,7 +105,9 @@ const TestDrawer: React.FC<TestDrawerProps> = ({ isOpen, onClose }) => {
       const requestId = `test-${Date.now()}`;
       const tabId = parseInt(selectedTabId);
 
-      // Send prompt
+      const storageKey = `testResponse_${tabId}`;
+      await chrome.storage.local.remove([storageKey]);
+
       const result = await chrome.runtime.sendMessage({
         action: "deepseek.sendPrompt",
         tabId,
@@ -113,58 +115,44 @@ const TestDrawer: React.FC<TestDrawerProps> = ({ isOpen, onClose }) => {
         requestId,
       });
 
-      // ✅ Kiểm tra kỹ result trước khi truy cập property
       if (!result || !result.success) {
         setError("Failed to send prompt to DeepSeek");
         setIsSending(false);
         return;
       }
 
-      // Poll for response
-      let attempts = 0;
-      const maxAttempts = 180; // 3 minutes
+      const storageListener = (
+        changes: { [key: string]: chrome.storage.StorageChange },
+        areaName: string
+      ) => {
+        if (areaName !== "local") return;
 
-      const pollResponse = async () => {
-        attempts++;
+        if (changes[storageKey]) {
+          const responseData = changes[storageKey].newValue;
 
-        if (attempts > maxAttempts) {
-          setError("Timeout waiting for response");
-          setIsSending(false);
-          return;
-        }
+          if (responseData && responseData.requestId === requestId) {
+            chrome.storage.onChanged.removeListener(storageListener);
 
-        // Check if still generating
-        const generatingResult = await chrome.runtime.sendMessage({
-          action: "deepseek.isGenerating",
-          tabId,
-        });
-
-        if (generatingResult.generating && attempts < 3) {
-          setTimeout(pollResponse, 1000);
-          return;
-        }
-
-        if (!generatingResult.generating && attempts >= 3) {
-          // AI finished, get response
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-
-          const responseResult = await chrome.runtime.sendMessage({
-            action: "deepseek.getLatestResponse",
-            tabId,
-          });
-
-          if (responseResult.response) {
-            setResponse(responseResult.response);
-            setIsSending(false);
-          } else {
-            setTimeout(pollResponse, 1000);
+            if (responseData.response) {
+              setResponse(responseData.response);
+              setIsSending(false);
+            } else if (responseData.error) {
+              setError(responseData.error);
+              setIsSending(false);
+            }
           }
-        } else {
-          setTimeout(pollResponse, 1000);
         }
       };
 
-      setTimeout(pollResponse, 3000);
+      chrome.storage.onChanged.addListener(storageListener);
+
+      setTimeout(() => {
+        chrome.storage.onChanged.removeListener(storageListener);
+        if (isSending) {
+          setError("Timeout waiting for response");
+          setIsSending(false);
+        }
+      }, 180000);
     } catch (error) {
       console.error("[TestDrawer] Send failed:", error);
       setError(error instanceof Error ? error.message : "Failed to send");
