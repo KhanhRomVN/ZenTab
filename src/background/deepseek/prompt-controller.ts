@@ -4,13 +4,67 @@ import { StateController } from "./state-controller";
 import { ChatController } from "./chat-controller";
 import { DEFAULT_CONFIG, DeepSeekConfig } from "./types";
 import { wrapPromptWithAPIFormat } from "./prompt-template";
+import { TabMonitor } from "../utils/tab-monitor";
 
 export class PromptController {
   private static activePollingTasks: Map<number, string> = new Map();
   private static config: DeepSeekConfig = DEFAULT_CONFIG;
+  private static tabMonitor = TabMonitor.getInstance();
 
   /**
-   * Gửi prompt tới DeepSeek
+   * Validate tab trước khi gửi prompt
+   */
+  private static async validateTab(
+    tabId: number
+  ): Promise<{ isValid: boolean; error?: string }> {
+    try {
+      const browserAPI = getBrowserAPI();
+
+      // Kiểm tra tab có tồn tại không
+      const tab = await new Promise<chrome.tabs.Tab>((resolve, reject) => {
+        browserAPI.tabs.get(tabId, (result: chrome.tabs.Tab) => {
+          if (browserAPI.runtime.lastError) {
+            reject(new Error(`Invalid tab ID: ${tabId}`));
+            return;
+          }
+          if (!result) {
+            reject(new Error(`Tab not found: ${tabId}`));
+            return;
+          }
+          resolve(result);
+        });
+      });
+
+      // Kiểm tra URL có phải DeepSeek không
+      if (!tab.url?.startsWith("https://chat.deepseek.com")) {
+        return {
+          isValid: false,
+          error: `Tab is not DeepSeek page: ${tab.url}`,
+        };
+      }
+
+      // Kiểm tra tab có thể nhận request không
+      if (!this.tabMonitor.canAcceptRequest(tabId)) {
+        return {
+          isValid: false,
+          error: `Tab ${tabId} is not ready for new request (cooling down)`,
+        };
+      }
+
+      return { isValid: true };
+    } catch (error) {
+      return {
+        isValid: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : `Unknown error validating tab ${tabId}`,
+      };
+    }
+  }
+
+  /**
+   * Gửi prompt tới DeepSeek với validation mạnh mẽ
    */
   static async sendPrompt(
     tabId: number,
@@ -18,37 +72,78 @@ export class PromptController {
     requestId: string
   ): Promise<boolean> {
     try {
-      const browserAPI = getBrowserAPI();
+      // 🔧 CRITICAL FIX: Enhanced tab validation
+      console.log(
+        `[PromptController] 🔍 Validating tab ${tabId} for request ${requestId}`
+      );
 
-      let tabExists = false;
-      try {
-        const tab = await new Promise<chrome.tabs.Tab>((resolve, reject) => {
-          browserAPI.tabs.get(tabId, (result: chrome.tabs.Tab) => {
-            if (browserAPI.runtime.lastError) {
-              reject(browserAPI.runtime.lastError);
-              return;
-            }
-            resolve(result);
+      const validation = await this.validateTab(tabId);
+      if (!validation.isValid) {
+        console.error(
+          `[PromptController] ❌ Tab validation failed: ${validation.error}`
+        );
+
+        // 🔧 NEW: Gửi error message về Backend ngay lập tức
+        const browserAPI = getBrowserAPI();
+        try {
+          // Tìm connectionId từ wsMessages
+          const messagesResult = await new Promise<any>((resolve, reject) => {
+            browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+              if (browserAPI.runtime.lastError) {
+                reject(browserAPI.runtime.lastError);
+                return;
+              }
+              resolve(data || {});
+            });
           });
-        });
 
-        tabExists = !!tab && tab.id === tabId;
+          const wsMessages = messagesResult?.wsMessages || {};
+          let targetConnectionId: string | null = null;
 
-        if (!tabExists) {
-          console.error("[PromptController] ❌ Tab not found:", tabId);
-          return false;
-        }
+          for (const [connId, msgArray] of Object.entries(wsMessages)) {
+            const msgs = msgArray as Array<{ timestamp: number; data: any }>;
+            const matchingMsg = msgs.find(
+              (msg) => msg.data?.requestId === requestId
+            );
+            if (matchingMsg) {
+              targetConnectionId = connId;
+              break;
+            }
+          }
 
-        if (!tab.url?.startsWith("https://chat.deepseek.com")) {
+          if (targetConnectionId) {
+            await browserAPI.storage.local.set({
+              wsOutgoingMessage: {
+                connectionId: targetConnectionId,
+                data: {
+                  type: "promptResponse",
+                  requestId: requestId,
+                  tabId: tabId,
+                  success: false,
+                  error: validation.error || "Tab validation failed",
+                  errorType: "VALIDATION_FAILED",
+                },
+                timestamp: Date.now(),
+              },
+            });
+            console.log(
+              `[PromptController] 📤 Sent validation error to Backend`
+            );
+          }
+        } catch (notifyError) {
           console.error(
-            "[PromptController] ❌ Tab is not DeepSeek page:",
-            tab.url
+            `[PromptController] Failed to notify Backend:`,
+            notifyError
           );
-          return false;
         }
-      } catch (tabError) {
+
         return false;
       }
+
+      // Đánh dấu tab đang bận
+      this.tabMonitor.markTabBusy(tabId);
+
+      const browserAPI = getBrowserAPI();
 
       const newChatClicked = await ChatController.clickNewChatButton(tabId);
 
@@ -119,6 +214,7 @@ export class PromptController {
       }
 
       if (!result || !result.success) {
+        this.tabMonitor.markTabFree(tabId);
         return false;
       }
 
@@ -210,6 +306,7 @@ export class PromptController {
       }
 
       if (!clickSuccess) {
+        this.tabMonitor.markTabFree(tabId);
         return false;
       }
 
@@ -219,6 +316,8 @@ export class PromptController {
 
       return true;
     } catch (error) {
+      this.tabMonitor.markTabFree(tabId);
+      console.error(`[PromptController] ❌ Exception in sendPrompt:`, error);
       return false;
     }
   }
@@ -228,8 +327,8 @@ export class PromptController {
    */
   private static async monitorButtonStateUntilComplete(
     tabId: number,
-    requestId: string,
-    clickTimestamp: number
+    _requestId: string, // Prefix với _ để đánh dấu intentionally unused
+    _clickTimestamp: number // Prefix với _ để đánh dấu intentionally unused
   ): Promise<void> {
     const maxChecks = 180;
     let checkCount = 0;
@@ -305,7 +404,7 @@ export class PromptController {
   }
 
   /**
-   * Polling để đợi AI trả lời xong
+   * Polling để đợi AI trả lời xong - CẬP NHẬT: đánh dấu tab free khi hoàn thành
    */
   private static async startResponsePolling(
     tabId: number,
@@ -333,6 +432,9 @@ export class PromptController {
           const response = await this.getLatestResponseDirectly(tabId);
 
           if (response) {
+            // Đánh dấu tab free khi nhận được response thành công
+            this.tabMonitor.markTabFree(tabId);
+
             if (isTestRequest) {
               await browserAPI.storage.local.set({
                 [`testResponse_${tabId}`]: {
@@ -379,13 +481,24 @@ export class PromptController {
                 }
               }
             } catch (storageError) {
-              // Lỗi đọc storage
+              console.error(
+                "[PromptController] ❌ Failed to find target connection:",
+                storageError
+              );
             }
 
             if (!targetConnectionId) {
+              console.error(
+                "[PromptController] ❌ No target connection found for requestId:",
+                capturedRequestId
+              );
               this.activePollingTasks.delete(tabId);
               return;
             }
+
+            console.log(
+              `[PromptController] ✅ Sending response back via connection: ${targetConnectionId}`
+            );
 
             const messagePayload = {
               connectionId: targetConnectionId,
@@ -403,8 +516,20 @@ export class PromptController {
               wsOutgoingMessage: messagePayload,
             });
 
+            console.log(
+              `[PromptController] 📤 Response sent successfully for requestId: ${capturedRequestId}`
+            );
+
             this.activePollingTasks.delete(tabId);
           } else {
+            console.error(
+              "[PromptController] ❌ Failed to fetch response from DeepSeek for requestId:",
+              capturedRequestId
+            );
+
+            // Đánh dấu tab free ngay cả khi không có response
+            this.tabMonitor.markTabFree(tabId);
+
             if (isTestRequest) {
               await browserAPI.storage.local.set({
                 [`testResponse_${tabId}`]: {
@@ -419,9 +544,57 @@ export class PromptController {
               return;
             }
 
+            let targetConnectionId: string | null = null;
+
+            try {
+              const messagesResult = await new Promise<any>(
+                (resolve, reject) => {
+                  browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+                    if (browserAPI.runtime.lastError) {
+                      reject(browserAPI.runtime.lastError);
+                      return;
+                    }
+                    resolve(data || {});
+                  });
+                }
+              );
+
+              const wsMessages = messagesResult?.wsMessages || {};
+
+              for (const [connId, msgArray] of Object.entries(wsMessages)) {
+                const msgs = msgArray as Array<{
+                  timestamp: number;
+                  data: any;
+                }>;
+
+                const matchingMsg = msgs.find(
+                  (msg) => msg.data?.requestId === capturedRequestId
+                );
+
+                if (matchingMsg) {
+                  targetConnectionId = connId;
+                  break;
+                }
+              }
+            } catch (storageError) {
+              console.error(
+                "[PromptController] ❌ Failed to find target connection for error response:",
+                storageError
+              );
+            }
+
+            if (!targetConnectionId) {
+              console.error(
+                "[PromptController] ❌ No target connection found for error response, requestId:",
+                capturedRequestId
+              );
+              this.activePollingTasks.delete(tabId);
+              return;
+            }
+
             await browserAPI.storage.local.set({
               wsOutgoingMessage: {
-                connectionId: "primary",
+                connectionId: targetConnectionId,
                 data: {
                   type: "promptResponse",
                   requestId: requestId,
@@ -432,6 +605,8 @@ export class PromptController {
                 timestamp: Date.now(),
               },
             });
+
+            this.activePollingTasks.delete(tabId);
           }
 
           return;
@@ -441,7 +616,13 @@ export class PromptController {
           const nextPollDelay = this.config.pollInterval;
           setTimeout(poll, nextPollDelay);
         } else {
+          console.error(
+            "[PromptController] ⏱️ Timeout waiting for response, requestId:",
+            capturedRequestId
+          );
           this.activePollingTasks.delete(tabId);
+          // Đánh dấu tab free khi timeout
+          this.tabMonitor.markTabFree(tabId);
 
           if (isTestRequest) {
             await browserAPI.storage.local.set({
@@ -455,9 +636,54 @@ export class PromptController {
             return;
           }
 
+          let targetConnectionId: string | null = null;
+
+          try {
+            const messagesResult = await new Promise<any>((resolve, reject) => {
+              browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+                if (browserAPI.runtime.lastError) {
+                  reject(browserAPI.runtime.lastError);
+                  return;
+                }
+                resolve(data || {});
+              });
+            });
+
+            const wsMessages = messagesResult?.wsMessages || {};
+
+            for (const [connId, msgArray] of Object.entries(wsMessages)) {
+              const msgs = msgArray as Array<{
+                timestamp: number;
+                data: any;
+              }>;
+
+              const matchingMsg = msgs.find(
+                (msg) => msg.data?.requestId === capturedRequestId
+              );
+
+              if (matchingMsg) {
+                targetConnectionId = connId;
+                break;
+              }
+            }
+          } catch (storageError) {
+            console.error(
+              "[PromptController] ❌ Failed to find target connection for timeout response:",
+              storageError
+            );
+          }
+
+          if (!targetConnectionId) {
+            console.error(
+              "[PromptController] ❌ No target connection found for timeout response, requestId:",
+              capturedRequestId
+            );
+            return;
+          }
+
           await browserAPI.storage.local.set({
             wsOutgoingMessage: {
-              connectionId: "primary",
+              connectionId: targetConnectionId,
               data: {
                 type: "promptResponse",
                 requestId: requestId,
@@ -471,6 +697,15 @@ export class PromptController {
           });
         }
       } catch (error) {
+        console.error(
+          "[PromptController] ❌ Exception in polling loop:",
+          error
+        );
+
+        this.activePollingTasks.delete(tabId);
+        // Đánh dấu tab free khi có lỗi
+        this.tabMonitor.markTabFree(tabId);
+
         if (isTestRequest) {
           await browserAPI.storage.local.set({
             [`testResponse_${tabId}`]: {
@@ -483,13 +718,57 @@ export class PromptController {
               timestamp: Date.now(),
             },
           });
-          this.activePollingTasks.delete(tabId);
+          return;
+        }
+
+        let targetConnectionId: string | null = null;
+
+        try {
+          const messagesResult = await new Promise<any>((resolve, reject) => {
+            browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+              if (browserAPI.runtime.lastError) {
+                reject(browserAPI.runtime.lastError);
+                return;
+              }
+              resolve(data || {});
+            });
+          });
+
+          const wsMessages = messagesResult?.wsMessages || {};
+
+          for (const [connId, msgArray] of Object.entries(wsMessages)) {
+            const msgs = msgArray as Array<{
+              timestamp: number;
+              data: any;
+            }>;
+
+            const matchingMsg = msgs.find(
+              (msg) => msg.data?.requestId === capturedRequestId
+            );
+
+            if (matchingMsg) {
+              targetConnectionId = connId;
+              break;
+            }
+          }
+        } catch (storageError) {
+          console.error(
+            "[PromptController] ❌ Failed to find target connection for exception response:",
+            storageError
+          );
+        }
+
+        if (!targetConnectionId) {
+          console.error(
+            "[PromptController] ❌ No target connection found for exception response, requestId:",
+            capturedRequestId
+          );
           return;
         }
 
         await browserAPI.storage.local.set({
           wsOutgoingMessage: {
-            connectionId: "primary",
+            connectionId: targetConnectionId,
             data: {
               type: "promptResponse",
               requestId: requestId,

@@ -40,6 +40,13 @@ declare const browser: typeof chrome & any;
     zenTabManager.handleTabRemoved(tabId);
   });
 
+  // 🆕 Track processed request IDs để tránh xử lý lại
+  const processedRequests = new Set<string>();
+
+  // 🆕 Rate limiting để tránh spam
+  const requestRateLimiter = new Map<string, number>(); // requestId -> timestamp
+  const MAX_REQUESTS_PER_MINUTE = 30;
+
   // 🆕 Listen for WebSocket messages from storage
   browserAPI.storage.onChanged.addListener((changes: any, areaName: string) => {
     if (areaName !== "local") return;
@@ -47,6 +54,26 @@ declare const browser: typeof chrome & any;
     // Process incoming WebSocket messages
     if (changes.wsMessages) {
       const messages = changes.wsMessages.newValue || {};
+
+      // 🆕 Rate limiting check
+      const now = Date.now();
+      const minuteAgo = now - 60000;
+
+      // Clean up old entries
+      for (const [reqId, timestamp] of requestRateLimiter.entries()) {
+        if (timestamp < minuteAgo) {
+          requestRateLimiter.delete(reqId);
+        }
+      }
+
+      // Check rate limit
+      if (requestRateLimiter.size >= MAX_REQUESTS_PER_MINUTE) {
+        console.warn(
+          "[ServiceWorker] ⚠️ Rate limit exceeded, ignoring new requests"
+        );
+        return;
+      }
+
       // Process each connection's messages
       for (const [connectionId, msgArray] of Object.entries(messages)) {
         const msgs = msgArray as Array<{ timestamp: number; data: any }>;
@@ -56,16 +83,48 @@ declare const browser: typeof chrome & any;
           // Handle sendPrompt type
           if (latestMsg.data.type === "sendPrompt") {
             const { tabId, prompt, requestId } = latestMsg.data;
+
+            // 🆕 Apply rate limiting
+            requestRateLimiter.set(requestId, now);
+
+            // 🆕 Kiểm tra xem đã xử lý request này chưa
+            if (processedRequests.has(requestId)) {
+              console.log(
+                `[ServiceWorker] ⏭️ Request ${requestId} already processed, skipping`
+              );
+              continue;
+            }
+
+            // 🆕 Đánh dấu request đã được xử lý
+            processedRequests.add(requestId);
+
+            // 🆕 Tự động xóa khỏi Set sau 3 phút để tránh memory leak
+            setTimeout(() => {
+              processedRequests.delete(requestId);
+              requestRateLimiter.delete(requestId);
+            }, 180000);
+
+            console.log(
+              `[ServiceWorker] 📥 Processing request ${requestId} for tab ${tabId}`
+            );
+
             // Send prompt to DeepSeek tab
+            console.log(
+              `[ServiceWorker] 📤 Calling DeepSeekController.sendPrompt for tab ${tabId}, request ${requestId}`
+            );
+
             DeepSeekController.sendPrompt(tabId, prompt, requestId)
               .then((success: boolean) => {
                 if (success) {
+                  console.log(
+                    `[ServiceWorker] ✅ Successfully sent prompt for request ${requestId}`
+                  );
                 } else {
                   console.error(
-                    "[ServiceWorker] ❌ Failed to send prompt to DeepSeek"
+                    `[ServiceWorker] ❌ Failed to send prompt to DeepSeek for request ${requestId}`
                   );
 
-                  // Send error back to ZenChat
+                  // 🔧 CRITICAL FIX: Send detailed error back to Backend
                   browserAPI.storage.local.set({
                     wsOutgoingMessage: {
                       connectionId: connectionId,
@@ -75,6 +134,12 @@ declare const browser: typeof chrome & any;
                         tabId: tabId,
                         success: false,
                         error: "Failed to send prompt to DeepSeek tab",
+                        errorType: "SEND_FAILED",
+                        details: {
+                          tabId: tabId,
+                          promptLength: prompt.length,
+                          timestamp: Date.now(),
+                        },
                       },
                       timestamp: Date.now(),
                     },
@@ -83,7 +148,7 @@ declare const browser: typeof chrome & any;
               })
               .catch((error: unknown) => {
                 console.error(
-                  "[ServiceWorker] ❌ Exception while sending prompt:",
+                  `[ServiceWorker] ❌ Exception while sending prompt for request ${requestId}:`,
                   error
                 );
                 console.error("[ServiceWorker] Error details:", {
@@ -238,4 +303,13 @@ declare const browser: typeof chrome & any;
 
   // Initialize on startup
   containerManager.initializeContainers();
+
+  // 🆕 Log system status periodically
+  setInterval(() => {
+    const rateLimitStatus = `Rate limiting: ${requestRateLimiter.size}/${MAX_REQUESTS_PER_MINUTE} requests in last minute`;
+    const processedStatus = `Processed requests: ${processedRequests.size}`;
+    console.log(
+      `[ServiceWorker] 📊 System Status - ${rateLimitStatus}, ${processedStatus}`
+    );
+  }, 30000); // Log every 30 seconds
 })();
