@@ -8,13 +8,44 @@ You must respond ONLY with valid JSON in this exact format. Do not include any t
 `.trim();
 
 /**
+ * Parse message content - handle both string and array formats
+ */
+function parseMessageContent(content: string | any[]): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    const textParts: string[] = [];
+
+    for (const item of content) {
+      if (typeof item === "object" && item !== null) {
+        if (item.type === "text" && item.text) {
+          textParts.push(item.text);
+        } else if (item.type === "image") {
+          textParts.push("[IMAGE CONTENT - Not supported in prompt]");
+        }
+      }
+    }
+
+    return textParts.join("\n\n");
+  }
+
+  // Fallback: convert to string
+  return String(content);
+}
+
+/**
  * Wrap user prompt với system instruction
  */
-export function wrapPromptWithAPIFormat(userPrompt: string): string {
+export function wrapPromptWithAPIFormat(userPrompt: string | any[]): string {
+  // 🆕 Parse prompt content (handle array format from Cline)
+  const parsedPrompt = parseMessageContent(userPrompt);
+
   return `${DEEPSEEK_API_SYSTEM_PROMPT}
 
 USER REQUEST:
-${userPrompt}
+${parsedPrompt}
 
 CRITICAL INSTRUCTION:
 Return ONLY a valid JSON object in this EXACT format. No additional text before or after the JSON.
@@ -37,9 +68,9 @@ Required JSON structure:
     }
   ],
   "usage": {
-    "prompt_tokens": ${estimateTokens(userPrompt)},
+    "prompt_tokens": ${estimateTokens(parsedPrompt)},
     "completion_tokens": 100,
-    "total_tokens": ${estimateTokens(userPrompt) + 100}
+    "total_tokens": ${estimateTokens(parsedPrompt) + 100}
   },
   "system_fingerprint": "fp_${generateRandomId().substring(0, 8)}"
 }
