@@ -1,5 +1,5 @@
 export class MessageHandler {
-  constructor(private containerManager: any, private zenTabManager: any) {}
+  constructor(private containerManager: any) {}
 
   async handleMessage(
     message: any,
@@ -9,32 +9,6 @@ export class MessageHandler {
       let result: any;
 
       switch (message.action) {
-        case "selectTab":
-          await this.zenTabManager.selectTab(
-            message.containerId,
-            message.tabId
-          );
-          result = { success: true };
-          break;
-
-        case "unselectTab":
-          await this.zenTabManager.unselectTab(message.containerId);
-          result = { success: true };
-          break;
-
-        case "getSelectedTab":
-          result = this.zenTabManager.getSelectedTab(message.containerId);
-          break;
-
-        case "getAllSelectedTabs":
-          result = Object.fromEntries(this.zenTabManager.getAllSelectedTabs());
-          break;
-
-        case "openSelectedTab":
-          await this.zenTabManager.openSelectedTab(message.containerId);
-          result = { success: true };
-          break;
-
         case "containersUpdated":
           // Broadcast to all connected ports (sidebar)
           result = { success: true, broadcast: true };

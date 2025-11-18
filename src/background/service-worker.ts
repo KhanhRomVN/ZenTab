@@ -1,5 +1,4 @@
 import { ContainerManager } from "./container-manager";
-import { ZenTabManager } from "./zentab-manager";
 import { MessageHandler } from "./message-handler";
 import { WSManagerNew } from "./websocket/ws-manager-new";
 import { TabBroadcaster } from "./websocket/tab-broadcaster";
@@ -16,36 +15,61 @@ declare const browser: typeof chrome & any;
     throw new Error("No browser API available");
   })();
 
+  // 🆕 THÊM: Cleanup old connections trên startup
+  const cleanupOldConnections = async () => {
+    try {
+      const result = await new Promise<any>((resolve) => {
+        browserAPI.storage.local.get(["wsConnections"], (data: any) => {
+          resolve(data || {});
+        });
+      });
+
+      const connections = result.wsConnections || [];
+
+      // 🆕 CHỈ giữ lại kết nối port 1500
+      const validConnections = connections.filter(
+        (conn: any) => conn.port === 1500
+      );
+
+      if (validConnections.length !== connections.length) {
+        await new Promise<void>((resolve) => {
+          browserAPI.storage.local.set(
+            { wsConnections: validConnections },
+            () => {
+              resolve();
+            }
+          );
+        });
+      }
+    } catch (error) {
+      console.error(
+        "[ServiceWorker] Failed to cleanup old connections:",
+        error
+      );
+    }
+  };
+
   // Initialize WebSocket Manager
   const wsManager = new WSManagerNew();
 
-  // Initialize Tab Broadcaster
-  new TabBroadcaster(wsManager);
+  cleanupOldConnections().then(() => {
+    new TabBroadcaster(wsManager);
+  });
 
   // Initialize managers
   const containerManager = new ContainerManager(browserAPI);
-  const zenTabManager = new ZenTabManager(browserAPI, containerManager);
-  const messageHandler = new MessageHandler(containerManager, zenTabManager);
+  const messageHandler = new MessageHandler(containerManager);
 
   // Setup event listeners
-  browserAPI.contextualIdentities.onCreated.addListener(() => {
-    containerManager.initializeContainers();
-  });
+  if (browserAPI.contextualIdentities) {
+    browserAPI.contextualIdentities.onCreated.addListener(() => {
+      containerManager.initializeContainers();
+    });
 
-  browserAPI.contextualIdentities.onRemoved.addListener(() => {
-    containerManager.initializeContainers();
-  });
-
-  browserAPI.tabs.onRemoved.addListener((tabId: number) => {
-    zenTabManager.handleTabRemoved(tabId);
-  });
-
-  // 🆕 Track processed request IDs để tránh xử lý lại
-  const processedRequests = new Set<string>();
-
-  // 🆕 Rate limiting để tránh spam
-  const requestRateLimiter = new Map<string, number>(); // requestId -> timestamp
-  const MAX_REQUESTS_PER_MINUTE = 30;
+    browserAPI.contextualIdentities.onRemoved.addListener(() => {
+      containerManager.initializeContainers();
+    });
+  }
 
   // 🆕 Listen for WebSocket messages from storage
   browserAPI.storage.onChanged.addListener((changes: any, areaName: string) => {
@@ -54,128 +78,218 @@ declare const browser: typeof chrome & any;
     // Process incoming WebSocket messages
     if (changes.wsMessages) {
       const messages = changes.wsMessages.newValue || {};
-
-      // 🆕 Rate limiting check
-      const now = Date.now();
-      const minuteAgo = now - 60000;
-
-      // Clean up old entries
-      for (const [reqId, timestamp] of requestRateLimiter.entries()) {
-        if (timestamp < minuteAgo) {
-          requestRateLimiter.delete(reqId);
-        }
-      }
-
-      // Check rate limit
-      if (requestRateLimiter.size >= MAX_REQUESTS_PER_MINUTE) {
-        console.warn(
-          "[ServiceWorker] ⚠️ Rate limit exceeded, ignoring new requests"
-        );
+      if (Object.keys(messages).length === 0) {
         return;
       }
 
       // Process each connection's messages
       for (const [connectionId, msgArray] of Object.entries(messages)) {
         const msgs = msgArray as Array<{ timestamp: number; data: any }>;
+
+        // 🔧 TĂNG timeout từ 30s lên 120s
+        const recentMsgs = msgs.filter((msg) => {
+          const age = Date.now() - msg.timestamp;
+          return age < 180000; // 180 seconds (3 minutes)
+        });
+
+        if (recentMsgs.length === 0) {
+          continue;
+        }
+
         // Get latest message
-        if (msgs.length > 0) {
-          const latestMsg = msgs[msgs.length - 1];
-          // Handle sendPrompt type
-          if (latestMsg.data.type === "sendPrompt") {
-            const { tabId, prompt, requestId } = latestMsg.data;
+        const latestMsg = recentMsgs[recentMsgs.length - 1];
 
-            // 🆕 Apply rate limiting
-            requestRateLimiter.set(requestId, now);
+        // 🆕 THÊM: Additional validation for sendPrompt messages
+        if (latestMsg.data.type === "sendPrompt") {
+          const { tabId, prompt, requestId } = latestMsg.data;
 
-            // 🆕 Kiểm tra xem đã xử lý request này chưa
-            if (processedRequests.has(requestId)) {
-              console.log(
-                `[ServiceWorker] ⏭️ Request ${requestId} already processed, skipping`
-              );
-              continue;
-            }
-
-            // 🆕 Đánh dấu request đã được xử lý
-            processedRequests.add(requestId);
-
-            // 🆕 Tự động xóa khỏi Set sau 3 phút để tránh memory leak
-            setTimeout(() => {
-              processedRequests.delete(requestId);
-              requestRateLimiter.delete(requestId);
-            }, 180000);
-
-            console.log(
-              `[ServiceWorker] 📥 Processing request ${requestId} for tab ${tabId}`
+          // 🆕 THÊM: Validate required fields
+          if (!tabId || !prompt || !requestId) {
+            console.error(
+              `[ServiceWorker] ❌ Invalid sendPrompt message: missing required fields`,
+              { tabId, promptLength: prompt?.length, requestId }
             );
+            continue;
+          }
 
-            // Send prompt to DeepSeek tab
-            console.log(
-              `[ServiceWorker] 📤 Calling DeepSeekController.sendPrompt for tab ${tabId}, request ${requestId}`
-            );
+          // 🔧 IMPROVED: Use async/await for duplicate detection
+          const requestKey = `processed_${requestId}`;
 
-            DeepSeekController.sendPrompt(tabId, prompt, requestId)
-              .then((success: boolean) => {
-                if (success) {
-                  console.log(
-                    `[ServiceWorker] ✅ Successfully sent prompt for request ${requestId}`
-                  );
-                } else {
-                  console.error(
-                    `[ServiceWorker] ❌ Failed to send prompt to DeepSeek for request ${requestId}`
-                  );
-
-                  // 🔧 CRITICAL FIX: Send detailed error back to Backend
-                  browserAPI.storage.local.set({
-                    wsOutgoingMessage: {
-                      connectionId: connectionId,
-                      data: {
-                        type: "promptResponse",
-                        requestId: requestId,
-                        tabId: tabId,
-                        success: false,
-                        error: "Failed to send prompt to DeepSeek tab",
-                        errorType: "SEND_FAILED",
-                        details: {
-                          tabId: tabId,
-                          promptLength: prompt.length,
-                          timestamp: Date.now(),
-                        },
-                      },
-                      timestamp: Date.now(),
-                    },
-                  });
-                }
-              })
-              .catch((error: unknown) => {
-                console.error(
-                  `[ServiceWorker] ❌ Exception while sending prompt for request ${requestId}:`,
-                  error
-                );
-                console.error("[ServiceWorker] Error details:", {
-                  name: error instanceof Error ? error.name : "unknown",
-                  message:
-                    error instanceof Error ? error.message : String(error),
-                  stack: error instanceof Error ? error.stack : undefined,
+          // Wrap in async IIFE to use await
+          (async () => {
+            try {
+              const result = await new Promise<any>((resolve) => {
+                browserAPI.storage.local.get([requestKey], (data: any) => {
+                  resolve(data || {});
                 });
+              });
 
-                // Send error back to ZenChat
-                browserAPI.storage.local.set({
+              if (result[requestKey]) {
+                return;
+              }
+
+              // Mark as processed
+              await new Promise<void>((resolve) => {
+                browserAPI.storage.local.set(
+                  { [requestKey]: Date.now() },
+                  () => {
+                    resolve();
+                  }
+                );
+              });
+
+              DeepSeekController.sendPrompt(tabId, prompt, requestId)
+                .then((success: boolean) => {
+                  if (success) {
+                    setTimeout(() => {
+                      browserAPI.storage.local.remove([requestKey]);
+                    }, 120000);
+                  } else {
+                    console.error(
+                      `[ServiceWorker] ❌ Failed to send prompt to DeepSeek for request ${requestId}`
+                    );
+
+                    // 🔧 CRITICAL FIX: Send detailed error back to Backend
+                    browserAPI.storage.local.set({
+                      wsOutgoingMessage: {
+                        connectionId: connectionId,
+                        data: {
+                          type: "promptResponse",
+                          requestId: requestId,
+                          tabId: tabId,
+                          success: false,
+                          error: "Failed to send prompt to DeepSeek tab",
+                          errorType: "SEND_FAILED",
+                          details: {
+                            tabId: tabId,
+                            promptLength: prompt.length,
+                            timestamp: Date.now(),
+                          },
+                        },
+                        timestamp: Date.now(),
+                      },
+                    });
+
+                    // 🆕 THÊM: Cleanup processed marker on failure
+                    browserAPI.storage.local.remove([requestKey]);
+                  }
+                })
+                .catch((error: unknown) => {
+                  console.error(
+                    `[ServiceWorker] ❌ Exception while sending prompt for request ${requestId}:`,
+                    error
+                  );
+                  // 🆕 THÊM: Cleanup processed marker on exception
+                  browserAPI.storage.local.remove([requestKey]);
+                });
+            } catch (error) {
+              console.error(
+                `[ServiceWorker] ❌ Exception in async IIFE for request ${requestId}:`,
+                error
+              );
+              browserAPI.storage.local.remove([requestKey]);
+            }
+          })();
+        }
+      }
+    }
+
+    if (changes.wsIncomingRequest) {
+      const request = changes.wsIncomingRequest.newValue;
+
+      if (!request) {
+        return;
+      }
+
+      if (request.type === "getAvailableTabs") {
+        (async () => {
+          try {
+            const { requestId, connectionId } = request;
+
+            const tabs = await new Promise<chrome.tabs.Tab[]>(
+              (resolve, reject) => {
+                browserAPI.tabs.query(
+                  { url: "https://chat.deepseek.com/*" },
+                  (result: chrome.tabs.Tab[]) => {
+                    if (browserAPI.runtime.lastError) {
+                      console.error(
+                        `[ServiceWorker] ❌ Query error:`,
+                        browserAPI.runtime.lastError
+                      );
+                      reject(browserAPI.runtime.lastError);
+                      return;
+                    }
+                    resolve(result || []);
+                  }
+                );
+              }
+            );
+
+            const availableTabs = tabs.map((tab) => ({
+              tabId: tab.id,
+              containerName: `Tab ${tab.id}`,
+              title: tab.title || "Untitled",
+              url: tab.url,
+              status: "free",
+              canAccept: true,
+            }));
+
+            // Send response via wsOutgoingMessage
+            await new Promise<void>((resolve, reject) => {
+              browserAPI.storage.local.set(
+                {
                   wsOutgoingMessage: {
                     connectionId: connectionId,
                     data: {
-                      type: "promptResponse",
+                      type: "availableTabs",
                       requestId: requestId,
-                      tabId: tabId,
-                      success: false,
-                      error:
-                        error instanceof Error ? error.message : String(error),
+                      tabs: availableTabs,
+                      timestamp: Date.now(),
                     },
                     timestamp: Date.now(),
                   },
-                });
-              });
+                },
+                () => {
+                  if (browserAPI.runtime.lastError) {
+                    console.error(
+                      `[ServiceWorker] ❌ Storage error:`,
+                      browserAPI.runtime.lastError
+                    );
+                    reject(browserAPI.runtime.lastError);
+                    return;
+                  }
+                  resolve();
+                }
+              );
+            });
+
+            // Clean up request
+            browserAPI.storage.local.remove(["wsIncomingRequest"]);
+          } catch (error) {
+            console.error(
+              `[ServiceWorker] ❌ Error processing getAvailableTabs:`,
+              error
+            );
+
+            // Send error response
+            browserAPI.storage.local.set({
+              wsOutgoingMessage: {
+                connectionId: request.connectionId,
+                data: {
+                  type: "availableTabs",
+                  requestId: request.requestId,
+                  success: false,
+                  error: error instanceof Error ? error.message : String(error),
+                  timestamp: Date.now(),
+                },
+                timestamp: Date.now(),
+              },
+            });
+
+            // Clean up request
+            browserAPI.storage.local.remove(["wsIncomingRequest"]);
           }
-        }
+        })();
       }
     }
   });
@@ -294,6 +408,9 @@ declare const browser: typeof chrome & any;
           );
           return true;
 
+        case "getAvailableTabs":
+          return true;
+
         default:
           messageHandler.handleMessage(message, sendResponse);
           return true;
@@ -303,13 +420,4 @@ declare const browser: typeof chrome & any;
 
   // Initialize on startup
   containerManager.initializeContainers();
-
-  // 🆕 Log system status periodically
-  setInterval(() => {
-    const rateLimitStatus = `Rate limiting: ${requestRateLimiter.size}/${MAX_REQUESTS_PER_MINUTE} requests in last minute`;
-    const processedStatus = `Processed requests: ${processedRequests.size}`;
-    console.log(
-      `[ServiceWorker] 📊 System Status - ${rateLimitStatus}, ${processedStatus}`
-    );
-  }, 30000); // Log every 30 seconds
 })();

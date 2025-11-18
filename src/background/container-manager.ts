@@ -8,7 +8,10 @@ export class ContainerManager {
 
   public async initializeContainers(): Promise<void> {
     try {
-      if (this.browserAPI.contextualIdentities) {
+      if (
+        this.browserAPI.contextualIdentities &&
+        typeof this.browserAPI.contextualIdentities.query === "function"
+      ) {
         this.containers = await this.browserAPI.contextualIdentities.query({});
         await this.saveContainers();
 
@@ -26,12 +29,18 @@ export class ContainerManager {
         } catch (error) {
           // Ignore errors if no receivers
         }
+      } else {
+        console.warn(
+          "[ContainerManager] contextualIdentities API not available"
+        );
+        this.containers = [];
       }
     } catch (error) {
       console.error(
         "[ContainerManager] Failed to initialize containers:",
         error
       );
+      this.containers = [];
     }
   }
 

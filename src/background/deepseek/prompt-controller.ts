@@ -72,11 +72,6 @@ export class PromptController {
     requestId: string
   ): Promise<boolean> {
     try {
-      // 🔧 CRITICAL FIX: Enhanced tab validation
-      console.log(
-        `[PromptController] 🔍 Validating tab ${tabId} for request ${requestId}`
-      );
-
       const validation = await this.validateTab(tabId);
       if (!validation.isValid) {
         console.error(
@@ -142,8 +137,6 @@ export class PromptController {
 
       // Đánh dấu tab đang bận
       this.tabMonitor.markTabBusy(tabId);
-
-      const browserAPI = getBrowserAPI();
 
       const newChatClicked = await ChatController.clickNewChatButton(tabId);
 
@@ -327,10 +320,10 @@ export class PromptController {
    */
   private static async monitorButtonStateUntilComplete(
     tabId: number,
-    _requestId: string, // Prefix với _ để đánh dấu intentionally unused
-    _clickTimestamp: number // Prefix với _ để đánh dấu intentionally unused
+    _requestId: string,
+    _clickTimestamp: number
   ): Promise<void> {
-    const maxChecks = 180;
+    const maxChecks = 180; // 180 checks x 1s = 3 minutes max
     let checkCount = 0;
     let wasGenerating = false;
 
@@ -500,6 +493,7 @@ export class PromptController {
               `[PromptController] ✅ Sending response back via connection: ${targetConnectionId}`
             );
 
+            const currentTimestamp = Date.now();
             const messagePayload = {
               connectionId: targetConnectionId,
               data: {
@@ -508,9 +502,14 @@ export class PromptController {
                 tabId: tabId,
                 success: true,
                 response: response,
+                timestamp: currentTimestamp, // 🔧 FIX: Add timestamp to data object
               },
-              timestamp: Date.now(),
+              timestamp: currentTimestamp,
             };
+
+            console.log(
+              `[PromptController] 📤 Sending response with timestamp: ${currentTimestamp}`
+            );
 
             await browserAPI.storage.local.set({
               wsOutgoingMessage: messagePayload,

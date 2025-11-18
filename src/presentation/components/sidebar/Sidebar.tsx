@@ -1,16 +1,14 @@
 import React, { useState, useEffect } from "react";
 import ContainerCard from "./ContainerCard";
-import TabSelectionDrawer from "./TabSelectionDrawer";
 import WebSocketDrawer from "./WebSocketDrawer";
 import SettingDrawer from "./SettingDrawer";
 import TestDrawer from "./TestDrawer";
 import CustomButton from "../common/CustomButton";
-import { Settings, List } from "lucide-react";
+import { Settings } from "lucide-react";
 import { getBrowserAPI } from "@/shared/lib/browser-api";
 
 const Sidebar: React.FC = () => {
   const [containers, setContainers] = useState<any[]>([]);
-  const [showTabSelectionDrawer, setShowTabSelectionDrawer] = useState(false);
   const [showSettingDrawer, setShowSettingDrawer] = useState(false);
   const [showWebSocketDrawer, setShowWebSocketDrawer] = useState(false);
   const [showTestDrawer, setShowTestDrawer] = useState(false);
@@ -39,20 +37,6 @@ const Sidebar: React.FC = () => {
 
     chrome.runtime.onMessage.addListener(messageListener);
 
-    // Listen for storage changes (zenTabSelectedTabs)
-    const storageListener = (
-      changes: { [key: string]: chrome.storage.StorageChange },
-      areaName: string
-    ) => {
-      if (areaName !== "local") return;
-
-      if (changes.zenTabSelectedTabs) {
-        loadContainers();
-      }
-    };
-
-    chrome.storage.onChanged.addListener(storageListener);
-
     const tabListener = () => {
       loadActiveTabs();
     };
@@ -61,7 +45,6 @@ const Sidebar: React.FC = () => {
 
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
-      chrome.storage.onChanged.removeListener(storageListener);
       chrome.tabs.onCreated.removeListener(tabListener);
       chrome.tabs.onRemoved.removeListener(tabListener);
     };
@@ -99,47 +82,24 @@ const Sidebar: React.FC = () => {
     try {
       const browserAPI = getBrowserAPI();
 
-      if (
-        browserAPI.contextualIdentities &&
-        typeof browserAPI.contextualIdentities.query === "function"
-      ) {
-        // Đọc trực tiếp từ storage với proper error handling cho Firefox
-        let selectedTabs: Record<string, number> = {};
-        try {
-          const result = await new Promise<any>((resolve) => {
-            chrome.storage.local.get(["zenTabSelectedTabs"], (data) => {
-              resolve(data || {});
-            });
-          });
-          selectedTabs = result?.zenTabSelectedTabs || {};
-        } catch (storageError) {
-          console.warn(
-            "[Sidebar] Failed to read from storage, using empty object:",
-            storageError
-          );
-          selectedTabs = {};
-        }
+      // Lấy ALL DeepSeek tabs (không filter theo container)
+      const allTabs = await browserAPI.tabs.query({
+        url: "https://chat.deepseek.com/*",
+      });
+      const safeTabs = Array.isArray(allTabs) ? allTabs : [];
 
-        // Lấy tất cả containers
-        const allContainers = await browserAPI.contextualIdentities.query({});
-        const safeContainers = Array.isArray(allContainers)
-          ? allContainers
-          : [];
+      // Convert tabs to container-like objects for UI compatibility
+      const tabContainers = safeTabs.map((tab: any) => ({
+        cookieStoreId: `tab-${tab.id}`,
+        name: tab.title || "Untitled",
+        color: "blue", // Default color
+        iconUrl: tab.favIconUrl || null,
+        tabId: tab.id,
+      }));
 
-        // Filter: chỉ giữ container có cookieStoreId trong selectedTabs
-        const containersWithSelection = safeContainers.filter((container) => {
-          const hasSelection =
-            selectedTabs[container.cookieStoreId] !== undefined;
-          return hasSelection;
-        });
-
-        setContainers(containersWithSelection);
-      } else {
-        console.warn("Contextual identities not supported in this browser");
-        setContainers([]);
-      }
+      setContainers(tabContainers);
     } catch (error) {
-      console.error("Failed to load containers:", error);
+      console.error("[Sidebar] Failed to load tabs:", error);
       setContainers([]);
     }
   };
@@ -204,15 +164,6 @@ const Sidebar: React.FC = () => {
         <CustomButton
           variant="ghost"
           size="sm"
-          icon={List}
-          onClick={() => setShowTabSelectionDrawer(!showTabSelectionDrawer)}
-          aria-label="Select tabs"
-          className="!p-3 !text-lg"
-          children={undefined}
-        />
-        <CustomButton
-          variant="ghost"
-          size="sm"
           icon={Settings}
           onClick={() => setShowSettingDrawer(!showSettingDrawer)}
           aria-label="Open settings menu"
@@ -220,12 +171,6 @@ const Sidebar: React.FC = () => {
           children={undefined}
         />
       </div>
-
-      {/* Tab Selection Drawer */}
-      <TabSelectionDrawer
-        isOpen={showTabSelectionDrawer}
-        onClose={() => setShowTabSelectionDrawer(false)}
-      />
 
       {/* Setting Drawer */}
       <SettingDrawer

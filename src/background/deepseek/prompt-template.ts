@@ -94,7 +94,6 @@ export function parseAPIResponse(rawResponse: string): {
       // LAYER 2: Try regex to find JSON object
       const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        console.log("[parseAPIResponse] 🔧 Layer 2: Found JSON via regex");
         parsed = JSON.parse(jsonMatch[0]);
       } else {
         throw parseError;
@@ -172,7 +171,6 @@ export function parseAPIResponse(rawResponse: string): {
 
         // Try parse again
         const parsed = JSON.parse(repaired);
-        console.log("[parseAPIResponse] ✅ Layer 4: JSON repair successful!");
 
         const content = parsed.choices?.[0]?.message?.content;
         if (content) {
@@ -190,10 +188,6 @@ export function parseAPIResponse(rawResponse: string): {
     // FINAL FALLBACK: Return raw response as-is
     console.warn(
       "[parseAPIResponse] 🆘 Using final fallback: returning raw response"
-    );
-    console.log(
-      "[parseAPIResponse] 📋 Fallback content length:",
-      trimmed.length
     );
 
     return {

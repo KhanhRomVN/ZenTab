@@ -3,15 +3,7 @@
   "name": "ZenTab",
   "version": "1.0.0",
   "description": "Minimal container-based tab management with DeepSeek Chat",
-  "permissions": [
-    "tabs",
-    "storage",
-    "contextualIdentities",
-    "tabHide",
-    "cookies",
-    "<all_urls>",
-    "clipboardRead"
-  ],
+  "permissions": ["tabs", "storage", "<all_urls>", "clipboardRead"],
   "background": {
     "scripts": ["serviceWorker.js"],
     "persistent": true

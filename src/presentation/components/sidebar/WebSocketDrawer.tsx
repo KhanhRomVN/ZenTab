@@ -21,9 +21,8 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
 
   const initializeDefaultPorts = async () => {
     try {
-      const DEFAULT_PORTS = [
-        1501, 1502, 1503, 1504, 1505, 1506, 1507, 1508, 1509, 1510,
-      ];
+      // Single WebSocket port for all communication
+      const DEFAULT_PORTS = [1500];
 
       // Load existing connections
       const existingConns = await WSHelper.getAllConnections();
@@ -246,7 +245,7 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
         {/* Reload All Button */}
         <div className="p-4 border-b border-border-default">
           <h3 className="text-sm font-medium text-text-primary mb-3">
-            WebSocket Connections (Ports 1501-1510)
+            WebSocket Connection (Port 1500)
           </h3>
           <CustomButton
             variant="primary"

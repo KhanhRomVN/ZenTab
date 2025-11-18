@@ -86,10 +86,13 @@ export class WSConnection {
           this.retryStartTime = undefined;
           this.notifyStateChange();
 
-          chrome.storage.local.set({
-            wsConnectionEstablished: Date.now(),
-            triggerFocusedTabsBroadcast: Date.now(),
-          });
+          chrome.storage.local.set(
+            {
+              wsConnectionEstablished: Date.now(),
+              triggerFocusedTabsBroadcast: Date.now(),
+            },
+            () => {}
+          );
 
           resolve();
         };
@@ -166,20 +169,105 @@ export class WSConnection {
     try {
       const message = JSON.parse(data);
 
+      // 🔧 FIX: ALWAYS ensure message has timestamp for tracking
+      if (!message.timestamp) {
+        message.timestamp = Date.now();
+        console.warn(
+          `[WSConnection] ⚠️ Message missing timestamp, added: ${message.timestamp}`
+        );
+      }
+
+      if (message.type === "cleanupMessages") {
+        chrome.storage.local.remove(
+          ["wsMessages", "wsOutgoingMessage"],
+          () => {}
+        );
+
+        chrome.storage.local.get(null, (allItems) => {
+          const keysToRemove: string[] = [];
+          for (const key in allItems) {
+            if (key.startsWith("testResponse_") || key.includes("request")) {
+              keysToRemove.push(key);
+            }
+          }
+          if (keysToRemove.length > 0) {
+            chrome.storage.local.remove(keysToRemove, () => {});
+          }
+        });
+
+        return;
+      }
+
+      // THÊM case mới trong xử lý message
+      if (message.type === "getAvailableTabs") {
+        // CRITICAL FIX: Use storage to communicate with ServiceWorker
+        const storagePayload = {
+          wsIncomingRequest: {
+            type: "getAvailableTabs",
+            requestId: message.requestId,
+            connectionId: this.state.id,
+            timestamp: Date.now(),
+          },
+        };
+
+        chrome.storage.local.set(storagePayload, () => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              `[WSConnection] ❌ Storage write error:`,
+              chrome.runtime.lastError
+            );
+            return;
+          }
+        });
+
+        return;
+      }
+
+      const messageTimestamp = message.timestamp || 0;
+      if (messageTimestamp === 0) {
+        console.warn(
+          `[WSConnection] ⚠️ Message has no timestamp, accepting anyway:`,
+          message.type
+        );
+      } else {
+        const messageAge = Date.now() - messageTimestamp;
+        // Timeout 180 seconds (3 minutes) để match với Backend REQUEST_TIMEOUT
+        if (messageAge > 180000) {
+          console.warn(
+            `[WSConnection] ⚠️ Ignoring old message (${messageAge}ms old):`,
+            message.type
+          );
+          return;
+        }
+      }
+
       // Store message in chrome.storage for UI to read
       chrome.storage.local.get(["wsMessages"], (result) => {
         const messages = result.wsMessages || {};
         if (!messages[this.state.id]) {
           messages[this.state.id] = [];
         }
+
+        // 🆕 THÊM: Check for duplicate messages
+        const isDuplicate = messages[this.state.id].some(
+          (existing: any) => existing.data.requestId === message.requestId
+        );
+
+        if (isDuplicate) {
+          console.warn(
+            `[WSConnection] ⚠️ Ignoring duplicate message with requestId: ${message.requestId}`
+          );
+          return;
+        }
+
         messages[this.state.id].push({
           timestamp: Date.now(),
           data: message,
         });
 
-        // Keep only last 100 messages per connection
-        if (messages[this.state.id].length > 100) {
-          messages[this.state.id] = messages[this.state.id].slice(-100);
+        // 🔧 INCREASED: Keep last 50 messages per connection (was 10)
+        if (messages[this.state.id].length > 50) {
+          messages[this.state.id] = messages[this.state.id].slice(-50);
         }
 
         chrome.storage.local.set({ wsMessages: messages });
@@ -199,6 +287,7 @@ export class WSConnection {
 
         if (msg && msg.connectionId === this.state.id) {
           this.send(msg.data);
+        } else {
         }
       }
     });

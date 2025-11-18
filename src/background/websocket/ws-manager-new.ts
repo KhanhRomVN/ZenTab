@@ -10,17 +10,23 @@ export class WSManagerNew {
   }
 
   /**
-   * Broadcast message to all connected WebSocket clients
+   * Broadcast message to single connected WebSocket client (port 1500)
    */
   public broadcastToAll(message: any): void {
     const connectionsArray = Array.from(this.connections.values());
+    const connectedCount = connectionsArray.filter(
+      (conn) => conn.state.status === "connected"
+    ).length;
+
+    let sentCount = 0;
     for (const conn of connectionsArray) {
       if (conn.state.status === "connected") {
         try {
           conn.send(message);
+          sentCount++;
         } catch (error) {
           console.error(
-            "[WSManagerNew] Failed to send to:",
+            "[WSManagerNew] ❌ Failed to send to:",
             conn.state.id,
             error
           );
@@ -29,15 +35,26 @@ export class WSManagerNew {
     }
   }
 
+  /**
+   * Kiểm tra WebSocket connection (port 1500) có đang connected không
+   */
+  public async hasActiveConnections(): Promise<boolean> {
+    const connectionsArray = Array.from(this.connections.values());
+    for (const conn of connectionsArray) {
+      if (conn.state.status === "connected") {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   private async loadConnections(): Promise<void> {
     try {
       const result = await chrome.storage.local.get(["wsConnections"]);
 
       // Kiểm tra kỹ result và wsConnections
       if (!result || typeof result !== "object") {
-        console.warn(
-          "[WSManagerNew] Invalid storage result, initializing empty"
-        );
         await chrome.storage.local.set({ wsConnections: [] });
         return;
       }

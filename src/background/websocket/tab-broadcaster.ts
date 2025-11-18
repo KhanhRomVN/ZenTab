@@ -11,7 +11,8 @@ interface FocusedTab {
 export class TabBroadcaster {
   private wsManager: WSManagerNew;
   private lastBroadcastTime = 0;
-  private readonly BROADCAST_THROTTLE = 500; // 500ms throttle
+  private readonly BROADCAST_THROTTLE = 1000; // 🆕 TĂNG: 1s throttle để giảm spam
+  private broadcastCount = 0; // 🆕 THÊM: Đếm số lần broadcast
 
   constructor(wsManager: WSManagerNew) {
     this.wsManager = wsManager;
@@ -19,30 +20,69 @@ export class TabBroadcaster {
   }
 
   private setupListeners(): void {
-    // Listen for tab selection changes
+    let pendingBroadcast: NodeJS.Timeout | null = null;
+
+    // 🆕 ĐƠN GIẢN HÓA: Chỉ dùng debounce đơn giản
+    const debouncedBroadcast = () => {
+      if (pendingBroadcast) {
+        clearTimeout(pendingBroadcast);
+      }
+      pendingBroadcast = setTimeout(() => {
+        this.broadcastFocusedTabs();
+        pendingBroadcast = null;
+      }, 500);
+    };
+
+    // 🆕 GIẢM: Chỉ lắng nghe storage changes quan trọng
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== "local") return;
 
-      if (changes.zenTabSelectedTabs) {
-        this.broadcastFocusedTabs();
+      // 🆕 CHỈ broadcast khi có thay đổi thực sự
+      if (changes.zenTabSelectedTabs || changes.wsConnectionEstablished) {
+        debouncedBroadcast();
       }
 
-      // THÊM: Listen for WebSocket connection established
-      if (changes.triggerFocusedTabsBroadcast) {
-        this.broadcastFocusedTabs();
+      // 🆕 GIẢM LOG: Chỉ log wsStates changes khi có kết nối mới
+      if (changes.wsStates) {
+        const newStates = changes.wsStates.newValue || {};
+        const oldStates = changes.wsStates.oldValue || {};
+
+        let hasNewConnection = false;
+        for (const [connId, newState] of Object.entries(newStates)) {
+          const typedNewState = newState as { status: string; port: number };
+          const oldState = oldStates[connId] as
+            | { status: string; port: number }
+            | undefined;
+
+          // 🆕 CHỈ quan tâm đến port 1500
+          if (
+            typedNewState.port === 1500 &&
+            typedNewState.status === "connected" &&
+            oldState?.status !== "connected"
+          ) {
+            hasNewConnection = true;
+            break;
+          }
+        }
+
+        if (hasNewConnection) {
+          debouncedBroadcast();
+        }
       }
     });
 
-    // Listen for tab updates (title change, url change, etc.)
-    chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
-      if (changeInfo.title || changeInfo.url) {
-        this.broadcastFocusedTabs();
+    // 🆕 GIẢM: Chỉ lắng nghe tab events quan trọng
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+      if (
+        tab.url?.startsWith("https://chat.deepseek.com") &&
+        (changeInfo.title || changeInfo.url)
+      ) {
+        debouncedBroadcast();
       }
     });
 
-    // Listen for tab removal
-    chrome.tabs.onRemoved.addListener(() => {
-      this.broadcastFocusedTabs();
+    chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+      debouncedBroadcast();
     });
   }
 
@@ -50,7 +90,19 @@ export class TabBroadcaster {
    * Broadcast focused tabs to all connected WebSocket clients
    */
   public async broadcastFocusedTabs(): Promise<void> {
-    // Throttle broadcasts
+    this.broadcastCount++;
+
+    // 🆕 GIẢM LOG: Chỉ log mỗi 10 lần broadcast
+    if (this.broadcastCount % 10 !== 1) {
+      return;
+    }
+
+    const hasConnections = await this.wsManager.hasActiveConnections();
+
+    if (!hasConnections) {
+      return;
+    }
+
     const now = Date.now();
     if (now - this.lastBroadcastTime < this.BROADCAST_THROTTLE) {
       return;
@@ -60,7 +112,10 @@ export class TabBroadcaster {
     try {
       const focusedTabs = await this.getFocusedTabs();
 
-      // Send to all connected WebSocket clients
+      if (focusedTabs.length === 0) {
+        return;
+      }
+
       const message = {
         type: "focusedTabsUpdate",
         data: focusedTabs,
@@ -69,7 +124,7 @@ export class TabBroadcaster {
 
       this.wsManager.broadcastToAll(message);
     } catch (error) {
-      console.error("[TabBroadcaster] Failed to broadcast:", error);
+      console.error("[TabBroadcaster] ❌ Failed to broadcast:", error);
     }
   }
 
@@ -78,260 +133,81 @@ export class TabBroadcaster {
    */
   private async getFocusedTabs(): Promise<FocusedTab[]> {
     try {
-      let selectedTabs: Record<string, number> = {};
+      const browserAPI =
+        typeof (globalThis as any).browser !== "undefined"
+          ? (globalThis as any).browser
+          : chrome;
+
+      // ✅ Step 1: Get ALL DeepSeek tabs (including sleeping, duplicate containers)
+      let allDeepSeekTabs: chrome.tabs.Tab[] = [];
 
       try {
-        const browserAPI =
-          typeof (globalThis as any).browser !== "undefined"
-            ? (globalThis as any).browser
-            : chrome;
-
-        const result = await new Promise<any>((resolve, reject) => {
-          try {
-            browserAPI.storage.local.get(
-              ["zenTabSelectedTabs"],
-              (data: any) => {
-                // ✅ Check for errors
-                if (browserAPI.runtime.lastError) {
-                  console.error(
-                    "[TabBroadcaster] ❌ Storage read error:",
-                    browserAPI.runtime.lastError
-                  );
-                  reject(browserAPI.runtime.lastError);
-                  return;
-                }
-
-                resolve(data || {});
-              }
-            );
-          } catch (callError) {
-            console.error(
-              "[TabBroadcaster] ❌ Exception in storage.local.get call:",
-              callError
-            );
-            reject(callError);
-          }
-        });
-
-        selectedTabs = result?.zenTabSelectedTabs || {};
-      } catch (storageError) {
-        console.error(
-          "[TabBroadcaster] ❌ CRITICAL: Failed to read storage:",
-          storageError
-        );
-        console.error("[TabBroadcaster] Error details:", {
-          name: storageError instanceof Error ? storageError.name : "unknown",
-          message:
-            storageError instanceof Error
-              ? storageError.message
-              : String(storageError),
-          stack: storageError instanceof Error ? storageError.stack : undefined,
-          toString: String(storageError),
-        });
-        return [];
-      }
-
-      if (Object.keys(selectedTabs).length === 0) {
-        console.warn("[TabBroadcaster] ⚠️ No selected tabs found in storage!");
-        console.warn(
-          "[TabBroadcaster] User needs to select tabs via ZenTab sidebar first."
-        );
-        return [];
-      }
-
-      let containers: any[] = [];
-      let retries = 3;
-
-      while (retries > 0 && containers.length === 0) {
-        try {
-          const browserAPI =
-            typeof (globalThis as any).browser !== "undefined"
-              ? (globalThis as any).browser
-              : chrome;
-
-          if (
-            !browserAPI.contextualIdentities ||
-            !browserAPI.contextualIdentities.query
-          ) {
-            console.error(
-              "[TabBroadcaster] ❌ contextualIdentities API not available!"
-            );
-            console.error(
-              "[TabBroadcaster] Check manifest.json permissions: contextualIdentities"
-            );
-            break;
-          }
-
-          const result = await browserAPI.contextualIdentities.query({});
-
-          if (Array.isArray(result)) {
-            containers = result;
-          } else {
-            console.warn(
-              "[TabBroadcaster] ⚠️ Query returned non-array:",
-              result
-            );
-          }
-        } catch (containerError) {
-          console.error(
-            "[TabBroadcaster] ❌ Container load attempt",
-            4 - retries,
-            "failed:",
-            containerError
-          );
-          console.error("[TabBroadcaster] Error details:", {
-            name:
-              containerError instanceof Error ? containerError.name : "unknown",
-            message:
-              containerError instanceof Error
-                ? containerError.message
-                : String(containerError),
-            stack:
-              containerError instanceof Error
-                ? containerError.stack
-                : undefined,
-          });
-
-          retries--;
-
-          if (retries > 0) {
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
-        }
-      }
-
-      if (containers.length === 0) {
-        console.error(
-          "[TabBroadcaster] ❌ CRITICAL: Could not load any containers after all retries!"
-        );
-        return [];
-      }
-
-      // ✅ Step 3: Build focused tabs array with detailed error handling
-      const focusedTabs: FocusedTab[] = [];
-
-      for (const [cookieStoreId, tabId] of Object.entries(selectedTabs)) {
-        try {
-          // ✅ Step 3.1: Validate tabId type
-          const tabIdNum =
-            typeof tabId === "number" ? tabId : parseInt(String(tabId));
-
-          if (isNaN(tabIdNum) || tabIdNum <= 0) {
-            console.error("[TabBroadcaster] ❌ Invalid tabId:", tabId);
-            continue;
-          }
-
-          // ✅ Step 3.2: Get tab details với Firefox-compatible approach
-          let tab: chrome.tabs.Tab;
-          try {
-            const browserAPI =
-              typeof (globalThis as any).browser !== "undefined"
-                ? (globalThis as any).browser
-                : chrome;
-
-            // ✅ CRITICAL FIX: Wrap chrome.tabs.get trong Promise cho Firefox
-            tab = await new Promise<chrome.tabs.Tab>((resolve, reject) => {
-              try {
-                browserAPI.tabs.get(tabIdNum, (result: chrome.tabs.Tab) => {
+        const result = await new Promise<chrome.tabs.Tab[]>(
+          (resolve, reject) => {
+            try {
+              browserAPI.tabs.query(
+                { url: "https://chat.deepseek.com/*" },
+                (tabs: chrome.tabs.Tab[]) => {
                   if (browserAPI.runtime.lastError) {
+                    console.error(
+                      "[TabBroadcaster] ❌ Tabs query error:",
+                      browserAPI.runtime.lastError
+                    );
                     reject(browserAPI.runtime.lastError);
                     return;
                   }
-                  if (!result) {
-                    reject(new Error("Tab not found"));
-                    return;
-                  }
-                  resolve(result);
-                });
-              } catch (callError) {
-                reject(callError);
-              }
-            });
-          } catch (tabError) {
-            console.error(
-              "[TabBroadcaster] ❌ Tab not found (may have been closed):",
-              tabIdNum,
-              tabError
-            );
-
-            // Xóa tab không tồn tại khỏi storage để tránh lỗi lần sau
-            try {
-              const browserAPI =
-                typeof (globalThis as any).browser !== "undefined"
-                  ? (globalThis as any).browser
-                  : chrome;
-
-              const result = await new Promise<any>((resolve, reject) => {
-                browserAPI.storage.local.get(
-                  ["zenTabSelectedTabs"],
-                  (data: any) => {
-                    if (browserAPI.runtime.lastError) {
-                      reject(browserAPI.runtime.lastError);
-                      return;
-                    }
-                    resolve(data || {});
-                  }
-                );
-              });
-
-              const currentSelected = result?.zenTabSelectedTabs || {};
-              delete currentSelected[cookieStoreId];
-
-              await new Promise<void>((resolve, reject) => {
-                browserAPI.storage.local.set(
-                  { zenTabSelectedTabs: currentSelected },
-                  () => {
-                    if (browserAPI.runtime.lastError) {
-                      reject(browserAPI.runtime.lastError);
-                      return;
-                    }
-                    resolve();
-                  }
-                );
-              });
-
-              console.warn(
-                "[TabBroadcaster] 🗑️ Removed invalid tab from storage:",
-                cookieStoreId
+                  resolve(tabs || []);
+                }
               );
-            } catch (cleanupError) {
+            } catch (callError) {
               console.error(
-                "[TabBroadcaster] Failed to cleanup invalid tab:",
-                cleanupError
+                "[TabBroadcaster] ❌ Exception in tabs.query call:",
+                callError
               );
+              reject(callError);
             }
-
-            continue;
           }
+        );
 
-          // ✅ Step 3.3: Validate tab data
+        allDeepSeekTabs = result || [];
+      } catch (tabsError) {
+        console.error(
+          "[TabBroadcaster] ❌ CRITICAL: Failed to query tabs:",
+          tabsError
+        );
+        console.error("[TabBroadcaster] Error details:", {
+          name: tabsError instanceof Error ? tabsError.name : "unknown",
+          message:
+            tabsError instanceof Error ? tabsError.message : String(tabsError),
+          stack: tabsError instanceof Error ? tabsError.stack : undefined,
+          toString: String(tabsError),
+        });
+        return [];
+      }
+
+      if (allDeepSeekTabs.length === 0) {
+        console.warn("[TabBroadcaster] ⚠️ No DeepSeek tabs found in browser!");
+        console.warn(
+          "[TabBroadcaster] User needs to open DeepSeek tabs first."
+        );
+        return [];
+      }
+
+      // Step 2: Build focused tabs array (no container filtering)
+      const focusedTabs: FocusedTab[] = [];
+
+      for (const tab of allDeepSeekTabs) {
+        try {
+          // Validate tab data
           if (!tab || !tab.id) {
             console.warn("[TabBroadcaster] ⚠️ Invalid tab object:", tab);
             continue;
           }
 
-          // ✅ Step 3.4: Find matching container
-          const container = containers.find(
-            (c) => c && c.cookieStoreId === cookieStoreId
-          );
-
-          if (!container) {
-            console.warn(
-              "[TabBroadcaster] ⚠️ Container not found for:",
-              cookieStoreId,
-              "\nAvailable containers:",
-              containers.map((c) => ({
-                id: c.cookieStoreId,
-                name: c.name,
-              }))
-            );
-            continue;
-          }
-
-          // ✅ Step 3.5: Add to focused tabs
+          // Add to focused tabs (without container info)
           const focusedTab = {
             tabId: tab.id,
-            containerName: container.name,
+            containerName: `Tab ${tab.id}`, // Simple identifier
             title: tab.title || "Untitled",
             url: tab.url,
           };
@@ -341,8 +217,7 @@ export class TabBroadcaster {
           console.error(
             "[TabBroadcaster] ❌ CRITICAL: Unexpected error processing tab:",
             {
-              tabId,
-              cookieStoreId,
+              tabId: tab.id,
               error: error instanceof Error ? error.message : String(error),
               stack: error instanceof Error ? error.stack : undefined,
             }
