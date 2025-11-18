@@ -1,5 +1,5 @@
 export class MessageHandler {
-  constructor(private containerManager: any) {}
+  constructor() {}
 
   async handleMessage(
     message: any,

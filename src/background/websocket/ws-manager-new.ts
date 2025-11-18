@@ -7,6 +7,11 @@ export class WSManagerNew {
   constructor() {
     this.loadConnections();
     this.setupStorageListener();
+
+    // 🆕 CRITICAL: Setup periodic cleanup (every 2 minutes)
+    setInterval(() => {
+      this.cleanupOldMessages();
+    }, 120000); // 2 minutes
   }
 
   /**
@@ -248,5 +253,46 @@ export class WSManagerNew {
     );
 
     await chrome.storage.local.set({ wsConnections: connectionsArray });
+  }
+
+  /**
+   * 🆕 CRITICAL: Cleanup old wsMessages định kỳ
+   */
+  private async cleanupOldMessages(): Promise<void> {
+    try {
+      const result = await chrome.storage.local.get(["wsMessages"]);
+      const messages = result.wsMessages || {};
+
+      const now = Date.now();
+      let cleanedCount = 0;
+
+      for (const [connId, msgArray] of Object.entries(messages)) {
+        if (!Array.isArray(msgArray)) continue;
+
+        // Keep only messages from last 2 minutes
+        const filtered = (
+          msgArray as Array<{ timestamp: number; data: any }>
+        ).filter((msg) => {
+          const age = now - msg.timestamp;
+          if (age > 120000) {
+            // 2 minutes
+            cleanedCount++;
+            return false;
+          }
+          return true;
+        });
+
+        messages[connId] = filtered;
+      }
+
+      if (cleanedCount > 0) {
+        console.log(
+          `[WSManagerNew] 🧹 Cleaned up ${cleanedCount} old messages`
+        );
+        await chrome.storage.local.set({ wsMessages: messages });
+      }
+    } catch (error) {
+      console.error("[WSManagerNew] ❌ Failed to cleanup messages:", error);
+    }
   }
 }
