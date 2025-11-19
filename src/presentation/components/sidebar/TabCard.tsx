@@ -1,12 +1,5 @@
 import React from "react";
-import {
-  MoreVertical,
-  Trash2,
-  MessageCircle,
-  Activity,
-  Clock,
-} from "lucide-react";
-import CustomDropdown from "../common/CustomDropdown";
+import { Activity, Clock } from "lucide-react";
 
 interface TabCardProps {
   tab: {
@@ -20,44 +13,6 @@ interface TabCardProps {
 }
 
 const TabCard: React.FC<TabCardProps> = ({ tab }) => {
-  const [showDropdown, setShowDropdown] = React.useState(false);
-
-  const handleOpenTab = async () => {
-    try {
-      await chrome.tabs.update(tab.tabId, { active: true });
-      const tabInfo = await chrome.tabs.get(tab.tabId);
-      if (tabInfo.windowId) {
-        await chrome.windows.update(tabInfo.windowId, { focused: true });
-      }
-    } catch (error) {
-      console.error("Error opening tab:", error);
-    }
-  };
-
-  const dropdownOptions = [
-    {
-      value: "open",
-      label: "Focus Tab",
-      icon: <MessageCircle className="w-3.5 h-3.5" />,
-    },
-    {
-      value: "remove",
-      label: "Close Tab",
-      icon: <Trash2 className="w-3.5 h-3.5" />,
-      danger: true,
-    },
-  ];
-
-  const handleDropdownSelect = (value: string) => {
-    setShowDropdown(false);
-
-    switch (value) {
-      case "open":
-        handleOpenTab();
-        break;
-    }
-  };
-
   const getStatusColor = (status: string): string => {
     return status === "busy"
       ? "text-yellow-600 dark:text-yellow-400"
@@ -130,32 +85,6 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
               <Clock className="w-3 h-3" />
               <span>{formatLastUsed(tab.lastUsed)}</span>
             </div>
-          </div>
-        </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-          <div className="relative">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowDropdown(!showDropdown);
-              }}
-              className="p-1 hover:bg-button-secondBgHover rounded"
-            >
-              <MoreVertical className="w-4 h-4 text-text-secondary" />
-            </button>
-
-            {showDropdown && (
-              <div className="absolute right-0 top-full mt-1 z-50">
-                <CustomDropdown
-                  options={dropdownOptions}
-                  onSelect={handleDropdownSelect}
-                  align="right"
-                  width="w-48"
-                />
-              </div>
-            )}
           </div>
         </div>
       </div>

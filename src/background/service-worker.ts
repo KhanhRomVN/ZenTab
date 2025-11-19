@@ -3,9 +3,9 @@ import { MessageHandler } from "./message-handler";
 import { WSManagerNew } from "./websocket/ws-manager-new";
 import { TabBroadcaster } from "./websocket/tab-broadcaster";
 import { DeepSeekController } from "./deepseek-controller";
+import { TabStateManager } from "./utils/tab-state-manager";
 
 declare const browser: typeof chrome & any;
-declare const TabStateManager: any;
 
 (function () {
   "use strict";
@@ -29,7 +29,8 @@ declare const TabStateManager: any;
   const wsManager = new WSManagerNew();
   new TabBroadcaster(wsManager);
 
-  // Initialize managers
+  const tabStateManager = TabStateManager.getInstance();
+
   const containerManager = new ContainerManager(browserAPI);
   const messageHandler = new MessageHandler(containerManager);
 
@@ -163,11 +164,7 @@ declare const TabStateManager: any;
           try {
             const { requestId, connectionId } = request;
 
-            // 🆕 SỬ DỤNG TabStateManager từ globalThis
-            const tabStateManager = (
-              globalThis as any
-            ).TabStateManager?.getInstance();
-
+            // Sử dụng tabStateManager instance đã tạo ở đầu file
             if (!tabStateManager) {
               console.error("[ServiceWorker] TabStateManager not available!");
               throw new Error("TabStateManager not initialized");
@@ -275,6 +272,73 @@ declare const TabStateManager: any;
 
       // DeepSeek controller handlers
       switch (message.action) {
+        case "getTabStates":
+          console.log("[ServiceWorker] 🔍 Processing getTabStates request...");
+          console.log(
+            "[ServiceWorker] 🔧 CRITICAL: Using Promise-based approach for async response"
+          );
+
+          // 🔧 CRITICAL FIX V2: Handle async properly with Promise wrapper
+          (async () => {
+            try {
+              console.log(
+                "[ServiceWorker] 🚀 Starting async getTabStates handler..."
+              );
+
+              console.log(
+                "[ServiceWorker] 📞 Calling tabStateManager.getAllTabStates()..."
+              );
+              const tabStates = await tabStateManager.getAllTabStates();
+              console.log(
+                `[ServiceWorker] ✅ Got ${tabStates.length} tab states`
+              );
+              console.log(
+                `[ServiceWorker] 📤 Preparing to send response with ${tabStates.length} tabs`
+              );
+
+              // 🆕 CRITICAL: Call sendResponse immediately after getting data
+              const responseData = { success: true, tabStates };
+              console.log(
+                `[ServiceWorker] 📦 Response data:`,
+                JSON.stringify(responseData).substring(0, 200)
+              );
+              sendResponse(responseData);
+              console.log(
+                "[ServiceWorker] ✅ sendResponse() executed successfully"
+              );
+            } catch (error) {
+              console.error("[ServiceWorker] ❌ Error in getTabStates:", error);
+              console.error("[ServiceWorker] 🔍 Error details:", {
+                type:
+                  error instanceof Error
+                    ? error.constructor.name
+                    : typeof error,
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+              });
+
+              // 🆕 CRITICAL: Call sendResponse immediately on error
+              const responseData = {
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              };
+              console.log(
+                "[ServiceWorker] 📦 Error response data:",
+                responseData
+              );
+              sendResponse(responseData);
+              console.log(
+                "[ServiceWorker] ✅ sendResponse() executed with error"
+              );
+            }
+          })();
+
+          // 🔧 CRITICAL: Return true IMMEDIATELY to keep message channel open
+          console.log(
+            "[ServiceWorker] 🔧 Returning true to keep message channel open"
+          );
+          return true;
+
         case "deepseek.clickNewChat":
           DeepSeekController.clickNewChatButton(message.tabId).then(
             (success: boolean) => {

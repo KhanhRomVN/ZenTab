@@ -4,7 +4,11 @@ import CustomButton from "../common/CustomButton";
 import { Settings, Power, PowerOff } from "lucide-react";
 import { WSHelper } from "@/shared/lib/ws-helper";
 
-declare const TabStateManager: any;
+interface TabStateResponse {
+  success: boolean;
+  tabStates?: any[];
+  error?: string;
+}
 
 const Sidebar: React.FC = () => {
   const [tabs, setTabs] = useState<any[]>([]);
@@ -89,10 +93,9 @@ const Sidebar: React.FC = () => {
             port: typedState.port,
           });
 
-          // ✅ QUAN TRỌNG: Reload tabs khi WebSocket connected
           if (newStatus === "connected") {
             console.log("[Sidebar] ✅ WebSocket CONNECTED! Reloading tabs...");
-            loadTabs();
+            loadTabs({ status: typedState.status, port: typedState.port });
           }
         }
       }
@@ -108,30 +111,157 @@ const Sidebar: React.FC = () => {
     };
   }, []);
 
-  const loadTabs = async () => {
+  const loadTabs = async (providedWsState?: {
+    status: string;
+    port: number;
+  }) => {
     try {
       console.log("[Sidebar] 🔍 loadTabs() - Fetching tab states...");
 
-      // ✅ KIỂM TRA WebSocket trước khi load tabs
-      if (!wsConnection || wsConnection.status !== "connected") {
+      let wsState = providedWsState;
+
+      if (!wsState) {
+        const storageResult = await chrome.storage.local.get(["wsStates"]);
+        const states = storageResult?.wsStates || {};
+        const FIXED_CONNECTION_ID = "ws-default-1500";
+        wsState = states[FIXED_CONNECTION_ID];
+      }
+
+      console.log(
+        `[Sidebar] 🔍 WebSocket state: status=${wsState?.status}, port=${
+          wsState?.port
+        }, source=${providedWsState ? "provided" : "storage"}`
+      );
+
+      if (!wsState || wsState.status !== "connected") {
         console.warn(
-          "[Sidebar] ⚠️  WebSocket not connected, skipping tab load"
+          `[Sidebar] ⚠️  WebSocket not connected (status=${wsState?.status}), skipping tab load`
         );
         setTabs([]);
         setActiveTabs(new Set());
         return;
       }
 
-      const tabStateManager = (window as any).TabStateManager?.getInstance();
+      console.log(
+        "[Sidebar] ✅ WebSocket confirmed connected, proceeding with tab load"
+      );
 
-      if (!tabStateManager) {
-        console.error("[Sidebar] TabStateManager not available!");
+      console.log("[Sidebar] 📡 Requesting tab states from background...");
+
+      // 🆕 IMPROVED: Better retry logic with multiple attempts
+      let response: TabStateResponse | null = null;
+      let attempts = 0;
+      const maxAttempts = 3;
+      const timeoutMs = 8000;
+
+      while (attempts < maxAttempts && !response) {
+        attempts++;
+        console.log(
+          `[Sidebar] 🔄 Attempt ${attempts}/${maxAttempts} - Sending getTabStates request...`
+        );
+        console.log(
+          `[Sidebar] 🕐 Timeout set to ${timeoutMs}ms for this attempt`
+        );
+
+        try {
+          console.log(`[Sidebar] 📤 Sending message to background...`);
+
+          const attemptResponse = await Promise.race([
+            new Promise<TabStateResponse | null>((resolve) => {
+              chrome.runtime.sendMessage(
+                { action: "getTabStates" },
+                (response) => {
+                  if (chrome.runtime.lastError) {
+                    console.error(
+                      `[Sidebar] ❌ Runtime error on attempt ${attempts}:`,
+                      chrome.runtime.lastError
+                    );
+                    resolve(null);
+                    return;
+                  }
+                  console.log(
+                    `[Sidebar] 📥 Received response in callback:`,
+                    response
+                  );
+                  resolve(response as TabStateResponse);
+                }
+              );
+            }),
+            new Promise<null>((resolve) =>
+              setTimeout(() => {
+                console.warn(
+                  `[Sidebar] ⏱️  Timeout (${timeoutMs}ms) on attempt ${attempts}/${maxAttempts}`
+                );
+                resolve(null);
+              }, timeoutMs)
+            ),
+          ]);
+
+          console.log(
+            `[Sidebar] 📥 Attempt ${attempts} received (after Promise.race):`,
+            attemptResponse
+          );
+          console.log(
+            `[Sidebar] 🔍 Response type: ${typeof attemptResponse}, success: ${
+              attemptResponse?.success
+            }`
+          );
+
+          if (attemptResponse && attemptResponse.success) {
+            response = attemptResponse;
+            console.log(`[Sidebar] ✅ Attempt ${attempts} successful!`);
+            break;
+          } else if (attemptResponse) {
+            console.warn(
+              `[Sidebar] ⚠️  Attempt ${attempts} returned non-success:`,
+              attemptResponse
+            );
+          } else {
+            console.warn(
+              `[Sidebar] ⚠️  Attempt ${attempts} returned null/undefined`
+            );
+          }
+        } catch (error) {
+          console.error(`[Sidebar] ❌ Attempt ${attempts} threw error:`, error);
+          console.error(`[Sidebar] 🔍 Error type: ${typeof error}`);
+          console.error(
+            `[Sidebar] 🔍 Error message: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+
+        // Wait before retry (except on last attempt)
+        if (attempts < maxAttempts && !response) {
+          const retryDelay = 1000;
+          console.log(`[Sidebar] ⏳ Waiting ${retryDelay}ms before retry...`);
+          await new Promise((resolve) => setTimeout(resolve, retryDelay));
+        }
+      }
+
+      if (!response) {
+        console.error(
+          `[Sidebar] ❌ All ${maxAttempts} attempts failed - no valid response`
+        );
+        console.error(
+          `[Sidebar] 💡 Possible causes: ServiceWorker not responding, TabStateManager disabled, or timeout too short`
+        );
         setTabs([]);
         setActiveTabs(new Set());
         return;
       }
 
-      const tabStates = await tabStateManager.getAllTabStates();
+      if (!response.success) {
+        console.error(
+          "[Sidebar] ❌ Failed to get tab states:",
+          response?.error || "Unknown error"
+        );
+        setTabs([]);
+        setActiveTabs(new Set());
+        return;
+      }
+
+      const tabStates = response.tabStates || [];
       console.log(
         `[Sidebar] ✅ Found ${tabStates.length} tabs with states:`,
         tabStates
@@ -139,7 +269,6 @@ const Sidebar: React.FC = () => {
 
       setTabs(tabStates);
 
-      // Update activeTabs set for compatibility
       const activeTabIds: Set<string> = new Set(
         tabStates.map((t: any) => String(t.tabId))
       );
@@ -194,25 +323,6 @@ const Sidebar: React.FC = () => {
         port: 1500,
       });
     }
-
-    // 🆕 CRITICAL: Sau khi load xong, đợi 100ms rồi kiểm tra lại
-    // Đảm bảo state được sync đầy đủ giữa background và sidebar
-    setTimeout(async () => {
-      const recheckResult = await chrome.storage.local.get(["wsStates"]);
-      const recheckStates = recheckResult?.wsStates || {};
-      const recheckState = recheckStates[FIXED_CONNECTION_ID];
-
-      if (recheckState && recheckState.status) {
-        console.log(
-          `[Sidebar] 🔄 Recheck WebSocket status: ${recheckState.status}`
-        );
-        setWsConnection({
-          id: FIXED_CONNECTION_ID,
-          status: recheckState.status as any,
-          port: recheckState.port || 1500,
-        });
-      }
-    }, 100);
   };
 
   const handleToggleWebSocket = async () => {
