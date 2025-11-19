@@ -11,8 +11,8 @@ interface FocusedTab {
 export class TabBroadcaster {
   private wsManager: WSManagerNew;
   private lastBroadcastTime = 0;
-  private readonly BROADCAST_THROTTLE = 1000; // 🆕 TĂNG: 1s throttle để giảm spam
-  private broadcastCount = 0; // 🆕 THÊM: Đếm số lần broadcast
+  private readonly BROADCAST_THROTTLE = 1000;
+  private broadcastCount = 0;
 
   constructor(wsManager: WSManagerNew) {
     this.wsManager = wsManager;
@@ -22,7 +22,6 @@ export class TabBroadcaster {
   private setupListeners(): void {
     let pendingBroadcast: NodeJS.Timeout | null = null;
 
-    // 🆕 ĐƠN GIẢN HÓA: Chỉ dùng debounce đơn giản
     const debouncedBroadcast = () => {
       if (pendingBroadcast) {
         clearTimeout(pendingBroadcast);
@@ -33,16 +32,13 @@ export class TabBroadcaster {
       }, 500);
     };
 
-    // 🆕 GIẢM: Chỉ lắng nghe storage changes quan trọng
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== "local") return;
 
-      // 🆕 CHỈ broadcast khi có thay đổi thực sự
-      if (changes.zenTabSelectedTabs || changes.wsConnectionEstablished) {
+      if (changes.zenTabSelectedTabs) {
         debouncedBroadcast();
       }
 
-      // 🆕 GIẢM LOG: Chỉ log wsStates changes khi có kết nối mới
       if (changes.wsStates) {
         const newStates = changes.wsStates.newValue || {};
         const oldStates = changes.wsStates.oldValue || {};
@@ -54,7 +50,6 @@ export class TabBroadcaster {
             | { status: string; port: number }
             | undefined;
 
-          // 🆕 CHỈ quan tâm đến port 1500
           if (
             typedNewState.port === 1500 &&
             typedNewState.status === "connected" &&
@@ -71,8 +66,7 @@ export class TabBroadcaster {
       }
     });
 
-    // 🆕 GIẢM: Chỉ lắng nghe tab events quan trọng
-    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
       if (
         tab.url?.startsWith("https://chat.deepseek.com") &&
         (changeInfo.title || changeInfo.url)
@@ -81,18 +75,14 @@ export class TabBroadcaster {
       }
     });
 
-    chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
+    chrome.tabs.onRemoved.addListener((_tabId) => {
       debouncedBroadcast();
     });
   }
 
-  /**
-   * Broadcast focused tabs to all connected WebSocket clients
-   */
   public async broadcastFocusedTabs(): Promise<void> {
     this.broadcastCount++;
 
-    // 🆕 GIẢM LOG: Chỉ log mỗi 10 lần broadcast
     if (this.broadcastCount % 10 !== 1) {
       return;
     }
@@ -123,9 +113,7 @@ export class TabBroadcaster {
       };
 
       this.wsManager.broadcastToAll(message);
-    } catch (error) {
-      console.error("[TabBroadcaster] ❌ Failed to broadcast:", error);
-    }
+    } catch (error) {}
   }
 
   /**
@@ -138,7 +126,6 @@ export class TabBroadcaster {
           ? (globalThis as any).browser
           : chrome;
 
-      // ✅ Step 1: Get ALL DeepSeek tabs (including sleeping, duplicate containers)
       let allDeepSeekTabs: chrome.tabs.Tab[] = [];
 
       try {
@@ -149,10 +136,6 @@ export class TabBroadcaster {
                 { url: "https://chat.deepseek.com/*" },
                 (tabs: chrome.tabs.Tab[]) => {
                   if (browserAPI.runtime.lastError) {
-                    console.error(
-                      "[TabBroadcaster] ❌ Tabs query error:",
-                      browserAPI.runtime.lastError
-                    );
                     reject(browserAPI.runtime.lastError);
                     return;
                   }
@@ -160,10 +143,6 @@ export class TabBroadcaster {
                 }
               );
             } catch (callError) {
-              console.error(
-                "[TabBroadcaster] ❌ Exception in tabs.query call:",
-                callError
-              );
               reject(callError);
             }
           }
@@ -171,25 +150,10 @@ export class TabBroadcaster {
 
         allDeepSeekTabs = result || [];
       } catch (tabsError) {
-        console.error(
-          "[TabBroadcaster] ❌ CRITICAL: Failed to query tabs:",
-          tabsError
-        );
-        console.error("[TabBroadcaster] Error details:", {
-          name: tabsError instanceof Error ? tabsError.name : "unknown",
-          message:
-            tabsError instanceof Error ? tabsError.message : String(tabsError),
-          stack: tabsError instanceof Error ? tabsError.stack : undefined,
-          toString: String(tabsError),
-        });
         return [];
       }
 
       if (allDeepSeekTabs.length === 0) {
-        console.warn("[TabBroadcaster] ⚠️ No DeepSeek tabs found in browser!");
-        console.warn(
-          "[TabBroadcaster] User needs to open DeepSeek tabs first."
-        );
         return [];
       }
 
@@ -200,7 +164,6 @@ export class TabBroadcaster {
         try {
           // Validate tab data
           if (!tab || !tab.id) {
-            console.warn("[TabBroadcaster] ⚠️ Invalid tab object:", tab);
             continue;
           }
 
@@ -213,21 +176,11 @@ export class TabBroadcaster {
           };
 
           focusedTabs.push(focusedTab);
-        } catch (error) {
-          console.error(
-            "[TabBroadcaster] ❌ CRITICAL: Unexpected error processing tab:",
-            {
-              tabId: tab.id,
-              error: error instanceof Error ? error.message : String(error),
-              stack: error instanceof Error ? error.stack : undefined,
-            }
-          );
-        }
+        } catch (error) {}
       }
 
       return focusedTabs;
     } catch (error) {
-      console.error("[TabBroadcaster] FATAL ERROR in getFocusedTabs:", error);
       return [];
     }
   }

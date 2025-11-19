@@ -41,9 +41,6 @@ const TabSelectionDrawer: React.FC<TabSelectionDrawerProps> = ({
         !browserAPI.contextualIdentities ||
         typeof browserAPI.contextualIdentities.query !== "function"
       ) {
-        console.warn(
-          "[TabSelectionDrawer] contextualIdentities API not supported"
-        );
         setContainersWithTabs([]);
         return;
       }
@@ -55,7 +52,6 @@ const TabSelectionDrawer: React.FC<TabSelectionDrawerProps> = ({
         : [];
 
       if (containers.length === 0) {
-        console.warn("[TabSelectionDrawer] No containers available");
         setContainersWithTabs([]);
         return;
       }
@@ -85,10 +81,6 @@ const TabSelectionDrawer: React.FC<TabSelectionDrawerProps> = ({
 
       setContainersWithTabs(grouped);
     } catch (error) {
-      console.error(
-        "[TabSelectionDrawer] Failed to load containers with tabs:",
-        error
-      );
       setContainersWithTabs([]);
     }
   };
@@ -125,9 +117,7 @@ const TabSelectionDrawer: React.FC<TabSelectionDrawerProps> = ({
           promise.catch(() => {}); // Ignore error if no receiver
         }
       } catch (error) {}
-    } catch (error) {
-      console.error("[TabSelectionDrawer] Failed to select tab:", error);
-    }
+    } catch (error) {}
   };
 
   const handleUnselectTab = async (containerId: string) => {
@@ -149,9 +139,7 @@ const TabSelectionDrawer: React.FC<TabSelectionDrawerProps> = ({
           promise.catch(() => {}); // Ignore error if no receiver
         }
       } catch (error) {}
-    } catch (error) {
-      console.error("[TabSelectionDrawer] Failed to unselect tab:", error);
-    }
+    } catch (error) {}
   };
 
   const getContainerColor = (color: string): string => {

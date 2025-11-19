@@ -5,6 +5,7 @@ import { TabBroadcaster } from "./websocket/tab-broadcaster";
 import { DeepSeekController } from "./deepseek-controller";
 
 declare const browser: typeof chrome & any;
+declare const TabStateManager: any;
 
 (function () {
   "use strict";
@@ -15,46 +16,18 @@ declare const browser: typeof chrome & any;
     throw new Error("No browser API available");
   })();
 
-  // 🆕 THÊM: Cleanup old connections trên startup
-  const cleanupOldConnections = async () => {
-    try {
-      const result = await new Promise<any>((resolve) => {
-        browserAPI.storage.local.get(["wsConnections"], (data: any) => {
-          resolve(data || {});
-        });
-      });
+  browserAPI.storage.local.remove([
+    "wsStates",
+    "wsConnections",
+    "wsMessages",
+    "wsOutgoingMessage",
+    "wsIncomingRequest",
+    "wsCommand",
+    "wsCommandResult",
+  ]);
 
-      const connections = result.wsConnections || [];
-
-      // 🆕 CHỈ giữ lại kết nối port 1500
-      const validConnections = connections.filter(
-        (conn: any) => conn.port === 1500
-      );
-
-      if (validConnections.length !== connections.length) {
-        await new Promise<void>((resolve) => {
-          browserAPI.storage.local.set(
-            { wsConnections: validConnections },
-            () => {
-              resolve();
-            }
-          );
-        });
-      }
-    } catch (error) {
-      console.error(
-        "[ServiceWorker] Failed to cleanup old connections:",
-        error
-      );
-    }
-  };
-
-  // Initialize WebSocket Manager
   const wsManager = new WSManagerNew();
-
-  cleanupOldConnections().then(() => {
-    new TabBroadcaster(wsManager);
-  });
+  new TabBroadcaster(wsManager);
 
   // Initialize managers
   const containerManager = new ContainerManager(browserAPI);
@@ -71,7 +44,6 @@ declare const browser: typeof chrome & any;
     });
   }
 
-  // 🆕 Listen for WebSocket messages from storage
   browserAPI.storage.onChanged.addListener((changes: any, areaName: string) => {
     if (areaName !== "local") return;
 
@@ -86,7 +58,6 @@ declare const browser: typeof chrome & any;
       for (const [connectionId, msgArray] of Object.entries(messages)) {
         const msgs = msgArray as Array<{ timestamp: number; data: any }>;
 
-        // 🔧 TĂNG timeout từ 30s lên 120s
         const recentMsgs = msgs.filter((msg) => {
           const age = Date.now() - msg.timestamp;
           return age < 180000; // 180 seconds (3 minutes)
@@ -99,20 +70,13 @@ declare const browser: typeof chrome & any;
         // Get latest message
         const latestMsg = recentMsgs[recentMsgs.length - 1];
 
-        // 🆕 THÊM: Additional validation for sendPrompt messages
         if (latestMsg.data.type === "sendPrompt") {
           const { tabId, prompt, requestId } = latestMsg.data;
 
-          // 🆕 THÊM: Validate required fields
           if (!tabId || !prompt || !requestId) {
-            console.error(
-              `[ServiceWorker] ❌ Invalid sendPrompt message: missing required fields`,
-              { tabId, promptLength: prompt?.length, requestId }
-            );
             continue;
           }
 
-          // 🔧 IMPROVED: Use async/await for duplicate detection
           const requestKey = `processed_${requestId}`;
 
           // Wrap in async IIFE to use await
@@ -145,11 +109,6 @@ declare const browser: typeof chrome & any;
                       browserAPI.storage.local.remove([requestKey]);
                     }, 120000);
                   } else {
-                    console.error(
-                      `[ServiceWorker] ❌ Failed to send prompt to DeepSeek for request ${requestId}`
-                    );
-
-                    // 🔧 CRITICAL FIX: Send detailed error back to Backend
                     browserAPI.storage.local.set({
                       wsOutgoingMessage: {
                         connectionId: connectionId,
@@ -170,23 +129,13 @@ declare const browser: typeof chrome & any;
                       },
                     });
 
-                    // 🆕 THÊM: Cleanup processed marker on failure
                     browserAPI.storage.local.remove([requestKey]);
                   }
                 })
-                .catch((error: unknown) => {
-                  console.error(
-                    `[ServiceWorker] ❌ Exception while sending prompt for request ${requestId}:`,
-                    error
-                  );
-                  // 🆕 THÊM: Cleanup processed marker on exception
+                .catch(() => {
                   browserAPI.storage.local.remove([requestKey]);
                 });
             } catch (error) {
-              console.error(
-                `[ServiceWorker] ❌ Exception in async IIFE for request ${requestId}:`,
-                error
-              );
               browserAPI.storage.local.remove([requestKey]);
             }
           })();
@@ -198,41 +147,38 @@ declare const browser: typeof chrome & any;
       const request = changes.wsIncomingRequest.newValue;
 
       if (!request) {
+        console.log("[ServiceWorker] wsIncomingRequest is empty, ignoring");
         return;
       }
 
+      console.log("[ServiceWorker] Received wsIncomingRequest:", request);
+
       if (request.type === "getAvailableTabs") {
+        console.log(
+          "[ServiceWorker] Processing getAvailableTabs request:",
+          request.requestId
+        );
+
         (async () => {
           try {
             const { requestId, connectionId } = request;
 
-            const tabs = await new Promise<chrome.tabs.Tab[]>(
-              (resolve, reject) => {
-                browserAPI.tabs.query(
-                  { url: "https://chat.deepseek.com/*" },
-                  (result: chrome.tabs.Tab[]) => {
-                    if (browserAPI.runtime.lastError) {
-                      console.error(
-                        `[ServiceWorker] ❌ Query error:`,
-                        browserAPI.runtime.lastError
-                      );
-                      reject(browserAPI.runtime.lastError);
-                      return;
-                    }
-                    resolve(result || []);
-                  }
-                );
-              }
-            );
+            // 🆕 SỬ DỤNG TabStateManager từ globalThis
+            const tabStateManager = (
+              globalThis as any
+            ).TabStateManager?.getInstance();
 
-            const availableTabs = tabs.map((tab) => ({
-              tabId: tab.id,
-              containerName: `Tab ${tab.id}`,
-              title: tab.title || "Untitled",
-              url: tab.url,
-              status: "free",
-              canAccept: true,
-            }));
+            if (!tabStateManager) {
+              console.error("[ServiceWorker] TabStateManager not available!");
+              throw new Error("TabStateManager not initialized");
+            }
+
+            const availableTabs = await tabStateManager.getAllTabStates();
+
+            console.log(
+              `[ServiceWorker] TabStateManager returned ${availableTabs.length} tabs:`,
+              availableTabs
+            );
 
             // Send response via wsOutgoingMessage
             await new Promise<void>((resolve, reject) => {
@@ -252,12 +198,15 @@ declare const browser: typeof chrome & any;
                 () => {
                   if (browserAPI.runtime.lastError) {
                     console.error(
-                      `[ServiceWorker] ❌ Storage error:`,
+                      "[ServiceWorker] Error sending availableTabs response:",
                       browserAPI.runtime.lastError
                     );
                     reject(browserAPI.runtime.lastError);
                     return;
                   }
+                  console.log(
+                    `[ServiceWorker] ✅ Sent availableTabs response with ${availableTabs.length} tabs`
+                  );
                   resolve();
                 }
               );
@@ -267,7 +216,7 @@ declare const browser: typeof chrome & any;
             browserAPI.storage.local.remove(["wsIncomingRequest"]);
           } catch (error) {
             console.error(
-              `[ServiceWorker] ❌ Error processing getAvailableTabs:`,
+              "[ServiceWorker] ❌ Error processing getAvailableTabs:",
               error
             );
 
@@ -313,7 +262,6 @@ declare const browser: typeof chrome & any;
         return true;
       }
 
-      // 🆕 Handle WebSocket incoming prompts (fallback method)
       if (message.action === "ws.incomingPrompt") {
         DeepSeekController.sendPrompt(
           message.tabId,

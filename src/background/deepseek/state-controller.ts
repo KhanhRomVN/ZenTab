@@ -43,29 +43,18 @@ export class StateController {
           return false;
         }
 
-        console.warn(
-          "[DeepSeek Page] ⚠️ Cannot determine status by exact path, using fallback..."
-        );
-
         if (pathData.startsWith("M2") && pathData.length > 100) {
           return true;
         } else if (pathData.startsWith("M8") && pathData.length > 50) {
           return false;
         }
 
-        console.error(
-          "[DeepSeek Page] ❌ Cannot determine AI generation status"
-        );
         return false;
       });
 
       const isGenerating = result ?? false;
       return isGenerating;
     } catch (error) {
-      console.error(
-        "[StateController] ❌ Failed to check generation status:",
-        error
-      );
       return false;
     }
   }
@@ -94,7 +83,6 @@ export class StateController {
 
       return result ?? false;
     } catch (error) {
-      console.error("[StateController] Failed to stop generation:", error);
       return false;
     }
   }
@@ -113,7 +101,6 @@ export class StateController {
 
       return result ?? "";
     } catch (error) {
-      console.error("[StateController] Failed to get current input:", error);
       return "";
     }
   }
@@ -139,7 +126,6 @@ export class StateController {
 
       return result ?? null;
     } catch (error) {
-      console.error("[StateController] Failed to get latest response:", error);
       return null;
     }
   }

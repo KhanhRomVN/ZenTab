@@ -474,13 +474,6 @@ export function parseAPIResponse(rawResponse: string): {
       !Array.isArray(parsed.choices) ||
       parsed.choices.length === 0
     ) {
-      console.error(
-        "[parseAPIResponse] ❌ Invalid structure: missing choices array"
-      );
-      console.error(
-        "[parseAPIResponse] Parsed object:",
-        JSON.stringify(parsed, null, 2)
-      );
       throw new Error("Invalid API response structure: missing choices array");
     }
 
@@ -489,58 +482,21 @@ export function parseAPIResponse(rawResponse: string): {
     const content = message?.content;
     const toolCalls = message?.tool_calls;
 
-    // 🆕 ADDED: Log tool calls if present
-    if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
-      console.log(`[parseAPIResponse] ✅ Found ${toolCalls.length} tool calls`);
-      toolCalls.forEach((tool: any, idx: number) => {
-        console.log(
-          `[parseAPIResponse]   Tool ${idx + 1}: ${tool?.function?.name}`
-        );
-      });
-    }
-
-    // 🆕 CRITICAL: Validate that tool_calls field exists (can be null or array)
     if (!("tool_calls" in message)) {
-      console.error(
-        "[parseAPIResponse] ❌ Invalid structure: message missing 'tool_calls' field"
-      );
-      console.error(
-        "[parseAPIResponse] Message object:",
-        JSON.stringify(message, null, 2)
-      );
       throw new Error(
         "Invalid API response structure: message must have 'tool_calls' field (can be null)"
       );
     }
 
-    // 🆕 IMPROVED: More lenient validation - allow empty content if tool_calls exist
     if (!content && (!toolCalls || toolCalls.length === 0)) {
-      console.error(
-        "[parseAPIResponse] ❌ Invalid structure: no content AND no tool_calls"
-      );
-      console.error(
-        "[parseAPIResponse] Message object:",
-        JSON.stringify(message, null, 2)
-      );
       throw new Error(
         "Invalid API response structure: no content and no tool_calls"
       );
     }
 
-    // 🆕 IMPROVED: Only check content if no tool_calls
     if (!toolCalls || toolCalls.length === 0) {
       if (typeof content !== "string") {
-        console.error(
-          "[parseAPIResponse] ❌ Invalid structure: content is not string"
-        );
         throw new Error("Invalid API response: content must be string");
-      }
-
-      if (content.trim().length === 0) {
-        console.warn(
-          "[parseAPIResponse] ⚠️ Warning: empty content without tool_calls"
-        );
-        console.warn("[parseAPIResponse] This may cause issues in Cline");
       }
     }
 
@@ -550,15 +506,9 @@ export function parseAPIResponse(rawResponse: string): {
       fullResponse: parsed,
     };
   } catch (error) {
-    console.error("[parseAPIResponse] ❌ Layers 1-2 failed:", error);
-
-    // LAYER 3: Fallback - treat entire response as plain text
-    console.warn("[parseAPIResponse] 🔄 Layer 3: Fallback to plain text mode");
-
     const trimmed = rawResponse.trim();
 
     if (trimmed.length === 0) {
-      console.error("[parseAPIResponse] ❌ Layer 3 failed: empty response");
       return {
         success: false,
         error: "Empty response received from DeepSeek",
@@ -572,10 +522,6 @@ export function parseAPIResponse(rawResponse: string): {
       trimmed.includes('"content"');
 
     if (looksLikeJson) {
-      console.warn(
-        "[parseAPIResponse] ⚠️ Response looks like malformed JSON, attempting repair..."
-      );
-
       // LAYER 4: Try to repair common JSON issues
       try {
         let repaired = trimmed;
@@ -596,15 +542,8 @@ export function parseAPIResponse(rawResponse: string): {
             fullResponse: parsed,
           };
         }
-      } catch (repairError) {
-        console.error("[parseAPIResponse] ❌ Layer 4 failed:", repairError);
-      }
+      } catch (repairError) {}
     }
-
-    // FINAL FALLBACK: Return raw response as-is
-    console.warn(
-      "[parseAPIResponse] 🆘 Using final fallback: returning raw response"
-    );
 
     return {
       success: true,

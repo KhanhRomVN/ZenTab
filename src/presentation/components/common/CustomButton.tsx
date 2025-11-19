@@ -153,9 +153,6 @@ const CustomButton: React.FC<CustomButtonProps> = ({
 
     // If both are provided, prioritize icon and ignore emoji
     if (Icon && emoji) {
-      console.warn(
-        "CustomButton: Both icon and emoji props provided. Only icon will be rendered."
-      );
       return <Icon className={`${iconSizes[size]} ${iconClassName}`.trim()} />;
     }
 

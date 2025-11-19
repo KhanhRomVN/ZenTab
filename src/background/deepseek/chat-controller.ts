@@ -16,10 +16,6 @@ export class ChatController {
 
       return result ?? false;
     } catch (error) {
-      console.error(
-        "[ChatController] Failed to check DeepThink status:",
-        error
-      );
       return false;
     }
   }
@@ -56,7 +52,6 @@ export class ChatController {
 
       return result ?? false;
     } catch (error) {
-      console.error("[ChatController] Failed to toggle DeepThink:", error);
       return false;
     }
   }
@@ -94,7 +89,6 @@ export class ChatController {
           }
         }
 
-        console.error("[DeepSeek Page] ❌ New Chat button not found!");
         return false;
       });
 
@@ -102,14 +96,9 @@ export class ChatController {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         return true;
       } else {
-        console.error("[ChatController] ❌ Failed to click New Chat button");
         return false;
       }
     } catch (error) {
-      console.error(
-        "[ChatController] ❌ Exception while clicking New Chat button:",
-        error
-      );
       return false;
     }
   }
@@ -132,7 +121,6 @@ export class ChatController {
 
       return result ?? false;
     } catch (error) {
-      console.error("[ChatController] Failed to create new chat:", error);
       return false;
     }
   }
@@ -151,7 +139,6 @@ export class ChatController {
 
       return result ?? null;
     } catch (error) {
-      console.error("[ChatController] Failed to get chat title:", error);
       return null;
     }
   }

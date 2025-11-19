@@ -1,31 +1,13 @@
 import React from "react";
-import { Network, X, MessageCircle } from "lucide-react";
+import { X } from "lucide-react";
 import MotionCustomDrawer from "../common/CustomDrawer";
-import CustomButton from "../common/CustomButton";
 
 interface SettingDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  onWebSocket: () => void;
-  onTest: () => void;
 }
 
-const SettingDrawer: React.FC<SettingDrawerProps> = ({
-  isOpen,
-  onClose,
-  onWebSocket,
-  onTest,
-}) => {
-  const handleWebSocket = () => {
-    onWebSocket();
-    onClose();
-  };
-
-  const handleTest = () => {
-    onTest();
-    onClose();
-  };
-
+const SettingDrawer: React.FC<SettingDrawerProps> = ({ isOpen, onClose }) => {
   return (
     <MotionCustomDrawer
       isOpen={isOpen}
@@ -54,31 +36,7 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="p-4 space-y-2">
-            {/* WebSocket Button */}
-            <CustomButton
-              variant="ghost"
-              size="md"
-              align="left"
-              icon={Network}
-              onClick={handleWebSocket}
-            >
-              WebSocket Connections
-            </CustomButton>
-
-            {/* Test Button */}
-            <CustomButton
-              variant="ghost"
-              size="md"
-              align="left"
-              icon={MessageCircle}
-              onClick={handleTest}
-            >
-              Test DeepSeek Chat
-            </CustomButton>
-          </div>
-        </div>
+        <div className="flex-1 overflow-y-auto"></div>
       </div>
     </MotionCustomDrawer>
   );

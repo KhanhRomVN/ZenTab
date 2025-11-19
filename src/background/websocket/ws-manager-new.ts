@@ -5,23 +5,73 @@ export class WSManagerNew {
   private connections: Map<string, WSConnection> = new Map();
 
   constructor() {
-    this.loadConnections();
+    this.cleanupOldConnections();
+    this.createDefaultConnection();
     this.setupStorageListener();
+    this.setupStateQueryHandler();
+  }
 
-    // 🆕 CRITICAL: Setup periodic cleanup (every 2 minutes)
-    setInterval(() => {
-      this.cleanupOldMessages();
-    }, 120000); // 2 minutes
+  /**
+   * ✅ Setup handler để UI có thể query states trực tiếp
+   */
+  private setupStateQueryHandler(): void {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message.type === "getWSStates") {
+        const states: Record<string, any> = {};
+        for (const [id, conn] of this.connections.entries()) {
+          states[id] = conn.getState();
+        }
+        sendResponse({ states });
+        return true;
+      }
+    });
+  }
+
+  private cleanupOldConnections(): void {
+    chrome.storage.local.remove([
+      "wsStates",
+      "wsConnections",
+      "wsMessages",
+      "wsOutgoingMessage",
+      "wsIncomingRequest",
+      "wsCommand",
+      "wsCommandResult",
+    ]);
+  }
+
+  private createDefaultConnection(): void {
+    const FIXED_CONNECTION_ID = "ws-default-1500";
+
+    const defaultConn = new WSConnection({
+      id: FIXED_CONNECTION_ID,
+      port: 1500,
+      url: "ws://localhost:1500",
+    });
+    this.connections.set(FIXED_CONNECTION_ID, defaultConn);
+
+    // Lưu connection ID vào storage để UI có thể truy cập
+    chrome.storage.local.set({
+      wsDefaultConnectionId: FIXED_CONNECTION_ID,
+    });
+
+    // 🆕 CRITICAL: Khởi tạo wsStates ngay lập tức với trạng thái disconnected
+    chrome.storage.local.set({
+      wsStates: {
+        [FIXED_CONNECTION_ID]: {
+          status: "disconnected",
+          port: 1500,
+          reconnectAttempts: 0,
+        },
+      },
+    });
   }
 
   /**
    * Broadcast message to single connected WebSocket client (port 1500)
    */
   public broadcastToAll(message: any): void {
-    const connectionsArray = Array.from(this.connections.values());
-    const connectedCount = connectionsArray.filter(
-      (conn) => conn.state.status === "connected"
-    ).length;
+    const connectionsArray: WSConnection[] = [];
+    this.connections.forEach((conn) => connectionsArray.push(conn));
 
     let sentCount = 0;
     for (const conn of connectionsArray) {
@@ -30,11 +80,7 @@ export class WSManagerNew {
           conn.send(message);
           sentCount++;
         } catch (error) {
-          console.error(
-            "[WSManagerNew] ❌ Failed to send to:",
-            conn.state.id,
-            error
-          );
+          // Ignore send errors
         }
       }
     }
@@ -44,7 +90,8 @@ export class WSManagerNew {
    * Kiểm tra WebSocket connection (port 1500) có đang connected không
    */
   public async hasActiveConnections(): Promise<boolean> {
-    const connectionsArray = Array.from(this.connections.values());
+    const connectionsArray: WSConnection[] = [];
+    this.connections.forEach((conn) => connectionsArray.push(conn));
     for (const conn of connectionsArray) {
       if (conn.state.status === "connected") {
         return true;
@@ -52,48 +99,6 @@ export class WSManagerNew {
     }
 
     return false;
-  }
-
-  private async loadConnections(): Promise<void> {
-    try {
-      const result = await chrome.storage.local.get(["wsConnections"]);
-
-      // Kiểm tra kỹ result và wsConnections
-      if (!result || typeof result !== "object") {
-        await chrome.storage.local.set({ wsConnections: [] });
-        return;
-      }
-
-      const savedConnections = Array.isArray(result.wsConnections)
-        ? result.wsConnections
-        : [];
-
-      for (const conn of savedConnections) {
-        // Validate connection data
-        if (!conn || !conn.id || !conn.port || !conn.url) {
-          console.warn("[WSManagerNew] Skipping invalid connection:", conn);
-          continue;
-        }
-
-        const wsConn = new WSConnection({
-          id: conn.id,
-          port: conn.port,
-          url: conn.url,
-        });
-        this.connections.set(conn.id, wsConn);
-      }
-    } catch (error) {
-      console.error("[WSManagerNew] Failed to load connections:", error);
-      // Initialize empty array on error
-      try {
-        await chrome.storage.local.set({ wsConnections: [] });
-      } catch (initError) {
-        console.error(
-          "[WSManagerNew] Failed to initialize storage:",
-          initError
-        );
-      }
-    }
   }
 
   private setupStorageListener(): void {
@@ -149,7 +154,6 @@ export class WSManagerNew {
       // Clear command SAU KHI đã ghi result
       await chrome.storage.local.remove(["wsCommand"]);
     } catch (error) {
-      console.error("[WSManagerNew] Command failed:", error);
       await chrome.storage.local.set({
         wsCommandResult: {
           commandId: command.commandId,
@@ -167,41 +171,33 @@ export class WSManagerNew {
   }
 
   private async addConnection(port: number): Promise<any> {
-    if (!port || port < 1 || port > 65535) {
-      return { success: false, error: "Invalid port number" };
+    // CRITICAL: Chặn mọi connection không phải port 1500
+    if (port !== 1500) {
+      console.error(
+        `[WSManager] Rejected connection attempt to invalid port: ${port}`
+      );
+      return { success: false, error: "Only port 1500 is supported" };
     }
 
-    // Check if port already exists
-    const connectionsArray = Array.from(this.connections.values());
+    const connectionsArray: WSConnection[] = [];
+    this.connections.forEach((conn) => connectionsArray.push(conn));
     for (const conn of connectionsArray) {
       if (conn.state.port === port) {
-        return { success: false, error: "Port already exists" };
+        return { success: false, error: "Connection already exists" };
       }
     }
 
-    const id = `ws-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const id = `ws-${Date.now()}-default`;
     const url = `ws://localhost:${port}`;
 
     const wsConn = new WSConnection({ id, port, url });
     this.connections.set(id, wsConn);
 
-    await this.saveConnections();
-
     return { success: true, connectionId: id };
   }
 
-  private async removeConnection(id: string): Promise<any> {
-    const conn = this.connections.get(id);
-    if (!conn) {
-      return { success: false, error: "Connection not found" };
-    }
-
-    conn.disconnect();
-    this.connections.delete(id);
-
-    await this.saveConnections();
-
-    return { success: true };
+  private async removeConnection(_id: string): Promise<any> {
+    return { success: false, error: "Cannot remove default connection" };
   }
 
   private async connect(id: string): Promise<any> {
@@ -210,8 +206,15 @@ export class WSManagerNew {
       return { success: false, error: "Connection not found" };
     }
 
-    await conn.connect();
-    return { success: true };
+    try {
+      await conn.connect();
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   private disconnect(id: string): any {
@@ -236,63 +239,11 @@ export class WSManagerNew {
 
   private getAllConnections(): any {
     const states: WSConnectionState[] = [];
-    const connectionsArray = Array.from(this.connections.values());
+    const connectionsArray: WSConnection[] = [];
+    this.connections.forEach((conn) => connectionsArray.push(conn));
     for (const conn of connectionsArray) {
       states.push(conn.getState());
     }
     return { success: true, connections: states };
-  }
-
-  private async saveConnections(): Promise<void> {
-    const connectionsArray = Array.from(this.connections.values()).map(
-      (conn) => ({
-        id: conn.state.id,
-        port: conn.state.port,
-        url: conn.state.url,
-      })
-    );
-
-    await chrome.storage.local.set({ wsConnections: connectionsArray });
-  }
-
-  /**
-   * 🆕 CRITICAL: Cleanup old wsMessages định kỳ
-   */
-  private async cleanupOldMessages(): Promise<void> {
-    try {
-      const result = await chrome.storage.local.get(["wsMessages"]);
-      const messages = result.wsMessages || {};
-
-      const now = Date.now();
-      let cleanedCount = 0;
-
-      for (const [connId, msgArray] of Object.entries(messages)) {
-        if (!Array.isArray(msgArray)) continue;
-
-        // Keep only messages from last 2 minutes
-        const filtered = (
-          msgArray as Array<{ timestamp: number; data: any }>
-        ).filter((msg) => {
-          const age = now - msg.timestamp;
-          if (age > 120000) {
-            // 2 minutes
-            cleanedCount++;
-            return false;
-          }
-          return true;
-        });
-
-        messages[connId] = filtered;
-      }
-
-      if (cleanedCount > 0) {
-        console.log(
-          `[WSManagerNew] 🧹 Cleaned up ${cleanedCount} old messages`
-        );
-        await chrome.storage.local.set({ wsMessages: messages });
-      }
-    } catch (error) {
-      console.error("[WSManagerNew] ❌ Failed to cleanup messages:", error);
-    }
   }
 }

@@ -1,5 +1,9 @@
 export class MessageHandler {
-  constructor() {}
+  private containerManager: any;
+
+  constructor(containerManager?: any) {
+    this.containerManager = containerManager;
+  }
 
   async handleMessage(
     message: any,
@@ -14,14 +18,31 @@ export class MessageHandler {
           result = { success: true, broadcast: true };
           break;
 
+        case "removeContainerFromZenTab":
+          if (this.containerManager) {
+            await this.containerManager.removeContainerFromZenTab(
+              message.containerId
+            );
+            result = { success: true };
+          } else {
+            result = { error: "Container manager not available" };
+          }
+          break;
+
+        case "addToBlacklist":
+          // Placeholder for blacklist functionality
+          result = {
+            success: true,
+            note: "Blacklist feature not implemented yet",
+          };
+          break;
+
         default:
-          console.warn(`[MessageHandler] Unknown action: ${message.action}`);
           result = { error: `Unknown action: ${message.action}` };
       }
 
       sendResponse(result);
     } catch (error) {
-      console.error("[MessageHandler] Error:", error);
       sendResponse({
         error: error instanceof Error ? error.message : String(error),
       });

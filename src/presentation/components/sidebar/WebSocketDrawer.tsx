@@ -40,10 +40,6 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
       // Reload all connections
       await loadConnections();
     } catch (error) {
-      console.error(
-        "[WebSocketDrawer] Failed to initialize default ports:",
-        error
-      );
       setError("Failed to initialize default ports");
     }
   };
@@ -72,12 +68,7 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
               return conn;
             })
           );
-        } catch (error) {
-          console.warn(
-            "[WebSocketDrawer] Failed to load initial wsStates:",
-            error
-          );
-        }
+        } catch (error) {}
       };
 
       loadInitialStates();
@@ -144,14 +135,9 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
 
         setConnections(mergedConns);
       } catch (storageError) {
-        console.warn(
-          "[WebSocketDrawer] Failed to sync with wsStates, using connections as-is:",
-          storageError
-        );
         setConnections(sortedConns);
       }
     } catch (error) {
-      console.error("[WebSocketDrawer] Failed to load connections:", error);
       setConnections([]);
     }
   };
@@ -178,7 +164,6 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
     } catch (error) {
-      console.error("[WebSocketDrawer] Failed to reload all:", error);
       setError("Failed to reload all connections");
     } finally {
       setIsReloading(false);
@@ -192,23 +177,17 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
         connectionId: id,
       });
       await loadConnections();
-    } catch (error) {
-      console.error("[WebSocketDrawer] Failed to remove connection:", error);
-    }
+    } catch (error) {}
   };
 
   const handleConnect = async (id: string) => {
     try {
       const response = await WSHelper.connect(id);
       if (!response.success) {
-        console.error("[WebSocketDrawer] ❌ Connect failed:", response.error);
         setError(response.error || "Failed to connect");
       } else {
       }
-
-      // Không cần reload - storage listener sẽ tự động update
     } catch (error) {
-      console.error("[WebSocketDrawer] ❌ Exception in handleConnect:", error);
       setError(error instanceof Error ? error.message : "Connection failed");
     }
   };
@@ -217,13 +196,11 @@ const WebSocketDrawer: React.FC<WebSocketDrawerProps> = ({
     try {
       const response = await WSHelper.disconnect(id);
       if (!response.success) {
-        console.error("[WebSocketDrawer] Disconnect failed:", response.error);
         setError(response.error || "Failed to disconnect");
       }
 
       // Không cần reload - storage listener sẽ tự động update
     } catch (error) {
-      console.error("[WebSocketDrawer] Failed to disconnect:", error);
       setError(error instanceof Error ? error.message : "Disconnection failed");
     }
   };

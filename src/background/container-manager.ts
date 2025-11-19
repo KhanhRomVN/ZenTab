@@ -30,16 +30,9 @@ export class ContainerManager {
           // Ignore errors if no receivers
         }
       } else {
-        console.warn(
-          "[ContainerManager] contextualIdentities API not available"
-        );
         this.containers = [];
       }
     } catch (error) {
-      console.error(
-        "[ContainerManager] Failed to initialize containers:",
-        error
-      );
       this.containers = [];
     }
   }
