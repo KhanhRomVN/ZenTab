@@ -75,10 +75,6 @@ export class PromptController {
     requestId: string
   ): Promise<boolean> {
     try {
-      console.log(
-        `[PromptController] 📥 Received sendPrompt request - tabId: ${tabId}, requestId: ${requestId}`
-      );
-
       const validation = await this.validateTab(tabId);
       if (!validation.isValid) {
         console.error(
@@ -137,49 +133,17 @@ export class PromptController {
         return false;
       }
 
-      console.log(
-        `[PromptController] ✅ Tab validation passed - tabId: ${tabId}, status: free`
-      );
-
-      // 🆕 CRITICAL FIX: Mark tab BUSY ngay sau validation để tránh race condition
-      console.log(
-        `[PromptController] 🔒 Marking tab BUSY early to prevent race condition...`
-      );
       await this.tabStateManager.markTabBusy(tabId, requestId);
-      console.log(
-        `[PromptController] ✅ Tab marked BUSY early - tabId: ${tabId}, requestId: ${requestId}`
-      );
-
-      console.log(`[PromptController] 🖱️ Clicking New Chat button...`);
-
       await ChatController.clickNewChatButton(tabId);
-
-      console.log(`[PromptController] ✅ New Chat button clicked successfully`);
-
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
       const wrappedPrompt = wrapPromptWithAPIFormat(prompt);
 
-      console.log(
-        `[PromptController] 📝 Wrapped prompt ready, length: ${wrappedPrompt.length} chars`
-      );
-
       let retries = 3;
       let result: any = null;
 
-      console.log(
-        `[PromptController] 🔄 Starting textarea fill attempts (max ${retries} retries)...`
-      );
-      console.log(
-        `[PromptController] 📝 Prompt length: ${wrappedPrompt.length} chars, will attempt to fill and trigger events`
-      );
-
       while (retries > 0 && !result) {
         try {
-          console.log(
-            `[PromptController] 📌 Textarea fill attempt ${4 - retries}/3`
-          );
-
           result = await executeScript(
             tabId,
             (text: string) => {
@@ -245,8 +209,6 @@ export class PromptController {
           );
 
           if (result && result.success) {
-            console.log(`[PromptController] ✅ Textarea filled successfully`);
-            console.log(`[PromptController] 📊 Textarea state:`, result.debug);
             break;
           } else {
             console.warn(
@@ -264,9 +226,6 @@ export class PromptController {
           retries--;
 
           if (retries > 0) {
-            console.log(
-              `[PromptController] 🔄 Retrying in 500ms... (${retries} attempts left)`
-            );
             await new Promise((resolve) => setTimeout(resolve, 500));
           }
         }
@@ -280,16 +239,8 @@ export class PromptController {
         return false;
       }
 
-      console.log(
-        `[PromptController] ✅ Textarea filled, proceeding to check button state...`
-      );
-
       // Wait longer for button to enable (DeepSeek UI needs time to process events)
       await new Promise((resolve) => setTimeout(resolve, 3000));
-
-      console.log(
-        `[PromptController] 🔄 Attempting to click send button (single attempt, no retry)...`
-      );
 
       const clickResult = await executeScript(tabId, () => {
         const sendButton = document.querySelector(
@@ -400,14 +351,6 @@ export class PromptController {
 
       if (clickResult && clickResult.success) {
         const clickTimestamp = Date.now();
-        console.log(
-          `[PromptController] ✅ Send button clicked successfully at timestamp: ${clickTimestamp}`
-        );
-        console.log(
-          `[PromptController] 🎯 Prompt has been SENT to DeepSeek - tab will remain BUSY until response received`
-        );
-
-        // Bắt đầu monitor button state để phát hiện khi AI trả lời xong
         this.monitorButtonStateUntilComplete(tabId, requestId, clickTimestamp);
       } else {
         console.error(
@@ -421,15 +364,7 @@ export class PromptController {
         return false;
       }
 
-      console.log(
-        `[PromptController] 🎯 Prompt sent successfully, starting response polling...`
-      );
-      console.log(
-        `[PromptController] ℹ️ Tab will remain BUSY until response is received and processed`
-      );
-
       this.activePollingTasks.set(tabId, requestId);
-
       this.startResponsePolling(tabId, requestId);
 
       return true;
@@ -568,18 +503,15 @@ export class PromptController {
           const response = await this.getLatestResponseDirectly(tabId);
 
           if (response) {
-            console.log(
-              `[PromptController] ✅ Response fetched successfully - marking tab FREE`
-            );
             responseSent = true;
             await this.tabStateManager.markTabFree(tabId);
             this.activePollingTasks.delete(tabId);
 
-            let responseToSend: any = null;
+            let responseToSend: string = "";
 
-            // Step 1: Parse response to object if it's a string
             if (typeof response === "string") {
               try {
+                // Try parse để validate JSON structure
                 const parsedObject = JSON.parse(response);
 
                 // Validate structure
@@ -588,14 +520,15 @@ export class PromptController {
                   typeof parsedObject === "object" &&
                   parsedObject.choices
                 ) {
-                  responseToSend = parsedObject;
+                  responseToSend = JSON.stringify(parsedObject);
                 } else {
                   console.warn(
                     `[PromptController] ⚠️ Response object missing 'choices' field`
                   );
                   console.warn(
-                    `[PromptController] 🔧 Falling back to string response`
+                    `[PromptController] 🔧 Falling back to raw string (no re-stringify)`
                   );
+                  // Raw string, giữ nguyên
                   responseToSend = response;
                 }
               } catch (parseError) {
@@ -614,7 +547,7 @@ export class PromptController {
                 responseToSend = response;
               }
             } else if (typeof response === "object") {
-              responseToSend = response;
+              responseToSend = JSON.stringify(response);
             } else {
               console.warn(
                 `[PromptController] ⚠️ Unexpected response type: ${typeof response}`
@@ -708,9 +641,6 @@ export class PromptController {
               capturedRequestId
             );
 
-            console.log(
-              `[PromptController] 🔧 Marking tab FREE due to failed response fetch`
-            );
             await this.tabStateManager.markTabFree(tabId);
 
             if (isTestRequest) {
@@ -803,9 +733,6 @@ export class PromptController {
             "[PromptController] ⏱️ Timeout waiting for response, requestId:",
             capturedRequestId
           );
-          console.log(
-            `[PromptController] 🔧 Marking tab FREE due to response timeout`
-          );
           this.activePollingTasks.delete(tabId);
           await this.tabStateManager.markTabFree(tabId);
 
@@ -887,9 +814,6 @@ export class PromptController {
           error
         );
 
-        console.log(
-          `[PromptController] 🔧 Marking tab FREE due to polling exception`
-        );
         this.activePollingTasks.delete(tabId);
         await this.tabStateManager.markTabFree(tabId);
 

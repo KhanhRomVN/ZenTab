@@ -483,21 +483,9 @@ export class TabStateManager {
 
   public async markTabBusy(tabId: number, requestId: string): Promise<boolean> {
     try {
-      console.log(
-        `[TabStateManager] 🔄 markTabBusy called - tabId: ${tabId}, requestId: ${requestId}`
-      );
-
       const result = await chrome.storage.session.get([this.STORAGE_KEY]);
       const states = (result && result[this.STORAGE_KEY]) || {};
-
       const currentState = states[tabId] || { requestCount: 0 };
-
-      console.log(`[TabStateManager] 📊 Current state BEFORE marking busy:`, {
-        tabId: tabId,
-        previousStatus: currentState.status || "unknown",
-        previousRequestId: currentState.requestId || "none",
-        previousRequestCount: currentState.requestCount || 0,
-      });
 
       states[tabId] = {
         status: "busy",
@@ -506,19 +494,7 @@ export class TabStateManager {
       };
 
       await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
-
       this.invalidateCache(tabId);
-
-      console.log(`[TabStateManager] ✅ Tab marked BUSY successfully:`, {
-        tabId: tabId,
-        newStatus: "busy",
-        newRequestId: requestId,
-        newRequestCount: states[tabId].requestCount,
-        timestamp: Date.now(),
-      });
-      console.log(
-        `[TabStateManager] ⚠️ WARNING: Tab is now BUSY - if any error occurs in prompt sending, this tab will be STUCK unless markTabFree is called!`
-      );
 
       return true;
     } catch (error) {
@@ -529,19 +505,9 @@ export class TabStateManager {
 
   public async markTabFree(tabId: number): Promise<boolean> {
     try {
-      console.log(`[TabStateManager] 🔄 markTabFree called - tabId: ${tabId}`);
-
       const result = await chrome.storage.session.get([this.STORAGE_KEY]);
       const states = (result && result[this.STORAGE_KEY]) || {};
-
       const currentState = states[tabId] || { requestCount: 0 };
-
-      console.log(`[TabStateManager] 📊 Current state BEFORE marking free:`, {
-        tabId: tabId,
-        previousStatus: currentState.status || "unknown",
-        previousRequestId: currentState.requestId || "none",
-        previousRequestCount: currentState.requestCount || 0,
-      });
 
       states[tabId] = {
         status: "free",
@@ -550,16 +516,7 @@ export class TabStateManager {
       };
 
       await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
-
       this.invalidateCache(tabId);
-
-      console.log(`[TabStateManager] ✅ Tab marked FREE successfully:`, {
-        tabId: tabId,
-        newStatus: "free",
-        newRequestId: null,
-        requestCount: states[tabId].requestCount,
-        timestamp: Date.now(),
-      });
 
       return true;
     } catch (error) {
@@ -657,12 +614,6 @@ export class TabStateManager {
             recoveredCount++;
           }
         }
-      }
-
-      if (recoveredCount > 0) {
-        console.log(
-          `[TabStateManager] ✅ Auto-recovery completed: ${recoveredCount} tab(s) recovered`
-        );
       }
     } catch (error) {
       console.error("[TabStateManager] ❌ Error in auto-recovery:", error);

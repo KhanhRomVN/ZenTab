@@ -74,10 +74,6 @@ declare const browser: typeof chrome & any;
         if (latestMsg.data.type === "sendPrompt") {
           const { tabId, prompt, requestId } = latestMsg.data;
 
-          console.log(
-            `[ServiceWorker] 📨 Received sendPrompt message - tabId: ${tabId}, requestId: ${requestId}`
-          );
-
           if (!tabId || !prompt || !requestId) {
             console.error(
               `[ServiceWorker] ❌ Invalid sendPrompt message - missing required fields`
@@ -95,10 +91,6 @@ declare const browser: typeof chrome & any;
           // Wrap in async IIFE to use await
           (async () => {
             try {
-              console.log(
-                `[ServiceWorker] 🔍 Checking if request already processed - requestId: ${requestId}`
-              );
-
               const result = await new Promise<any>((resolve) => {
                 browserAPI.storage.local.get([requestKey], (data: any) => {
                   resolve(data || {});
@@ -106,16 +98,8 @@ declare const browser: typeof chrome & any;
               });
 
               if (result[requestKey]) {
-                console.log(
-                  `[ServiceWorker] ⚠️ Request already processed, skipping - requestId: ${requestId}`
-                );
                 return;
               }
-
-              console.log(
-                `[ServiceWorker] ✅ Request not processed yet, proceeding - requestId: ${requestId}`
-              );
-              console.log(`[ServiceWorker] 📝 Marking request as processed...`);
 
               // Mark as processed
               await new Promise<void>((resolve) => {
@@ -127,25 +111,11 @@ declare const browser: typeof chrome & any;
                 );
               });
 
-              console.log(
-                `[ServiceWorker] 🚀 Calling DeepSeekController.sendPrompt - tabId: ${tabId}, requestId: ${requestId}`
-              );
-
               DeepSeekController.sendPrompt(tabId, prompt, requestId)
                 .then((success: boolean) => {
-                  console.log(
-                    `[ServiceWorker] 📊 DeepSeekController.sendPrompt completed - success: ${success}, tabId: ${tabId}, requestId: ${requestId}`
-                  );
-
                   if (success) {
-                    console.log(
-                      `[ServiceWorker] ✅ Prompt sent successfully, will cleanup processed marker in 2 minutes`
-                    );
                     setTimeout(() => {
                       browserAPI.storage.local.remove([requestKey]);
-                      console.log(
-                        `[ServiceWorker] 🧹 Cleaned up processed marker for requestId: ${requestId}`
-                      );
                     }, 120000);
                   } else {
                     console.error(
