@@ -148,18 +148,10 @@ declare const browser: typeof chrome & any;
       const request = changes.wsIncomingRequest.newValue;
 
       if (!request) {
-        console.log("[ServiceWorker] wsIncomingRequest is empty, ignoring");
         return;
       }
 
-      console.log("[ServiceWorker] Received wsIncomingRequest:", request);
-
       if (request.type === "getAvailableTabs") {
-        console.log(
-          "[ServiceWorker] Processing getAvailableTabs request:",
-          request.requestId
-        );
-
         (async () => {
           try {
             const { requestId, connectionId } = request;
@@ -171,11 +163,6 @@ declare const browser: typeof chrome & any;
             }
 
             const availableTabs = await tabStateManager.getAllTabStates();
-
-            console.log(
-              `[ServiceWorker] TabStateManager returned ${availableTabs.length} tabs:`,
-              availableTabs
-            );
 
             // Send response via wsOutgoingMessage
             await new Promise<void>((resolve, reject) => {
@@ -201,9 +188,6 @@ declare const browser: typeof chrome & any;
                     reject(browserAPI.runtime.lastError);
                     return;
                   }
-                  console.log(
-                    `[ServiceWorker] ✅ Sent availableTabs response with ${availableTabs.length} tabs`
-                  );
                   resolve();
                 }
               );
@@ -273,39 +257,11 @@ declare const browser: typeof chrome & any;
       // DeepSeek controller handlers
       switch (message.action) {
         case "getTabStates":
-          console.log("[ServiceWorker] 🔍 Processing getTabStates request...");
-          console.log(
-            "[ServiceWorker] 🔧 CRITICAL: Using Promise-based approach for async response"
-          );
-
-          // 🔧 CRITICAL FIX V2: Handle async properly with Promise wrapper
           (async () => {
             try {
-              console.log(
-                "[ServiceWorker] 🚀 Starting async getTabStates handler..."
-              );
-
-              console.log(
-                "[ServiceWorker] 📞 Calling tabStateManager.getAllTabStates()..."
-              );
               const tabStates = await tabStateManager.getAllTabStates();
-              console.log(
-                `[ServiceWorker] ✅ Got ${tabStates.length} tab states`
-              );
-              console.log(
-                `[ServiceWorker] 📤 Preparing to send response with ${tabStates.length} tabs`
-              );
-
-              // 🆕 CRITICAL: Call sendResponse immediately after getting data
               const responseData = { success: true, tabStates };
-              console.log(
-                `[ServiceWorker] 📦 Response data:`,
-                JSON.stringify(responseData).substring(0, 200)
-              );
               sendResponse(responseData);
-              console.log(
-                "[ServiceWorker] ✅ sendResponse() executed successfully"
-              );
             } catch (error) {
               console.error("[ServiceWorker] ❌ Error in getTabStates:", error);
               console.error("[ServiceWorker] 🔍 Error details:", {
@@ -317,26 +273,14 @@ declare const browser: typeof chrome & any;
                 stack: error instanceof Error ? error.stack : undefined,
               });
 
-              // 🆕 CRITICAL: Call sendResponse immediately on error
               const responseData = {
                 success: false,
                 error: error instanceof Error ? error.message : String(error),
               };
-              console.log(
-                "[ServiceWorker] 📦 Error response data:",
-                responseData
-              );
               sendResponse(responseData);
-              console.log(
-                "[ServiceWorker] ✅ sendResponse() executed with error"
-              );
             }
           })();
 
-          // 🔧 CRITICAL: Return true IMMEDIATELY to keep message channel open
-          console.log(
-            "[ServiceWorker] 🔧 Returning true to keep message channel open"
-          );
           return true;
 
         case "deepseek.clickNewChat":

@@ -33,33 +33,15 @@ export class TabStateManager {
   }
 
   private async enable(): Promise<void> {
-    console.log(
-      "[TabStateManager] ✅ Starting tab state manager on extension load..."
-    );
     this.isEnabled = true;
-
-    console.log(
-      "[TabStateManager] 🗑️  Clearing old tab states from session storage..."
-    );
     await chrome.storage.session.set({ [this.STORAGE_KEY]: {} });
 
-    console.log("[TabStateManager] 🔍 Starting tab scan and initialization...");
     await this.scanAndInitializeAllTabs();
-    console.log(
-      "[TabStateManager] ✅ Tab state manager fully enabled and ready"
-    );
   }
 
   private async scanAndInitializeAllTabs(): Promise<void> {
-    console.log("[TabStateManager] 🔍 Scanning all DeepSeek tabs...");
-
     let tabs: chrome.tabs.Tab[] = [];
     try {
-      console.log(
-        "[TabStateManager] 🔍 Step 1: Attempting chrome.tabs.query with URL patterns..."
-      );
-
-      // 🆕 FIX: Wrap query in Promise to handle both callback and Promise-based APIs
       const result = await new Promise<chrome.tabs.Tab[]>((resolve, reject) => {
         chrome.tabs.query(
           {
@@ -79,27 +61,14 @@ export class TabStateManager {
               reject(chrome.runtime.lastError);
               return;
             }
-            console.log(
-              `[TabStateManager] 🔍 Query callback received: ${
-                queriedTabs?.length || 0
-              } tabs`
-            );
             resolve(queriedTabs || []);
           }
         );
       });
 
       tabs = Array.isArray(result) ? result : [];
-      console.log(
-        `[TabStateManager] ✅ Query successful: found ${tabs.length} DeepSeek tabs`
-      );
 
-      // 🆕 FIX: If no tabs found with patterns, try a broader query
       if (tabs.length === 0) {
-        console.log(
-          "[TabStateManager] 🔧 Step 2: Trying alternative tab discovery (query all tabs)..."
-        );
-
         const allTabs = await new Promise<chrome.tabs.Tab[]>(
           (resolve, reject) => {
             chrome.tabs.query({}, (queriedTabs) => {
@@ -111,11 +80,6 @@ export class TabStateManager {
                 reject(chrome.runtime.lastError);
                 return;
               }
-              console.log(
-                `[TabStateManager] 🔍 Alternative query callback received: ${
-                  queriedTabs?.length || 0
-                } tabs`
-              );
               resolve(queriedTabs || []);
             });
           }
@@ -129,9 +93,6 @@ export class TabStateManager {
                 tab.url?.includes("deepseek")
             )
           : [];
-        console.log(
-          `[TabStateManager] 🔧 Alternative query found ${tabs.length} tabs`
-        );
       }
     } catch (error) {
       console.error("[TabStateManager] ❌ Error querying tabs:", error);
@@ -144,12 +105,7 @@ export class TabStateManager {
         error instanceof Error ? error.message : String(error)
       );
 
-      // 🆕 FIX: Fallback to manual tab discovery
       try {
-        console.log(
-          "[TabStateManager] 🔧 Step 3: Attempting fallback query (all tabs)..."
-        );
-
         const allTabs = await new Promise<chrome.tabs.Tab[]>(
           (resolve, reject) => {
             chrome.tabs.query({}, (queriedTabs) => {
@@ -161,11 +117,7 @@ export class TabStateManager {
                 reject(chrome.runtime.lastError);
                 return;
               }
-              console.log(
-                `[TabStateManager] 🔍 Fallback query callback received: ${
-                  queriedTabs?.length || 0
-                } tabs`
-              );
+
               resolve(queriedTabs || []);
             });
           }
@@ -177,7 +129,6 @@ export class TabStateManager {
                 tab.url?.includes("deepseek") || tab.title?.includes("DeepSeek")
             )
           : [];
-        console.log(`[TabStateManager] 🔧 Fallback found ${tabs.length} tabs`);
       } catch (fallbackError) {
         console.error(
           "[TabStateManager] ❌ Fallback also failed:",
@@ -200,10 +151,6 @@ export class TabStateManager {
       return;
     }
 
-    console.log(
-      `[TabStateManager] 📋 Starting initialization for ${tabs.length} tabs...`
-    );
-
     const states: Record<number, TabStateData> = {};
 
     for (let i = 0; i < tabs.length; i++) {
@@ -215,23 +162,13 @@ export class TabStateManager {
         continue;
       }
 
-      console.log(
-        `[TabStateManager] [${i + 1}/${
-          tabs.length
-        }] Checking button state for tab ${tab.id} ("${tab.title?.substring(
-          0,
-          50
-        )}...")...`
-      );
-
-      // 🆕 FIX: Add timeout and error handling for button state check
       try {
         const buttonState = await Promise.race([
           this.checkButtonState(tab.id),
           new Promise<{ isBusy: false }>((resolve) =>
             setTimeout(() => {
               console.warn(
-                `[TabStateManager] ⏱️  Button check timeout for tab ${tab.id}`
+                `[TabStateManager] ⏱️  Button check timeout for tab ${tab.id} - defaulting to FREE`
               );
               resolve({ isBusy: false });
             }, 3000)
@@ -244,14 +181,6 @@ export class TabStateManager {
           lastUsed: Date.now(),
           requestCount: 0,
         };
-
-        console.log(
-          `[TabStateManager] [${i + 1}/${tabs.length}] Tab ${
-            tab.id
-          } initialized: status=${states[tab.id].status}, isBusy=${
-            buttonState.isBusy
-          }`
-        );
       } catch (buttonError) {
         console.error(
           `[TabStateManager] ❌ Button check failed for tab ${tab.id}:`,
@@ -267,12 +196,6 @@ export class TabStateManager {
       }
     }
 
-    console.log("[TabStateManager] 💾 Saving tab states to session storage...");
-    console.log(
-      `[TabStateManager] 📊 States to save:`,
-      JSON.stringify(states, null, 2)
-    );
-
     await new Promise<void>((resolve, reject) => {
       chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
         if (chrome.runtime.lastError) {
@@ -283,26 +206,15 @@ export class TabStateManager {
           reject(chrome.runtime.lastError);
           return;
         }
-        console.log("[TabStateManager] ✅ States saved successfully");
         resolve();
       });
     });
 
-    // 🆕 FIX: Add small delay to ensure storage is synced
     await new Promise((resolve) => setTimeout(resolve, 100));
-
-    console.log(
-      `[TabStateManager] ✅ All ${
-        Object.keys(states).length
-      } tabs initialized successfully`
-    );
   }
 
   private async checkButtonState(tabId: number): Promise<{ isBusy: boolean }> {
     try {
-      console.log(`[TabStateManager]   → Executing script on tab ${tabId}...`);
-
-      // 🆕 CRITICAL FIX: Use browser.tabs.executeScript for Firefox compatibility
       const browserAPI = typeof browser !== "undefined" ? browser : chrome;
 
       // Script code as string for Firefox compatibility
@@ -321,19 +233,19 @@ export class TabStateManager {
           const isStopIcon = pathData.includes("M2 4.88006") && pathData.includes("C2 3.68015");
           const isSendIcon = pathData.includes("M8.3125 0.981648") && pathData.includes("9.2627 1.4338");
 
+          // 🔧 FIX: Chỉ coi là busy khi có STOP ICON (AI đang trả lời)
+          // Send icon (dù enabled hay disabled) đều là trạng thái FREE
           if (isStopIcon) {
-            return { isBusy: true, reason: "stop_icon" };
+            return { isBusy: true, reason: "stop_icon_ai_responding" };
           }
 
           if (isSendIcon) {
-            const isDisabled = sendButton.classList.contains("ds-icon-button--disabled");
-            return {
-              isBusy: isDisabled,
-              reason: isDisabled ? "send_icon_disabled" : "send_icon_enabled"
-            };
+            // Send icon = tab rảnh (không quan tâm disabled hay không)
+            return { isBusy: false, reason: "send_icon_tab_free" };
           }
 
-          return { isBusy: false, reason: "unknown_icon" };
+          // Không xác định được icon → mặc định free để tránh block tab
+          return { isBusy: false, reason: "unknown_icon_assume_free" };
         })();
       `;
 
@@ -350,10 +262,6 @@ export class TabStateManager {
               reject(browserAPI.runtime.lastError);
               return;
             }
-            console.log(
-              `[TabStateManager]   ✓ executeScript callback received for tab ${tabId}:`,
-              results
-            );
             resolve(results);
           }
         );
@@ -363,9 +271,6 @@ export class TabStateManager {
         isBusy: false,
         reason: "no_result",
       };
-      console.log(
-        `[TabStateManager]   ✓ Tab ${tabId} button state: isBusy=${buttonState.isBusy}, reason=${buttonState.reason}`
-      );
 
       return { isBusy: buttonState.isBusy };
     } catch (error) {
@@ -378,9 +283,6 @@ export class TabStateManager {
   }
 
   public async getAllTabStates(): Promise<TabStateInfo[]> {
-    console.log("[TabStateManager] getAllTabStates() called");
-
-    // 🆕 FIX: Add small delay before reading to ensure storage is synced
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     const result = await new Promise<any>((resolve, reject) => {
@@ -393,29 +295,14 @@ export class TabStateManager {
           reject(chrome.runtime.lastError);
           return;
         }
-        console.log(
-          "[TabStateManager] 🔍 Session storage read callback:",
-          data
-        );
         resolve(data || {});
       });
     });
 
     const states = (result && result[this.STORAGE_KEY]) || {};
 
-    console.log(
-      "[TabStateManager] Current states from session storage:",
-      Object.keys(states).length
-    );
-    console.log("[TabStateManager] 📊 States details:", states);
-
     let tabs: chrome.tabs.Tab[] = [];
     try {
-      console.log(
-        "[TabStateManager] 🔍 getAllTabStates: Step 1 - Querying with URL patterns..."
-      );
-
-      // 🆕 CRITICAL FIX: Wrap query in Promise for Firefox compatibility
       const result = await new Promise<chrome.tabs.Tab[]>((resolve, reject) => {
         chrome.tabs.query(
           {
@@ -435,11 +322,6 @@ export class TabStateManager {
               reject(chrome.runtime.lastError);
               return;
             }
-            console.log(
-              `[TabStateManager] 🔍 getAllTabStates query callback: ${
-                queriedTabs?.length || 0
-              } tabs`
-            );
             resolve(queriedTabs || []);
           }
         );
@@ -447,16 +329,7 @@ export class TabStateManager {
 
       tabs = Array.isArray(result) ? result : [];
 
-      console.log(
-        `[TabStateManager] 🔍 Query returned ${tabs.length} DeepSeek tabs`
-      );
-
-      // 🆕 FIX: Fallback if no tabs found
       if (tabs.length === 0) {
-        console.log(
-          "[TabStateManager] 🔧 getAllTabStates: Step 2 - Trying alternative discovery..."
-        );
-
         const allTabs = await new Promise<chrome.tabs.Tab[]>(
           (resolve, reject) => {
             chrome.tabs.query({}, (queriedTabs) => {
@@ -481,18 +354,6 @@ export class TabStateManager {
                 tab.url?.includes("deepseek")
             )
           : [];
-        console.log(
-          `[TabStateManager] 🔧 Alternative found ${tabs.length} tabs`
-        );
-      }
-
-      if (tabs.length > 0) {
-        console.log(
-          "[TabStateManager] 📋 Tab IDs:",
-          tabs
-            .map((t) => `${t.id} ("${t.title?.substring(0, 30)}...")`)
-            .join(", ")
-        );
       }
     } catch (error) {
       console.error(
@@ -505,12 +366,7 @@ export class TabStateManager {
         stack: error instanceof Error ? error.stack : undefined,
       });
 
-      // 🆕 FIX: Fallback for getAllTabStates too
       try {
-        console.log(
-          "[TabStateManager] 🔧 getAllTabStates: Step 3 - Attempting fallback..."
-        );
-
         const allTabs = await new Promise<chrome.tabs.Tab[]>(
           (resolve, reject) => {
             chrome.tabs.query({}, (queriedTabs) => {
@@ -533,7 +389,6 @@ export class TabStateManager {
                 tab.url?.includes("deepseek") || tab.title?.includes("DeepSeek")
             )
           : [];
-        console.log(`[TabStateManager] 🔧 Fallback found ${tabs.length} tabs`);
       } catch (fallbackError) {
         console.error(
           "[TabStateManager] ❌ Fallback also failed:",
@@ -552,9 +407,6 @@ export class TabStateManager {
         return [];
       }
     }
-
-    console.log(`[TabStateManager] Found ${tabs.length} DeepSeek tabs`);
-
     if (tabs.length === 0) {
       console.warn(
         "[TabStateManager] ⚠️ No DeepSeek tabs found! Please open https://chat.deepseek.com first"
@@ -570,10 +422,6 @@ export class TabStateManager {
       };
       const canAccept = this.canAcceptRequest(state);
 
-      console.log(
-        `[TabStateManager] Tab ${tab.id}: status=${state.status}, canAccept=${canAccept}, lastUsed=${state.lastUsed}, requestCount=${state.requestCount}`
-      );
-
       return {
         tabId: tab.id!,
         containerName: `Tab ${tab.id}`,
@@ -586,13 +434,9 @@ export class TabStateManager {
       };
     });
 
-    console.log(`[TabStateManager] Returning ${tabStates.length} tab states`);
     return tabStates;
   }
 
-  /**
-   * Kiểm tra tab có thể nhận request không
-   */
   private canAcceptRequest(state: TabStateData): boolean {
     if (state.status !== "free") {
       return false;
@@ -602,9 +446,6 @@ export class TabStateManager {
     return Date.now() - state.lastUsed >= MIN_FREE_TIME;
   }
 
-  /**
-   * Đánh dấu tab bận - CHỈ được gọi từ monitorButtonStateUntilComplete
-   */
   public async markTabBusy(tabId: number, requestId: string): Promise<boolean> {
     try {
       const result = await chrome.storage.session.get([this.STORAGE_KEY]);
@@ -619,7 +460,6 @@ export class TabStateManager {
       };
 
       await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
-      console.log(`[TabStateManager] Tab ${tabId} marked as BUSY`);
       return true;
     } catch (error) {
       console.error("[TabStateManager] Error marking tab busy:", error);
@@ -644,7 +484,6 @@ export class TabStateManager {
       };
 
       await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
-      console.log(`[TabStateManager] Tab ${tabId} marked as FREE`);
       return true;
     } catch (error) {
       console.error("[TabStateManager] Error marking tab free:", error);
@@ -652,24 +491,17 @@ export class TabStateManager {
     }
   }
 
-  /**
-   * Lấy trạng thái của 1 tab cụ thể
-   */
   public async getTabState(tabId: number): Promise<TabStateData | null> {
     const result = await chrome.storage.session.get([this.STORAGE_KEY]);
     const states = (result && result[this.STORAGE_KEY]) || {};
     return states[tabId] || null;
   }
 
-  /**
-   * Kiểm tra xem tab state manager có đang enabled không
-   */
   public getEnabled(): boolean {
     return this.isEnabled;
   }
 }
 
-// Expose to global scope for non-module contexts
 if (typeof globalThis !== "undefined") {
   (globalThis as any).TabStateManager = TabStateManager;
 }

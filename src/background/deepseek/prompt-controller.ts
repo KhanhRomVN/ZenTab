@@ -72,23 +72,14 @@ export class PromptController {
     requestId: string
   ): Promise<boolean> {
     try {
-      // 🆕 THÊM: Log thông tin request
-      console.log(`[PromptController] 📥 Received sendPrompt request:`, {
-        tabId,
-        requestId,
-        promptLength: prompt.length,
-      });
-
       const validation = await this.validateTab(tabId);
       if (!validation.isValid) {
         console.error(
           `[PromptController] ❌ Tab validation failed: ${validation.error}`
         );
 
-        // 🔧 IMPROVED: Gửi error message về Backend với logging tốt hơn
         const browserAPI = getBrowserAPI();
         try {
-          // 🆕 FIX: Get tất cả connections và tìm connection ID duy nhất (port 1500)
           const connectionsResult = await new Promise<any>(
             (resolve, reject) => {
               browserAPI.storage.local.get(["wsConnections"], (data: any) => {
@@ -123,16 +114,7 @@ export class PromptController {
               },
             };
 
-            console.log(
-              `[PromptController] 📤 Sending validation error to Backend:`,
-              errorPayload
-            );
-
             await browserAPI.storage.local.set(errorPayload);
-
-            console.log(
-              `[PromptController] ✅ Validation error sent successfully`
-            );
           } else {
             console.error(
               `[PromptController] ❌ No WebSocket connection found (port 1500)`
@@ -148,14 +130,8 @@ export class PromptController {
         return false;
       }
 
-      // Đánh dấu tab đang bận
       this.tabMonitor.markTabBusy(tabId);
-
-      const newChatClicked = await ChatController.clickNewChatButton(tabId);
-
-      if (!newChatClicked) {
-        // Tiếp tục xử lý
-      }
+      await ChatController.clickNewChatButton(tabId);
 
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
@@ -421,7 +397,7 @@ export class PromptController {
 
     const browserAPI = getBrowserAPI();
     let pollCount = 0;
-    let responseSent = false; // 🆕 THÊM: Flag để track đã gửi response chưa
+    let responseSent = false;
 
     const poll = async () => {
       const currentActiveRequest = this.activePollingTasks.get(tabId);
@@ -429,11 +405,7 @@ export class PromptController {
         return;
       }
 
-      // 🆕 THÊM: Kiểm tra nếu đã gửi response thì dừng polling
       if (responseSent) {
-        console.log(
-          `[PromptController] 🛑 Polling stopped - response already sent: ${capturedRequestId}`
-        );
         return;
       }
 
@@ -443,7 +415,6 @@ export class PromptController {
         const isGenerating = await StateController.isGenerating(tabId);
 
         if (!isGenerating && pollCount >= 3) {
-          // 🆕 THÊM: Kiểm tra duplicate trước khi gửi response
           if (responseSent) {
             console.warn(
               `[PromptController] 🚫 DUPLICATE RESPONSE PREVENTED: ${capturedRequestId}`
@@ -455,49 +426,16 @@ export class PromptController {
           const response = await this.getLatestResponseDirectly(tabId);
 
           if (response) {
-            // 🆕 ĐÁNH DẤU: Đã gửi response
             responseSent = true;
-
-            // 🆕 CRITICAL FIX: Đánh dấu tab free TRƯỚC KHI gửi response
             this.tabMonitor.markTabFree(tabId);
-
-            // 🆕 THÊM: Cleanup active polling task ngay lập tức
             this.activePollingTasks.delete(tabId);
-
-            console.log(
-              `[PromptController] ✅ Tab ${tabId} marked FREE and polling stopped for: ${capturedRequestId}`
-            );
-
-            // 🔧 CRITICAL FIX V3: KHÔNG stringify response - gửi object trực tiếp
-            console.log(
-              `[PromptController] 🔍 Raw response type: ${typeof response}`
-            );
-            console.log(
-              `[PromptController] 📏 Raw response length: ${
-                response?.length || 0
-              }`
-            );
-            console.log(
-              `[PromptController] 📝 Raw response preview (first 300 chars):`,
-              response?.substring(0, 300)
-            );
 
             let responseToSend: any = null;
 
             // Step 1: Parse response to object if it's a string
             if (typeof response === "string") {
-              console.log(
-                `[PromptController] 🔧 Response is string, attempting to parse...`
-              );
               try {
                 const parsedObject = JSON.parse(response);
-                console.log(
-                  `[PromptController] ✅ Successfully parsed response to object`
-                );
-                console.log(
-                  `[PromptController] 📊 Parsed object keys:`,
-                  Object.keys(parsedObject)
-                );
 
                 // Validate structure
                 if (
@@ -505,13 +443,6 @@ export class PromptController {
                   typeof parsedObject === "object" &&
                   parsedObject.choices
                 ) {
-                  console.log(
-                    `[PromptController] ✅ Response has valid OpenAI structure`
-                  );
-                  console.log(
-                    `[PromptController] 🎯 CRITICAL: Sending OBJECT directly (NOT stringified)`
-                  );
-                  // 🔧 CRITICAL: GỬI OBJECT TRỰC TIẾP, KHÔNG stringify
                   responseToSend = parsedObject;
                 } else {
                   console.warn(
@@ -520,7 +451,7 @@ export class PromptController {
                   console.warn(
                     `[PromptController] 🔧 Falling back to string response`
                   );
-                  responseToSend = response; // Giữ nguyên string
+                  responseToSend = response;
                 }
               } catch (parseError) {
                 console.error(
@@ -538,11 +469,6 @@ export class PromptController {
                 responseToSend = response;
               }
             } else if (typeof response === "object") {
-              console.log(`[PromptController] 🔧 Response is already object`);
-              console.log(
-                `[PromptController] 🎯 CRITICAL: Sending OBJECT directly (already parsed)`
-              );
-              // 🔧 CRITICAL: Response đã là object, gửi trực tiếp
               responseToSend = response;
             } else {
               console.warn(
@@ -550,29 +476,6 @@ export class PromptController {
               );
               console.warn(`[PromptController] 🔧 Converting to string`);
               responseToSend = String(response);
-            }
-
-            console.log(
-              `[PromptController] 📤 Final response type to send: ${typeof responseToSend}`
-            );
-            if (typeof responseToSend === "object") {
-              console.log(
-                `[PromptController] 📤 Final response keys:`,
-                Object.keys(responseToSend)
-              );
-              console.log(
-                `[PromptController] 📤 Final response.choices[0].delta.content length:`,
-                responseToSend?.choices?.[0]?.delta?.content?.length || 0
-              );
-            } else {
-              console.log(
-                `[PromptController] 📤 Final response length:`,
-                responseToSend?.length || 0
-              );
-              console.log(
-                `[PromptController] 📤 Final response preview (first 300 chars):`,
-                String(responseToSend).substring(0, 300)
-              );
             }
 
             if (isTestRequest) {
@@ -636,18 +539,7 @@ export class PromptController {
               return;
             }
 
-            console.log(
-              `[PromptController] ✅ Sending response back via connection: ${targetConnectionId}`
-            );
-
             const currentTimestamp = Date.now();
-
-            // 🔧 CRITICAL FIX: Gửi response theo đúng type (object hoặc string)
-            console.log(`[PromptController] 🔧 Preparing message payload...`);
-            console.log(
-              `[PromptController] 📊 Response to send type: ${typeof responseToSend}`
-            );
-
             const messagePayload = {
               wsOutgoingMessage: {
                 connectionId: targetConnectionId,
@@ -656,58 +548,14 @@ export class PromptController {
                   requestId: requestId,
                   tabId: tabId,
                   success: true,
-                  response: responseToSend, // 🔧 CRITICAL: Gửi trực tiếp (object hoặc string)
+                  response: responseToSend,
                   timestamp: currentTimestamp,
                 },
                 timestamp: currentTimestamp,
               },
             };
 
-            console.log(
-              `[PromptController] 📤 Sending response with timestamp: ${currentTimestamp}`
-            );
-            console.log(
-              `[PromptController] 📤 Message payload.data.response type: ${typeof messagePayload
-                .wsOutgoingMessage.data.response}`
-            );
-
-            if (
-              typeof messagePayload.wsOutgoingMessage.data.response === "object"
-            ) {
-              console.log(
-                `[PromptController] 📤 Response is OBJECT - will be auto-stringified by storage.local.set`
-              );
-              console.log(
-                `[PromptController] 📤 Response object keys:`,
-                Object.keys(messagePayload.wsOutgoingMessage.data.response)
-              );
-            } else {
-              console.log(
-                `[PromptController] 📤 Response is STRING - length:`,
-                messagePayload.wsOutgoingMessage.data.response?.length || 0
-              );
-              console.log(
-                `[PromptController] 📤 Response preview (first 200 chars):`,
-                String(
-                  messagePayload.wsOutgoingMessage.data.response
-                ).substring(0, 200)
-              );
-            }
-
-            console.log(
-              `[PromptController] 🔧 About to call storage.local.set...`
-            );
-
             await browserAPI.storage.local.set(messagePayload);
-
-            console.log(
-              `[PromptController] ✅ storage.local.set completed successfully`
-            );
-
-            console.log(
-              `[PromptController] ✅ Response sent successfully for requestId: ${capturedRequestId}`
-            );
-
             this.activePollingTasks.delete(tabId);
           } else {
             console.error(
@@ -982,14 +830,7 @@ export class PromptController {
     tabId: number
   ): Promise<string | null> {
     try {
-      console.log(
-        `\n[PromptController] 🔍 ===== EXTRACTING RESPONSE START =====`
-      );
-      console.log(`[PromptController] Target tab: ${tabId}`);
-
       const result = await executeScript(tabId, () => {
-        console.log("[DeepSeek Page] 🔍 Extracting response from page...");
-
         window.scrollTo({
           top: document.documentElement.scrollHeight,
           behavior: "smooth",
@@ -997,10 +838,6 @@ export class PromptController {
 
         const messageContainers = Array.from(
           document.querySelectorAll('[class*="message"]')
-        );
-
-        console.log(
-          `[DeepSeek Page] 📊 Found ${messageContainers.length} message containers`
         );
 
         if (messageContainers.length === 0) {
@@ -1011,18 +848,6 @@ export class PromptController {
         const lastContainer = messageContainers[messageContainers.length - 1];
         const textContent = lastContainer.textContent?.trim();
 
-        console.log(
-          `[DeepSeek Page] 📏 Last message content length: ${
-            textContent?.length || 0
-          }`
-        );
-        console.log(
-          `[DeepSeek Page] 📝 Last message preview (first 300 chars): ${textContent?.substring(
-            0,
-            300
-          )}`
-        );
-
         if (!textContent) {
           console.error("[DeepSeek Page] ❌ Last message container is empty");
           return null;
@@ -1031,130 +856,35 @@ export class PromptController {
         return textContent;
       });
 
-      console.log(`[PromptController] 📥 Received result from page`);
-      console.log(`[PromptController] 📊 Result type: ${typeof result}`);
-      console.log(
-        `[PromptController] 📏 Result length: ${result?.length || 0}`
-      );
-
       if (result) {
-        console.log(`[PromptController] 📝 Raw result (first 500 chars):`);
-        console.log(result.substring(0, 500));
-
-        // Parse JSON nếu có thể
         try {
-          console.log(
-            `[PromptController] 🔧 Attempting to extract JSON from result...`
-          );
-
           const jsonMatch = result.match(/\{[\s\S]*\}/);
           if (jsonMatch) {
-            console.log(`[PromptController] ✅ JSON pattern found`);
-            console.log(
-              `[PromptController] 📏 JSON match length: ${jsonMatch[0].length}`
-            );
-            console.log(
-              `[PromptController] 📝 JSON match preview (first 500 chars):`
-            );
-            console.log(jsonMatch[0].substring(0, 500));
-
-            // 🔧 FIX: Sanitize JSON string trước khi parse
             let sanitizedJson = jsonMatch[0];
-
-            console.log(`[PromptController] 🔧 Starting JSON sanitization...`);
-
-            // 🆕 CRITICAL FIX: Improved regex để handle nested quotes
-            // Match pattern: "field": "value with possible "quotes" inside"
             let sanitizationCount = 0;
             sanitizedJson = sanitizedJson.replace(
               /(:\s*")([^"]*(?:"(?:[^"\\]|\\.)*")*[^"]*?)("(?:\s*[,}\]]|$))/g,
               (
-                fullMatch: string,
+                _fullMatch: string,
                 prefix: string,
                 content: string,
                 suffix: string
               ): string => {
                 sanitizationCount++;
 
-                console.log(
-                  `[PromptController] 🔍 Sanitization ${sanitizationCount}:`
-                );
-                console.log(`  - Original content length: ${content.length}`);
-                console.log(
-                  `  - Original content preview: ${content.substring(0, 100)}`
-                );
-
-                // Escape các ký tự đặc biệt trong content
                 const escaped = content
-                  .replace(/\\/g, "\\\\") // Escape backslashes TRƯỚC
-                  .replace(/"/g, '\\"') // Escape double quotes
-                  .replace(/\n/g, "\\n") // Escape newlines
-                  .replace(/\r/g, "\\r") // Escape carriage returns
-                  .replace(/\t/g, "\\t"); // Escape tabs
-
-                console.log(`  - Escaped content length: ${escaped.length}`);
-                console.log(
-                  `  - Escaped content preview: ${escaped.substring(0, 100)}`
-                );
+                  .replace(/\\/g, "\\\\")
+                  .replace(/"/g, '\\"')
+                  .replace(/\n/g, "\\n")
+                  .replace(/\r/g, "\\r")
+                  .replace(/\t/g, "\\t");
 
                 return prefix + escaped + suffix;
               }
             );
 
-            console.log(
-              `[PromptController] ✅ Sanitization complete: ${sanitizationCount} replacements`
-            );
-            console.log(
-              `[PromptController] 📝 Sanitized JSON preview (first 500 chars):`
-            );
-            console.log(sanitizedJson.substring(0, 500));
-
-            console.log(
-              `[PromptController] 🔧 Attempting to parse sanitized JSON...`
-            );
             const jsonResponse = JSON.parse(sanitizedJson);
-
-            console.log(`[PromptController] ✅ JSON parsed successfully!`);
-            console.log(
-              `[PromptController] 📊 Parsed response keys:`,
-              Object.keys(jsonResponse)
-            );
-
-            if (jsonResponse.choices) {
-              console.log(
-                `[PromptController] 📊 Choices count: ${jsonResponse.choices.length}`
-              );
-              if (jsonResponse.choices[0]) {
-                console.log(
-                  `[PromptController] 📊 First choice keys:`,
-                  Object.keys(jsonResponse.choices[0])
-                );
-                if (jsonResponse.choices[0].delta) {
-                  console.log(
-                    `[PromptController] 📊 Delta keys:`,
-                    Object.keys(jsonResponse.choices[0].delta)
-                  );
-                  console.log(
-                    `[PromptController] 📏 Content length: ${
-                      jsonResponse.choices[0].delta.content?.length || 0
-                    }`
-                  );
-                }
-              }
-            }
-
-            // 🔧 CRITICAL FIX: Return stringified JSON thay vì plain text
             const stringifiedResponse = JSON.stringify(jsonResponse);
-            console.log(
-              `[PromptController] 📤 Returning stringified JSON (length: ${stringifiedResponse.length})`
-            );
-            console.log(
-              `[PromptController] 📝 Stringified preview (first 300 chars):`
-            );
-            console.log(stringifiedResponse.substring(0, 300));
-            console.log(
-              `[PromptController] ===== EXTRACTING RESPONSE END (SUCCESS) =====\n`
-            );
 
             return stringifiedResponse;
           } else {
@@ -1176,7 +906,6 @@ export class PromptController {
             result.substring(0, 1000)
           );
 
-          // 🆕 THÊM: Try to identify the exact location of parse error
           if (parseError instanceof Error && parseError.message) {
             const errorMsg = parseError.message;
             const posMatch =
@@ -1202,18 +931,9 @@ export class PromptController {
           }
         }
 
-        console.log(
-          `[PromptController] 📤 Returning raw result (no JSON found/parsed)`
-        );
-        console.log(
-          `[PromptController] ===== EXTRACTING RESPONSE END (RAW) =====\n`
-        );
         return result;
       } else {
         console.error(`[PromptController] ❌ No result from page`);
-        console.log(
-          `[PromptController] ===== EXTRACTING RESPONSE END (NULL) =====\n`
-        );
         return null;
       }
     } catch (error) {
@@ -1232,9 +952,6 @@ export class PromptController {
       console.error(
         `  - Stack trace:`,
         error instanceof Error ? error.stack : "N/A"
-      );
-      console.log(
-        `[PromptController] ===== EXTRACTING RESPONSE END (EXCEPTION) =====\n`
       );
       return null;
     }

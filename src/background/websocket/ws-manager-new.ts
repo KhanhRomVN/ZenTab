@@ -54,7 +54,6 @@ export class WSManagerNew {
       wsDefaultConnectionId: FIXED_CONNECTION_ID,
     });
 
-    // 🆕 CRITICAL: Khởi tạo wsStates ngay lập tức với trạng thái disconnected
     chrome.storage.local.set({
       wsStates: {
         [FIXED_CONNECTION_ID]: {

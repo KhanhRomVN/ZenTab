@@ -23,8 +23,6 @@ const Sidebar: React.FC = () => {
 
   useEffect(() => {
     const initializeSidebar = async () => {
-      console.log("[Sidebar] 🚀 Initializing sidebar...");
-
       await chrome.storage.local.remove([
         "wsMessages",
         "wsOutgoingMessage",
@@ -65,7 +63,6 @@ const Sidebar: React.FC = () => {
       if (areaName !== "local") return;
 
       if (changes.wsConnections) {
-        console.log("[Sidebar] 🔄 wsConnections changed, updating status...");
         loadWebSocketStatus();
       }
 
@@ -74,10 +71,6 @@ const Sidebar: React.FC = () => {
         const FIXED_CONNECTION_ID = "ws-default-1500";
         const state = states[FIXED_CONNECTION_ID];
 
-        console.log(
-          `[Sidebar] 🌐 wsStates changed - status: ${state?.status}, port: ${state?.port}`
-        );
-
         // Chỉ kiểm tra connection với ID cố định
         if (state) {
           const typedState = state as {
@@ -85,7 +78,6 @@ const Sidebar: React.FC = () => {
             port: number;
           };
           const newStatus = typedState.status as any;
-          console.log(`[Sidebar] 📡 WebSocket state updated: ${newStatus}`);
 
           setWsConnection({
             id: FIXED_CONNECTION_ID,
@@ -94,7 +86,6 @@ const Sidebar: React.FC = () => {
           });
 
           if (newStatus === "connected") {
-            console.log("[Sidebar] ✅ WebSocket CONNECTED! Reloading tabs...");
             loadTabs({ status: typedState.status, port: typedState.port });
           }
         }
@@ -116,8 +107,6 @@ const Sidebar: React.FC = () => {
     port: number;
   }) => {
     try {
-      console.log("[Sidebar] 🔍 loadTabs() - Fetching tab states...");
-
       let wsState = providedWsState;
 
       if (!wsState) {
@@ -127,28 +116,6 @@ const Sidebar: React.FC = () => {
         wsState = states[FIXED_CONNECTION_ID];
       }
 
-      console.log(
-        `[Sidebar] 🔍 WebSocket state: status=${wsState?.status}, port=${
-          wsState?.port
-        }, source=${providedWsState ? "provided" : "storage"}`
-      );
-
-      if (!wsState || wsState.status !== "connected") {
-        console.warn(
-          `[Sidebar] ⚠️  WebSocket not connected (status=${wsState?.status}), skipping tab load`
-        );
-        setTabs([]);
-        setActiveTabs(new Set());
-        return;
-      }
-
-      console.log(
-        "[Sidebar] ✅ WebSocket confirmed connected, proceeding with tab load"
-      );
-
-      console.log("[Sidebar] 📡 Requesting tab states from background...");
-
-      // 🆕 IMPROVED: Better retry logic with multiple attempts
       let response: TabStateResponse | null = null;
       let attempts = 0;
       const maxAttempts = 3;
@@ -156,16 +123,7 @@ const Sidebar: React.FC = () => {
 
       while (attempts < maxAttempts && !response) {
         attempts++;
-        console.log(
-          `[Sidebar] 🔄 Attempt ${attempts}/${maxAttempts} - Sending getTabStates request...`
-        );
-        console.log(
-          `[Sidebar] 🕐 Timeout set to ${timeoutMs}ms for this attempt`
-        );
-
         try {
-          console.log(`[Sidebar] 📤 Sending message to background...`);
-
           const attemptResponse = await Promise.race([
             new Promise<TabStateResponse | null>((resolve) => {
               chrome.runtime.sendMessage(
@@ -179,10 +137,7 @@ const Sidebar: React.FC = () => {
                     resolve(null);
                     return;
                   }
-                  console.log(
-                    `[Sidebar] 📥 Received response in callback:`,
-                    response
-                  );
+
                   resolve(response as TabStateResponse);
                 }
               );
@@ -197,19 +152,8 @@ const Sidebar: React.FC = () => {
             ),
           ]);
 
-          console.log(
-            `[Sidebar] 📥 Attempt ${attempts} received (after Promise.race):`,
-            attemptResponse
-          );
-          console.log(
-            `[Sidebar] 🔍 Response type: ${typeof attemptResponse}, success: ${
-              attemptResponse?.success
-            }`
-          );
-
           if (attemptResponse && attemptResponse.success) {
             response = attemptResponse;
-            console.log(`[Sidebar] ✅ Attempt ${attempts} successful!`);
             break;
           } else if (attemptResponse) {
             console.warn(
@@ -234,7 +178,6 @@ const Sidebar: React.FC = () => {
         // Wait before retry (except on last attempt)
         if (attempts < maxAttempts && !response) {
           const retryDelay = 1000;
-          console.log(`[Sidebar] ⏳ Waiting ${retryDelay}ms before retry...`);
           await new Promise((resolve) => setTimeout(resolve, retryDelay));
         }
       }
@@ -262,16 +205,12 @@ const Sidebar: React.FC = () => {
       }
 
       const tabStates = response.tabStates || [];
-      console.log(
-        `[Sidebar] ✅ Found ${tabStates.length} tabs with states:`,
-        tabStates
-      );
-
       setTabs(tabStates);
 
       const activeTabIds: Set<string> = new Set(
         tabStates.map((t: any) => String(t.tabId))
       );
+
       setActiveTabs(activeTabIds);
     } catch (error) {
       console.error("[Sidebar] ❌ Error in loadTabs:", error);
@@ -286,9 +225,7 @@ const Sidebar: React.FC = () => {
     try {
       const result = await chrome.storage.local.get(["wsStates"]);
       const states = result?.wsStates || {};
-      console.log("[Sidebar] 🔍 loadWebSocketStatus - Current states:", states);
 
-      // Chỉ tìm connection với ID cố định
       const state = states[FIXED_CONNECTION_ID];
 
       if (state) {
@@ -296,9 +233,6 @@ const Sidebar: React.FC = () => {
           status: string;
           port: number;
         };
-        console.log(
-          `[Sidebar] 📊 Found WebSocket state: status=${typedState.status}, port=${typedState.port}`
-        );
 
         setWsConnection({
           id: FIXED_CONNECTION_ID,
