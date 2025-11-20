@@ -194,6 +194,27 @@ export class WSConnection {
           return;
         }
 
+        const requestId = message.requestId;
+        const dedupeKey = `tabs_req_${requestId}`;
+
+        try {
+          const result = await new Promise<any>((resolve) => {
+            chrome.storage.local.get([dedupeKey], (data) => {
+              resolve(data || {});
+            });
+          });
+
+          if (result[dedupeKey]) {
+            return;
+          }
+        } catch (storageError) {}
+
+        chrome.storage.local.set({ [dedupeKey]: Date.now() });
+
+        setTimeout(() => {
+          chrome.storage.local.remove([dedupeKey]);
+        }, 5000);
+
         const storagePayload = {
           wsIncomingRequest: {
             type: "getAvailableTabs",

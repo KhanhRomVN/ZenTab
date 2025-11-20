@@ -1,7 +1,6 @@
 export interface TabStateData {
   status: "free" | "busy";
   requestId: string | null;
-  lastUsed: number;
   requestCount: number;
 }
 
@@ -12,7 +11,6 @@ export interface TabStateInfo {
   url?: string;
   status: "free" | "busy";
   canAccept: boolean;
-  lastUsed: number;
   requestCount: number;
 }
 
@@ -28,8 +26,45 @@ export class TabStateManager {
     return TabStateManager.instance;
   }
 
+  private tabStateCache: Map<
+    number,
+    { state: TabStateData; timestamp: number }
+  > = new Map();
+  private readonly CACHE_TTL = 10000; // 10 seconds
+
   private constructor() {
     this.enable();
+    this.startAutoRecovery();
+  }
+
+  private getCachedState(tabId: number): TabStateData | null {
+    const cached = this.tabStateCache.get(tabId);
+    if (!cached) {
+      return null;
+    }
+
+    const now = Date.now();
+    if (now - cached.timestamp > this.CACHE_TTL) {
+      this.tabStateCache.delete(tabId);
+      return null;
+    }
+
+    return cached.state;
+  }
+
+  private setCachedState(tabId: number, state: TabStateData): void {
+    this.tabStateCache.set(tabId, {
+      state: state,
+      timestamp: Date.now(),
+    });
+  }
+
+  private invalidateCache(tabId?: number): void {
+    if (tabId !== undefined) {
+      this.tabStateCache.delete(tabId);
+    } else {
+      this.tabStateCache.clear();
+    }
   }
 
   private async enable(): Promise<void> {
@@ -167,18 +202,14 @@ export class TabStateManager {
           this.checkButtonState(tab.id),
           new Promise<{ isBusy: false }>((resolve) =>
             setTimeout(() => {
-              console.warn(
-                `[TabStateManager] ⏱️  Button check timeout for tab ${tab.id} - defaulting to FREE`
-              );
               resolve({ isBusy: false });
-            }, 3000)
+            }, 2000)
           ),
         ]);
 
         states[tab.id] = {
           status: buttonState.isBusy ? "busy" : "free",
           requestId: null,
-          lastUsed: Date.now(),
           requestCount: 0,
         };
       } catch (buttonError) {
@@ -190,7 +221,6 @@ export class TabStateManager {
         states[tab.id] = {
           status: "free",
           requestId: null,
-          lastUsed: Date.now(),
           requestCount: 0,
         };
       }
@@ -215,7 +245,10 @@ export class TabStateManager {
 
   private async checkButtonState(tabId: number): Promise<{ isBusy: boolean }> {
     try {
-      const browserAPI = typeof browser !== "undefined" ? browser : chrome;
+      const browserAPI =
+        typeof (globalThis as any).browser !== "undefined"
+          ? (globalThis as any).browser
+          : chrome;
 
       // Script code as string for Firefox compatibility
       const scriptCode = `
@@ -300,6 +333,11 @@ export class TabStateManager {
     });
 
     const states = (result && result[this.STORAGE_KEY]) || {};
+
+    for (const [tabIdStr, state] of Object.entries(states)) {
+      const tabId = parseInt(tabIdStr);
+      this.setCachedState(tabId, state as TabStateData);
+    }
 
     let tabs: chrome.tabs.Tab[] = [];
     try {
@@ -417,7 +455,6 @@ export class TabStateManager {
     const tabStates = tabs.map((tab) => {
       const state = states[tab.id!] || {
         status: "free",
-        lastUsed: 0,
         requestCount: 0,
       };
       const canAccept = this.canAcceptRequest(state);
@@ -429,7 +466,6 @@ export class TabStateManager {
         url: tab.url,
         status: state.status,
         canAccept: canAccept,
-        lastUsed: state.lastUsed,
         requestCount: state.requestCount || 0,
       };
     });
@@ -442,63 +478,218 @@ export class TabStateManager {
       return false;
     }
 
-    const MIN_FREE_TIME = 2000;
-    return Date.now() - state.lastUsed >= MIN_FREE_TIME;
+    return true;
   }
 
   public async markTabBusy(tabId: number, requestId: string): Promise<boolean> {
     try {
+      console.log(
+        `[TabStateManager] 🔄 markTabBusy called - tabId: ${tabId}, requestId: ${requestId}`
+      );
+
       const result = await chrome.storage.session.get([this.STORAGE_KEY]);
       const states = (result && result[this.STORAGE_KEY]) || {};
 
       const currentState = states[tabId] || { requestCount: 0 };
+
+      console.log(`[TabStateManager] 📊 Current state BEFORE marking busy:`, {
+        tabId: tabId,
+        previousStatus: currentState.status || "unknown",
+        previousRequestId: currentState.requestId || "none",
+        previousRequestCount: currentState.requestCount || 0,
+      });
+
       states[tabId] = {
         status: "busy",
         requestId: requestId,
-        lastUsed: Date.now(),
         requestCount: (currentState.requestCount || 0) + 1,
       };
 
       await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
+
+      this.invalidateCache(tabId);
+
+      console.log(`[TabStateManager] ✅ Tab marked BUSY successfully:`, {
+        tabId: tabId,
+        newStatus: "busy",
+        newRequestId: requestId,
+        newRequestCount: states[tabId].requestCount,
+        timestamp: Date.now(),
+      });
+      console.log(
+        `[TabStateManager] ⚠️ WARNING: Tab is now BUSY - if any error occurs in prompt sending, this tab will be STUCK unless markTabFree is called!`
+      );
+
       return true;
     } catch (error) {
-      console.error("[TabStateManager] Error marking tab busy:", error);
+      console.error("[TabStateManager] ❌ Error marking tab busy:", error);
       return false;
     }
   }
 
-  /**
-   * Đánh dấu tab rảnh - CHỈ được gọi từ monitorButtonStateUntilComplete
-   */
   public async markTabFree(tabId: number): Promise<boolean> {
     try {
+      console.log(`[TabStateManager] 🔄 markTabFree called - tabId: ${tabId}`);
+
       const result = await chrome.storage.session.get([this.STORAGE_KEY]);
       const states = (result && result[this.STORAGE_KEY]) || {};
 
       const currentState = states[tabId] || { requestCount: 0 };
+
+      console.log(`[TabStateManager] 📊 Current state BEFORE marking free:`, {
+        tabId: tabId,
+        previousStatus: currentState.status || "unknown",
+        previousRequestId: currentState.requestId || "none",
+        previousRequestCount: currentState.requestCount || 0,
+      });
+
       states[tabId] = {
         status: "free",
         requestId: null,
-        lastUsed: Date.now(),
         requestCount: currentState.requestCount || 0,
       };
 
       await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
+
+      this.invalidateCache(tabId);
+
+      console.log(`[TabStateManager] ✅ Tab marked FREE successfully:`, {
+        tabId: tabId,
+        newStatus: "free",
+        newRequestId: null,
+        requestCount: states[tabId].requestCount,
+        timestamp: Date.now(),
+      });
+
       return true;
     } catch (error) {
-      console.error("[TabStateManager] Error marking tab free:", error);
+      console.error("[TabStateManager] ❌ Error marking tab free:", error);
       return false;
     }
   }
 
   public async getTabState(tabId: number): Promise<TabStateData | null> {
+    const cachedState = this.getCachedState(tabId);
+    if (cachedState) {
+      return cachedState;
+    }
+
     const result = await chrome.storage.session.get([this.STORAGE_KEY]);
     const states = (result && result[this.STORAGE_KEY]) || {};
-    return states[tabId] || null;
+    const state = states[tabId] || null;
+
+    if (state) {
+      this.setCachedState(tabId, state);
+      return state;
+    }
+
+    console.warn(
+      `[TabStateManager] ⚠️ Tab ${tabId} not found in storage, trying fallback...`
+    );
+
+    try {
+      const allStates = await this.getAllTabStates();
+      const tabState = allStates.find((t) => t.tabId === tabId);
+
+      if (tabState) {
+        const fallbackState: TabStateData = {
+          status: tabState.status,
+          requestId: null,
+          requestCount: tabState.requestCount,
+        };
+        this.setCachedState(tabId, fallbackState);
+        return fallbackState;
+      }
+    } catch (error) {
+      console.error(
+        `[TabStateManager] ❌ Fallback validation failed for tab ${tabId}:`,
+        error
+      );
+    }
+
+    return null;
   }
 
   public getEnabled(): boolean {
     return this.isEnabled;
+  }
+
+  private startAutoRecovery(): void {
+    setInterval(async () => {
+      await this.autoRecoverStuckTabs();
+    }, 30000); // Run every 30 seconds
+  }
+
+  private async autoRecoverStuckTabs(): Promise<void> {
+    if (!this.isEnabled) {
+      return;
+    }
+
+    this.invalidateCache();
+
+    try {
+      const result = await chrome.storage.session.get([this.STORAGE_KEY]);
+      const states = (result && result[this.STORAGE_KEY]) || {};
+
+      const STUCK_THRESHOLD = 5 * 60 * 1000; // 5 minutes
+      let recoveredCount = 0;
+
+      for (const [tabIdStr, state] of Object.entries(states)) {
+        const tabState = state as TabStateData;
+        const tabId = parseInt(tabIdStr);
+
+        if (tabState.status === "busy") {
+          // Check if tab has been busy for too long
+          const tabInfo = await this.getDetailedTabInfo(tabId);
+
+          if (
+            tabInfo &&
+            tabInfo.busyDuration &&
+            tabInfo.busyDuration > STUCK_THRESHOLD
+          ) {
+            console.warn(
+              `[TabStateManager] 🔧 Auto-recovering stuck tab ${tabId} (busy for ${Math.round(
+                tabInfo.busyDuration / 1000
+              )}s)`
+            );
+
+            await this.markTabFree(tabId);
+            recoveredCount++;
+          }
+        }
+      }
+
+      if (recoveredCount > 0) {
+        console.log(
+          `[TabStateManager] ✅ Auto-recovery completed: ${recoveredCount} tab(s) recovered`
+        );
+      }
+    } catch (error) {
+      console.error("[TabStateManager] ❌ Error in auto-recovery:", error);
+    }
+  }
+
+  private async getDetailedTabInfo(
+    tabId: number
+  ): Promise<{ busyDuration: number | null } | null> {
+    try {
+      const state = await this.getTabState(tabId);
+      if (!state) {
+        return null;
+      }
+
+      // Estimate busy duration based on requestId timestamp if available
+      // For now, return null as we don't have busySince tracking yet
+      return { busyDuration: null };
+    } catch (error) {
+      return null;
+    }
+  }
+
+  public async forceResetTab(tabId: number): Promise<boolean> {
+    console.warn(`[TabStateManager] 🔧 Force resetting tab ${tabId}`);
+    this.invalidateCache(tabId);
+    return await this.markTabFree(tabId);
   }
 }
 

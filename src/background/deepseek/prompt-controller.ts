@@ -4,23 +4,19 @@ import { StateController } from "./state-controller";
 import { ChatController } from "./chat-controller";
 import { DEFAULT_CONFIG, DeepSeekConfig } from "./types";
 import { wrapPromptWithAPIFormat } from "./prompt-template";
-import { TabMonitor } from "../utils/tab-monitor";
+import { TabStateManager } from "../utils/tab-state-manager";
 
 export class PromptController {
   private static activePollingTasks: Map<number, string> = new Map();
   private static config: DeepSeekConfig = DEFAULT_CONFIG;
-  private static tabMonitor = TabMonitor.getInstance();
+  private static tabStateManager = TabStateManager.getInstance();
 
-  /**
-   * Validate tab trước khi gửi prompt
-   */
   private static async validateTab(
     tabId: number
   ): Promise<{ isValid: boolean; error?: string }> {
     try {
       const browserAPI = getBrowserAPI();
 
-      // Kiểm tra tab có tồn tại không
       const tab = await new Promise<chrome.tabs.Tab>((resolve, reject) => {
         browserAPI.tabs.get(tabId, (result: chrome.tabs.Tab) => {
           if (browserAPI.runtime.lastError) {
@@ -35,7 +31,6 @@ export class PromptController {
         });
       });
 
-      // Kiểm tra URL có phải DeepSeek không
       if (!tab.url?.startsWith("https://chat.deepseek.com")) {
         return {
           isValid: false,
@@ -43,11 +38,22 @@ export class PromptController {
         };
       }
 
-      // Kiểm tra tab có thể nhận request không
-      if (!this.tabMonitor.canAcceptRequest(tabId)) {
+      const tabState = await this.tabStateManager.getTabState(tabId);
+
+      if (!tabState) {
+        console.warn(
+          `[PromptController] ⚠️ Tab ${tabId} state not found (may have been recovered by cache fallback)`
+        );
         return {
           isValid: false,
-          error: `Tab ${tabId} is not ready for new request (cooling down)`,
+          error: `Tab ${tabId} state not found in TabStateManager after fallback attempts`,
+        };
+      }
+
+      if (tabState.status !== "free") {
+        return {
+          isValid: false,
+          error: `Tab ${tabId} is currently ${tabState.status}`,
         };
       }
 
@@ -63,15 +69,16 @@ export class PromptController {
     }
   }
 
-  /**
-   * Gửi prompt tới DeepSeek với validation mạnh mẽ
-   */
   static async sendPrompt(
     tabId: number,
     prompt: string,
     requestId: string
   ): Promise<boolean> {
     try {
+      console.log(
+        `[PromptController] 📥 Received sendPrompt request - tabId: ${tabId}, requestId: ${requestId}`
+      );
+
       const validation = await this.validateTab(tabId);
       if (!validation.isValid) {
         console.error(
@@ -80,27 +87,25 @@ export class PromptController {
 
         const browserAPI = getBrowserAPI();
         try {
-          const connectionsResult = await new Promise<any>(
-            (resolve, reject) => {
-              browserAPI.storage.local.get(["wsConnections"], (data: any) => {
-                if (browserAPI.runtime.lastError) {
-                  reject(browserAPI.runtime.lastError);
-                  return;
-                }
-                resolve(data || {});
-              });
-            }
-          );
+          const FIXED_CONNECTION_ID = "ws-default-1500";
 
-          const connections = connectionsResult?.wsConnections || [];
-          const targetConnection = connections.find(
-            (conn: any) => conn.port === 1500
-          );
+          const statesResult = await new Promise<any>((resolve, reject) => {
+            browserAPI.storage.local.get(["wsStates"], (data: any) => {
+              if (browserAPI.runtime.lastError) {
+                reject(browserAPI.runtime.lastError);
+                return;
+              }
+              resolve(data || {});
+            });
+          });
 
-          if (targetConnection) {
+          const wsStates = statesResult?.wsStates || {};
+          const connectionState = wsStates[FIXED_CONNECTION_ID];
+
+          if (connectionState && connectionState.status === "connected") {
             const errorPayload = {
               wsOutgoingMessage: {
-                connectionId: targetConnection.id,
+                connectionId: FIXED_CONNECTION_ID,
                 data: {
                   type: "promptResponse",
                   requestId: requestId,
@@ -117,7 +122,9 @@ export class PromptController {
             await browserAPI.storage.local.set(errorPayload);
           } else {
             console.error(
-              `[PromptController] ❌ No WebSocket connection found (port 1500)`
+              `[PromptController] ❌ WebSocket not connected (status: ${
+                connectionState?.status || "unknown"
+              })`
             );
           }
         } catch (notifyError) {
@@ -130,18 +137,39 @@ export class PromptController {
         return false;
       }
 
-      this.tabMonitor.markTabBusy(tabId);
+      console.log(
+        `[PromptController] ✅ Tab validation passed - tabId: ${tabId}, status: free`
+      );
+      console.log(`[PromptController] 🖱️ Clicking New Chat button...`);
+
       await ChatController.clickNewChatButton(tabId);
+
+      console.log(`[PromptController] ✅ New Chat button clicked successfully`);
 
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
       const wrappedPrompt = wrapPromptWithAPIFormat(prompt);
 
+      console.log(
+        `[PromptController] 📝 Wrapped prompt ready, length: ${wrappedPrompt.length} chars`
+      );
+
       let retries = 3;
       let result: any = null;
 
+      console.log(
+        `[PromptController] 🔄 Starting textarea fill attempts (max ${retries} retries)...`
+      );
+      console.log(
+        `[PromptController] ⚠️ Tab is currently BUSY - if textarea fill fails, must mark FREE to avoid stuck state`
+      );
+
       while (retries > 0 && !result) {
         try {
+          console.log(
+            `[PromptController] 📌 Textarea fill attempt ${4 - retries}/3`
+          );
+
           result = await executeScript(
             tabId,
             (text: string) => {
@@ -184,29 +212,67 @@ export class PromptController {
           );
 
           if (result && result.success) {
+            console.log(`[PromptController] ✅ Textarea filled successfully`);
             break;
+          } else {
+            console.warn(
+              `[PromptController] ⚠️ Textarea fill returned non-success result:`,
+              result
+            );
           }
         } catch (injectError) {
+          console.error(
+            `[PromptController] ❌ Textarea fill attempt ${
+              4 - retries
+            }/3 failed:`,
+            injectError
+          );
           retries--;
 
           if (retries > 0) {
+            console.log(
+              `[PromptController] 🔄 Retrying in 500ms... (${retries} attempts left)`
+            );
             await new Promise((resolve) => setTimeout(resolve, 500));
           }
         }
       }
 
       if (!result || !result.success) {
-        this.tabMonitor.markTabFree(tabId);
+        console.error(
+          `[PromptController] ❌ All textarea fill attempts failed - tab remains FREE`
+        );
         return false;
       }
+
+      console.log(
+        `[PromptController] ✅ Textarea filled, proceeding to click send button...`
+      );
+
+      console.log(
+        `[PromptController] ✅ Textarea filled, proceeding to click send button...`
+      );
 
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       let clickRetries = 3;
       let clickSuccess = false;
 
+      console.log(
+        `[PromptController] 🔄 Starting send button click attempts (max ${clickRetries} retries)...`
+      );
+      console.log(
+        `[PromptController] ⚠️ Tab is currently BUSY - if button click fails, must mark FREE to avoid stuck state`
+      );
+
       while (clickRetries > 0 && !clickSuccess) {
         try {
+          console.log(
+            `[PromptController] 📌 Send button click attempt ${
+              4 - clickRetries
+            }/3`
+          );
+
           const clickResult = await executeScript(tabId, () => {
             const sendButton = document.querySelector(
               ".ds-icon-button._7436101"
@@ -257,14 +323,22 @@ export class PromptController {
 
           if (clickResult && clickResult.success) {
             const clickTimestamp = Date.now();
-            // Kiểm tra trạng thái button ngay sau khi click
-            try {
-            } catch (stateError) {
-              console.error(
-                `[PromptController] ⚠️ Không thể kiểm tra button state:`,
-                stateError
-              );
-            }
+            console.log(
+              `[PromptController] ✅ Send button clicked successfully at timestamp: ${clickTimestamp}`
+            );
+            console.log(
+              `[PromptController] 🔄 Marking tab BUSY after successful button click...`
+            );
+
+            // Mark tab BUSY chỉ sau khi đã click send button thành công
+            await this.tabStateManager.markTabBusy(tabId, requestId);
+
+            console.log(
+              `[PromptController] ✅ Tab marked BUSY - tabId: ${tabId}, requestId: ${requestId}`
+            );
+            console.log(
+              `[PromptController] 🎯 Prompt has been SENT to DeepSeek - tab will remain BUSY until response received`
+            );
 
             // Bắt đầu monitor button state để phát hiện khi AI trả lời xong
             this.monitorButtonStateUntilComplete(
@@ -276,21 +350,42 @@ export class PromptController {
             clickSuccess = true;
             break;
           } else {
-            // Click failed, retry
+            console.warn(
+              `[PromptController] ⚠️ Send button click returned non-success:`,
+              clickResult
+            );
           }
         } catch (clickError) {
+          console.error(
+            `[PromptController] ❌ Send button click attempt ${
+              4 - clickRetries
+            }/3 failed:`,
+            clickError
+          );
           clickRetries--;
 
           if (clickRetries > 0) {
+            console.log(
+              `[PromptController] 🔄 Retrying in 500ms... (${clickRetries} attempts left)`
+            );
             await new Promise((resolve) => setTimeout(resolve, 500));
           }
         }
       }
 
       if (!clickSuccess) {
-        this.tabMonitor.markTabFree(tabId);
+        console.error(
+          `[PromptController] ❌ All send button click attempts failed - tab remains FREE`
+        );
         return false;
       }
+
+      console.log(
+        `[PromptController] 🎯 Prompt sent successfully, starting response polling...`
+      );
+      console.log(
+        `[PromptController] ℹ️ Tab will remain BUSY until response is received and processed`
+      );
 
       this.activePollingTasks.set(tabId, requestId);
 
@@ -298,15 +393,21 @@ export class PromptController {
 
       return true;
     } catch (error) {
-      this.tabMonitor.markTabFree(tabId);
-      console.error(`[PromptController] ❌ Exception in sendPrompt:`, error);
+      console.error(
+        `[PromptController] ❌ CRITICAL EXCEPTION in sendPrompt:`,
+        error
+      );
+      console.error(
+        `[PromptController] 📍 Exception occurred at: tabId=${tabId}, requestId=${requestId}`
+      );
+      console.error(
+        `[PromptController] ℹ️ Tab remains in current state (likely FREE if exception before button click)`
+      );
+
       return false;
     }
   }
 
-  /**
-   * Monitor button state liên tục để phát hiện khi AI trả lời xong
-   */
   private static async monitorButtonStateUntilComplete(
     tabId: number,
     _requestId: string,
@@ -426,8 +527,11 @@ export class PromptController {
           const response = await this.getLatestResponseDirectly(tabId);
 
           if (response) {
+            console.log(
+              `[PromptController] ✅ Response fetched successfully - marking tab FREE`
+            );
             responseSent = true;
-            this.tabMonitor.markTabFree(tabId);
+            await this.tabStateManager.markTabFree(tabId);
             this.activePollingTasks.delete(tabId);
 
             let responseToSend: any = null;
@@ -563,8 +667,10 @@ export class PromptController {
               capturedRequestId
             );
 
-            // Đánh dấu tab free ngay cả khi không có response
-            this.tabMonitor.markTabFree(tabId);
+            console.log(
+              `[PromptController] 🔧 Marking tab FREE due to failed response fetch`
+            );
+            await this.tabStateManager.markTabFree(tabId);
 
             if (isTestRequest) {
               await browserAPI.storage.local.set({
@@ -656,9 +762,11 @@ export class PromptController {
             "[PromptController] ⏱️ Timeout waiting for response, requestId:",
             capturedRequestId
           );
+          console.log(
+            `[PromptController] 🔧 Marking tab FREE due to response timeout`
+          );
           this.activePollingTasks.delete(tabId);
-          // Đánh dấu tab free khi timeout
-          this.tabMonitor.markTabFree(tabId);
+          await this.tabStateManager.markTabFree(tabId);
 
           if (isTestRequest) {
             await browserAPI.storage.local.set({
@@ -738,9 +846,11 @@ export class PromptController {
           error
         );
 
+        console.log(
+          `[PromptController] 🔧 Marking tab FREE due to polling exception`
+        );
         this.activePollingTasks.delete(tabId);
-        // Đánh dấu tab free khi có lỗi
-        this.tabMonitor.markTabFree(tabId);
+        await this.tabStateManager.markTabFree(tabId);
 
         if (isTestRequest) {
           await browserAPI.storage.local.set({

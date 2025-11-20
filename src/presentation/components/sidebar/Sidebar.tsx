@@ -119,7 +119,7 @@ const Sidebar: React.FC = () => {
       let response: TabStateResponse | null = null;
       let attempts = 0;
       const maxAttempts = 3;
-      const timeoutMs = 8000;
+      const timeoutMs = 3000;
 
       while (attempts < maxAttempts && !response) {
         attempts++;
@@ -130,10 +130,6 @@ const Sidebar: React.FC = () => {
                 { action: "getTabStates" },
                 (response) => {
                   if (chrome.runtime.lastError) {
-                    console.error(
-                      `[Sidebar] ❌ Runtime error on attempt ${attempts}:`,
-                      chrome.runtime.lastError
-                    );
                     resolve(null);
                     return;
                   }
@@ -144,9 +140,6 @@ const Sidebar: React.FC = () => {
             }),
             new Promise<null>((resolve) =>
               setTimeout(() => {
-                console.warn(
-                  `[Sidebar] ⏱️  Timeout (${timeoutMs}ms) on attempt ${attempts}/${maxAttempts}`
-                );
                 resolve(null);
               }, timeoutMs)
             ),
@@ -240,9 +233,6 @@ const Sidebar: React.FC = () => {
           port: typedState.port,
         });
       } else {
-        console.warn(
-          "[Sidebar] ⚠️ No WebSocket state found, setting to disconnected"
-        );
         setWsConnection({
           id: FIXED_CONNECTION_ID,
           status: "disconnected",

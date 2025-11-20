@@ -1,5 +1,5 @@
 import React from "react";
-import { Activity, Clock } from "lucide-react";
+import { Activity } from "lucide-react";
 
 interface TabCardProps {
   tab: {
@@ -7,7 +7,6 @@ interface TabCardProps {
     title: string;
     status: "free" | "busy";
     canAccept: boolean;
-    lastUsed: number;
     requestCount: number;
   };
 }
@@ -23,14 +22,14 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
     return status === "busy" ? "⏳" : "✅";
   };
 
-  const formatLastUsed = (timestamp: number): string => {
-    const now = Date.now();
-    const diff = now - timestamp;
+  const getStatusBadge = (status: string): string => {
+    return status === "busy" ? "Processing" : "Idle";
+  };
 
-    if (diff < 60000) return "Just now";
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    return `${Math.floor(diff / 86400000)}d ago`;
+  const getStatusBadgeColor = (status: string): string => {
+    return status === "busy"
+      ? "text-blue-600 dark:text-blue-400"
+      : "text-gray-600 dark:text-gray-400";
   };
 
   const getRunningState = (canAccept: boolean, status: string): string => {
@@ -82,8 +81,13 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
               <span>{tab.requestCount} reqs</span>
             </div>
             <div className="flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              <span>{formatLastUsed(tab.lastUsed)}</span>
+              <span
+                className={`text-xs font-medium ${getStatusBadgeColor(
+                  tab.status
+                )}`}
+              >
+                {getStatusBadge(tab.status)}
+              </span>
             </div>
           </div>
         </div>

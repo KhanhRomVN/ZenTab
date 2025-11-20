@@ -73,7 +73,9 @@ export class WSManagerNew {
     this.connections.forEach((conn) => connectionsArray.push(conn));
 
     let sentCount = 0;
-    for (const conn of connectionsArray) {
+    const connectionsToProcess = connectionsArray;
+    for (let i = 0; i < connectionsToProcess.length; i++) {
+      const conn = connectionsToProcess[i];
       if (conn.state.status === "connected") {
         try {
           conn.send(message);
@@ -91,7 +93,8 @@ export class WSManagerNew {
   public async hasActiveConnections(): Promise<boolean> {
     const connectionsArray: WSConnection[] = [];
     this.connections.forEach((conn) => connectionsArray.push(conn));
-    for (const conn of connectionsArray) {
+    for (let i = 0; i < connectionsArray.length; i++) {
+      const conn = connectionsArray[i];
       if (conn.state.status === "connected") {
         return true;
       }
@@ -240,7 +243,8 @@ export class WSManagerNew {
     const states: WSConnectionState[] = [];
     const connectionsArray: WSConnection[] = [];
     this.connections.forEach((conn) => connectionsArray.push(conn));
-    for (const conn of connectionsArray) {
+    for (let i = 0; i < connectionsArray.length; i++) {
+      const conn = connectionsArray[i];
       states.push(conn.getState());
     }
     return { success: true, connections: states };
