@@ -140,6 +140,16 @@ export class PromptController {
       console.log(
         `[PromptController] ✅ Tab validation passed - tabId: ${tabId}, status: free`
       );
+
+      // 🆕 CRITICAL FIX: Mark tab BUSY ngay sau validation để tránh race condition
+      console.log(
+        `[PromptController] 🔒 Marking tab BUSY early to prevent race condition...`
+      );
+      await this.tabStateManager.markTabBusy(tabId, requestId);
+      console.log(
+        `[PromptController] ✅ Tab marked BUSY early - tabId: ${tabId}, requestId: ${requestId}`
+      );
+
       console.log(`[PromptController] 🖱️ Clicking New Chat button...`);
 
       await ChatController.clickNewChatButton(tabId);
@@ -161,7 +171,7 @@ export class PromptController {
         `[PromptController] 🔄 Starting textarea fill attempts (max ${retries} retries)...`
       );
       console.log(
-        `[PromptController] ⚠️ Tab is currently BUSY - if textarea fill fails, must mark FREE to avoid stuck state`
+        `[PromptController] 📝 Prompt length: ${wrappedPrompt.length} chars, will attempt to fill and trigger events`
       );
 
       while (retries > 0 && !result) {
@@ -189,13 +199,35 @@ export class PromptController {
                 };
               }
 
+              // Step 1: Focus textarea
+              textarea.focus();
+
+              // Step 2: Set value
               textarea.value = text;
 
-              const inputEvent = new Event("input", { bubbles: true });
+              // Step 3: Create proper InputEvent with data property
+              const inputEvent = new InputEvent("input", {
+                bubbles: true,
+                cancelable: true,
+                data: text,
+                inputType: "insertText",
+              });
               textarea.dispatchEvent(inputEvent);
 
+              // Step 4: Dispatch change event
               const changeEvent = new Event("change", { bubbles: true });
               textarea.dispatchEvent(changeEvent);
+
+              // Step 5: Trigger React's internal event system
+              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLTextAreaElement.prototype,
+                "value"
+              )?.set;
+
+              if (nativeInputValueSetter) {
+                nativeInputValueSetter.call(textarea, text);
+                textarea.dispatchEvent(new Event("input", { bubbles: true }));
+              }
 
               return {
                 success: true,
@@ -205,6 +237,7 @@ export class PromptController {
                   textareaValue: textarea.value.substring(0, 50),
                   textareaDisabled: textarea.disabled,
                   textareaReadOnly: textarea.readOnly,
+                  textareaFocused: document.activeElement === textarea,
                 },
               };
             },
@@ -213,6 +246,7 @@ export class PromptController {
 
           if (result && result.success) {
             console.log(`[PromptController] ✅ Textarea filled successfully`);
+            console.log(`[PromptController] 📊 Textarea state:`, result.debug);
             break;
           } else {
             console.warn(
@@ -240,143 +274,150 @@ export class PromptController {
 
       if (!result || !result.success) {
         console.error(
-          `[PromptController] ❌ All textarea fill attempts failed - tab remains FREE`
+          `[PromptController] ❌ All textarea fill attempts failed - marking tab FREE for cleanup`
         );
+        await this.tabStateManager.markTabFree(tabId);
         return false;
       }
 
       console.log(
-        `[PromptController] ✅ Textarea filled, proceeding to click send button...`
+        `[PromptController] ✅ Textarea filled, proceeding to check button state...`
       );
+
+      // Wait longer for button to enable (DeepSeek UI needs time to process events)
+      await new Promise((resolve) => setTimeout(resolve, 3000));
 
       console.log(
-        `[PromptController] ✅ Textarea filled, proceeding to click send button...`
+        `[PromptController] 🔄 Attempting to click send button (single attempt, no retry)...`
       );
 
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const clickResult = await executeScript(tabId, () => {
+        const sendButton = document.querySelector(
+          ".ds-icon-button._7436101"
+        ) as HTMLButtonElement;
 
-      let clickRetries = 3;
-      let clickSuccess = false;
-
-      console.log(
-        `[PromptController] 🔄 Starting send button click attempts (max ${clickRetries} retries)...`
-      );
-      console.log(
-        `[PromptController] ⚠️ Tab is currently BUSY - if button click fails, must mark FREE to avoid stuck state`
-      );
-
-      while (clickRetries > 0 && !clickSuccess) {
-        try {
-          console.log(
-            `[PromptController] 📌 Send button click attempt ${
-              4 - clickRetries
-            }/3`
-          );
-
-          const clickResult = await executeScript(tabId, () => {
-            const sendButton = document.querySelector(
-              ".ds-icon-button._7436101"
-            ) as HTMLButtonElement;
-
-            if (!sendButton) {
-              return {
-                success: false,
-                reason: "button_not_found",
-                debug: {
-                  buttonExists: false,
-                  allButtons:
-                    document.querySelectorAll(".ds-icon-button").length,
-                  specificButtons: document.querySelectorAll(
-                    ".ds-icon-button._7436101"
-                  ).length,
-                },
-              };
-            }
-
-            const isDisabled = sendButton.classList.contains(
-              "ds-icon-button--disabled"
-            );
-
-            if (isDisabled) {
-              return {
-                success: false,
-                reason: "button_disabled",
-                debug: {
-                  buttonExists: true,
-                  isDisabled: true,
-                  classList: Array.from(sendButton.classList),
-                },
-              };
-            }
-
-            sendButton.click();
-
-            return {
-              success: true,
-              debug: {
-                buttonExists: true,
-                isDisabled: false,
-                clicked: true,
-              },
-            };
-          });
-
-          if (clickResult && clickResult.success) {
-            const clickTimestamp = Date.now();
-            console.log(
-              `[PromptController] ✅ Send button clicked successfully at timestamp: ${clickTimestamp}`
-            );
-            console.log(
-              `[PromptController] 🔄 Marking tab BUSY after successful button click...`
-            );
-
-            // Mark tab BUSY chỉ sau khi đã click send button thành công
-            await this.tabStateManager.markTabBusy(tabId, requestId);
-
-            console.log(
-              `[PromptController] ✅ Tab marked BUSY - tabId: ${tabId}, requestId: ${requestId}`
-            );
-            console.log(
-              `[PromptController] 🎯 Prompt has been SENT to DeepSeek - tab will remain BUSY until response received`
-            );
-
-            // Bắt đầu monitor button state để phát hiện khi AI trả lời xong
-            this.monitorButtonStateUntilComplete(
-              tabId,
-              requestId,
-              clickTimestamp
-            );
-
-            clickSuccess = true;
-            break;
-          } else {
-            console.warn(
-              `[PromptController] ⚠️ Send button click returned non-success:`,
-              clickResult
-            );
-          }
-        } catch (clickError) {
-          console.error(
-            `[PromptController] ❌ Send button click attempt ${
-              4 - clickRetries
-            }/3 failed:`,
-            clickError
-          );
-          clickRetries--;
-
-          if (clickRetries > 0) {
-            console.log(
-              `[PromptController] 🔄 Retrying in 500ms... (${clickRetries} attempts left)`
-            );
-            await new Promise((resolve) => setTimeout(resolve, 500));
-          }
+        if (!sendButton) {
+          return {
+            success: false,
+            reason: "button_not_found",
+            debug: {
+              buttonExists: false,
+              allButtons: document.querySelectorAll(".ds-icon-button").length,
+              specificButtons: document.querySelectorAll(
+                ".ds-icon-button._7436101"
+              ).length,
+            },
+          };
         }
-      }
 
-      if (!clickSuccess) {
-        console.error(
-          `[PromptController] ❌ All send button click attempts failed - tab remains FREE`
+        const isDisabled = sendButton.classList.contains(
+          "ds-icon-button--disabled"
         );
+
+        if (isDisabled) {
+          // Try to trigger button enable by re-focusing textarea and dispatching events
+          const textarea = document.querySelector(
+            'textarea[placeholder="Message DeepSeek"]'
+          ) as HTMLTextAreaElement;
+
+          if (textarea && textarea.value) {
+            // Re-focus and trigger events
+            textarea.focus();
+            textarea.blur();
+            textarea.focus();
+
+            // Dispatch multiple events to trigger validation
+            const events = [
+              new Event("input", { bubbles: true }),
+              new Event("change", { bubbles: true }),
+              new Event("keyup", { bubbles: true }),
+              new Event("keydown", { bubbles: true }),
+            ];
+
+            events.forEach((event) => textarea.dispatchEvent(event));
+
+            // Check button state again after short delay
+            const checkAfterMs = 500;
+            return new Promise((resolve) => {
+              setTimeout(() => {
+                const stillDisabled = sendButton.classList.contains(
+                  "ds-icon-button--disabled"
+                );
+
+                if (stillDisabled) {
+                  resolve({
+                    success: false,
+                    reason: "button_still_disabled_after_retry",
+                    debug: {
+                      buttonExists: true,
+                      isDisabled: true,
+                      classList: Array.from(sendButton.classList),
+                      textareaValue: textarea.value.substring(0, 50),
+                      textareaFocused: document.activeElement === textarea,
+                    },
+                  });
+                } else {
+                  // Button enabled, click it
+                  sendButton.click();
+                  resolve({
+                    success: true,
+                    debug: {
+                      buttonExists: true,
+                      isDisabled: false,
+                      clicked: true,
+                      retriedEvents: true,
+                    },
+                  });
+                }
+              }, checkAfterMs);
+            });
+          }
+
+          return {
+            success: false,
+            reason: "button_disabled",
+            debug: {
+              buttonExists: true,
+              isDisabled: true,
+              classList: Array.from(sendButton.classList),
+              textareaExists: !!textarea,
+              textareaValue: textarea?.value.substring(0, 50) || "N/A",
+            },
+          };
+        }
+
+        sendButton.click();
+
+        return {
+          success: true,
+          debug: {
+            buttonExists: true,
+            isDisabled: false,
+            clicked: true,
+          },
+        };
+      });
+
+      if (clickResult && clickResult.success) {
+        const clickTimestamp = Date.now();
+        console.log(
+          `[PromptController] ✅ Send button clicked successfully at timestamp: ${clickTimestamp}`
+        );
+        console.log(
+          `[PromptController] 🎯 Prompt has been SENT to DeepSeek - tab will remain BUSY until response received`
+        );
+
+        // Bắt đầu monitor button state để phát hiện khi AI trả lời xong
+        this.monitorButtonStateUntilComplete(tabId, requestId, clickTimestamp);
+      } else {
+        console.error(
+          `[PromptController] ❌ Send button click failed - marking tab FREE`
+        );
+        console.error(`[PromptController] 💡 Click result:`, clickResult);
+        console.error(
+          `[PromptController] 💡 Hint: Button may be disabled due to DeepSeek UI validation or tab is currently processing another request.`
+        );
+        await this.tabStateManager.markTabFree(tabId);
         return false;
       }
 
