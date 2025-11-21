@@ -1150,19 +1150,32 @@ export class PromptController {
                           .trim();
                         result += itemText + "\n";
                       } else {
-                        // Regular list item
+                        // Regular list item (including lists inside <thinking>)
                         if (tag === "ol") {
                           result += `${index + 1}. `;
                         } else {
                           result += "- ";
                         }
 
-                        // Extract content recursively (không thêm text trực tiếp)
+                        // 🆕 FIX: Extract content recursively VÀ GIỮ NGUYÊN paragraph structure
                         Array.from(item.childNodes).forEach((child) => {
                           if (child.nodeType === Node.TEXT_NODE) {
-                            result += (child.textContent || "").trim();
-                          } else {
-                            traverse(child);
+                            result += child.textContent || "";
+                          } else if (child.nodeType === Node.ELEMENT_NODE) {
+                            const childEl = child as Element;
+                            const childTag = childEl.tagName.toLowerCase();
+
+                            // Handle <p> inside <li> - keep newline structure
+                            if (childTag === "p") {
+                              traverse(child);
+                              // Remove the automatic "\n\n" that paragraph adds
+                              // and replace with single newline for list item
+                              if (result.endsWith("\n\n")) {
+                                result = result.slice(0, -2);
+                              }
+                            } else {
+                              traverse(child);
+                            }
                           }
                         });
                         result += "\n";
@@ -1254,9 +1267,17 @@ export class PromptController {
             .replace(/(-\s*\[\s*[x ]\s*\][^\n]*)\s+(-)/g, "$1\n$2")
             // 🆕 CRITICAL: Fix closing tags dính liền với list items
             // Pattern: "- [ ] text</task_progress>" → "- [ ] text\n</task_progress>"
-            .replace(/(-\s*\[\s*[x ]\s*\][^\n<]*?)(<\/\w+>)/g, "$1\n$2")
+            // BUT SKIP tags like </path>, </thinking>, </read_file> that should stay inline
+            .replace(
+              /(-\s*\[\s*[x ]\s*\][^\n<]*?)(<\/(?!path|thinking|read_file|write_file)\w+>)/g,
+              "$1\n$2"
+            )
             // Pattern: "</task_progress></read_file>" → "</task_progress>\n</read_file>"
-            .replace(/(<\/\w+>)(<\/\w+>)/g, "$1\n$2");
+            // BUT keep tool structure intact (don't add newline between tool closing tags)
+            .replace(
+              /(<\/task_progress>)(<\/(?:read_file|write_file|execute_command)>)/g,
+              "$1$2"
+            );
 
           console.log(
             "[DeepSeek Page] 🔍 DEBUG extracted markdown length:",
