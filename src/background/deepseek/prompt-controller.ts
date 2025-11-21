@@ -527,7 +527,7 @@ export class PromptController {
 
               const wsMessages = messagesResult?.wsMessages || {};
 
-              for (const [connId, msgArray] of Object.entries(wsMessages)) {
+              for (const [, msgArray] of Object.entries(wsMessages)) {
                 const msgs = msgArray as Array<{
                   timestamp: number;
                   data: any;
@@ -971,317 +971,341 @@ export class PromptController {
           behavior: "smooth",
         });
 
-        // Strategy 1: Tìm tất cả ds-markdown containers
-        const markdownContainers = Array.from(
-          document.querySelectorAll(".ds-markdown")
-        );
+        // Strategy 1: Tìm TẤT CẢ message containers với nhiều selectors
+        const possibleSelectors = [
+          '[class*="message"]',
+          '[class*="chat-message"]',
+          '[class*="conversation"]',
+          ".ds-markdown",
+        ];
 
-        if (markdownContainers.length > 0) {
-          const lastMarkdown =
-            markdownContainers[markdownContainers.length - 1];
+        let allMessages: Element[] = [];
+        for (const selector of possibleSelectors) {
+          const found = Array.from(document.querySelectorAll(selector));
+          if (found.length > 0) {
+            allMessages = found;
+            break;
+          }
+        }
 
-          // Tìm parent container chứa toàn bộ message
-          let messageContainer: Element = lastMarkdown;
-          let parent = lastMarkdown.parentElement;
-          let level = 0;
+        if (allMessages.length === 0) {
+          console.error(
+            "[DeepSeek Page] ❌ No message containers found with any selector"
+          );
+          return null;
+        }
 
-          while (parent && level < 5) {
-            const parentClasses = parent.className || "";
-            if (
-              parentClasses.includes("message") ||
-              parentClasses.includes("content") ||
-              parentClasses.includes("assistant") ||
-              parentClasses.includes("response")
-            ) {
-              messageContainer = parent;
-              break;
-            }
-            const childMarkdowns = parent.querySelectorAll(".ds-markdown");
-            if (
-              childMarkdowns.length === 1 &&
-              parent.textContent &&
-              parent.textContent.length >
-                (messageContainer.textContent?.length || 0)
-            ) {
-              messageContainer = parent;
-            }
-            parent = parent.parentElement;
-            level++;
+        // Lọc ra CHỈ CÁC AI RESPONSES (chứa ds-markdown hoặc có content dài)
+        const aiResponses = allMessages.filter((msg) => {
+          const hasMarkdown = msg.querySelector(".ds-markdown") !== null;
+          const hasContent = msg.classList && !msg.classList.contains("user");
+          return hasMarkdown || hasContent;
+        });
+
+        if (aiResponses.length === 0) {
+          console.error("[DeepSeek Page] ❌ No AI responses found");
+          return null;
+        }
+
+        // Lấy AI response CUỐI CÙNG (response mới nhất)
+        const lastAIResponse = aiResponses[aiResponses.length - 1];
+        const lastMarkdown =
+          lastAIResponse.querySelector(".ds-markdown") || lastAIResponse;
+
+        if (!lastMarkdown) {
+          console.error("[DeepSeek Page] ❌ Last AI response missing markdown");
+          return null;
+        }
+
+        // Tìm parent container chứa toàn bộ message
+        let messageContainer: Element = lastMarkdown;
+        let parent = lastMarkdown.parentElement;
+        let level = 0;
+
+        while (parent && level < 5) {
+          // ✅ Safe string conversion
+          const parentClasses = String(parent.className || "");
+
+          if (
+            parentClasses.includes("message") ||
+            parentClasses.includes("content") ||
+            parentClasses.includes("assistant") ||
+            parentClasses.includes("response")
+          ) {
+            messageContainer = parent;
+            break;
           }
 
-          const extractMarkdown = (element: Element): string => {
-            let result = "";
+          const childMarkdowns = parent.querySelectorAll(".ds-markdown");
+          const parentText = parent.textContent || "";
+          const containerText = messageContainer.textContent || "";
 
-            const traverse = (node: Node): void => {
-              if (node.nodeType === Node.TEXT_NODE) {
-                const text = node.textContent || "";
+          if (
+            childMarkdowns.length === 1 &&
+            parentText.length > containerText.length
+          ) {
+            messageContainer = parent;
+          }
+          parent = parent.parentElement;
+          level++;
+        }
 
-                if (
-                  text.includes("<task_progress>") ||
-                  text.includes("</task_progress>")
-                ) {
-                  result += text;
-                  return;
-                }
+        const extractMarkdown = (element: Element): string => {
+          let result = "";
 
-                result += text;
-              } else if (node.nodeType === Node.ELEMENT_NODE) {
-                const el = node as Element;
-                const tag = el.tagName.toLowerCase();
-                const className = el.className || "";
+          const traverse = (node: Node): void => {
+            if (node.nodeType === Node.TEXT_NODE) {
+              const text = node.textContent || "";
 
-                // 🆕 CRITICAL: Xử lý đặc biệt cho ds-markdown-html spans (chứa XML tags)
-                if (className.includes("ds-markdown-html")) {
-                  const htmlContent = el.textContent || "";
+              // ✅ Ensure text is always string before using .includes()
+              const safeText = String(text);
 
-                  // 🆕 CRITICAL: Nếu là closing tag và không có newline trước nó
-                  // thì tự động thêm newline
-                  if (htmlContent.startsWith("</") && !result.endsWith("\n")) {
-                    result += "\n";
-                  }
-
-                  result += htmlContent;
-                  return;
-                }
-
-                // Handle line breaks
-                if (tag === "br") {
-                  result += "\n";
-                  return;
-                }
-
-                // Handle code blocks
-                if (tag === "pre") {
-                  const codeEl = el.querySelector("code");
-                  if (codeEl) {
-                    const lang =
-                      codeEl.className.match(/language-(\w+)/)?.[1] || "";
-                    result += "```" + lang + "\n";
-                    result += codeEl.textContent || "";
-                    result += "\n```\n";
-                  } else {
-                    result += "```\n";
-                    result += el.textContent || "";
-                    result += "\n```\n";
-                  }
-                  return;
-                }
-
-                // Handle inline code
-                if (
-                  tag === "code" &&
-                  el.parentElement?.tagName.toLowerCase() !== "pre"
-                ) {
-                  result += "`" + (el.textContent || "") + "`";
-                  return;
-                }
-
-                // Handle lists
-                if (tag === "ul" || tag === "ol") {
-                  const items = Array.from(el.children);
-
-                  // 🆕 CRITICAL: Kiểm tra xem list này có phải là task_progress không
-                  // Check previous sibling để tìm <task_progress> tag
-                  let isTaskProgressList = false;
-                  let sibling = el.previousElementSibling;
-                  let checkCount = 0;
-
-                  // Check tối đa 3 sibling trước đó
-                  while (sibling && checkCount < 3) {
-                    const siblingText = sibling.textContent || "";
-                    if (
-                      siblingText.includes("<task_progress>") ||
-                      siblingText.includes("&lt;task_progress&gt;")
-                    ) {
-                      isTaskProgressList = true;
-                      break;
-                    }
-                    sibling = sibling.previousElementSibling;
-                    checkCount++;
-                  }
-
-                  items.forEach((item, index) => {
-                    if (item.tagName.toLowerCase() === "li") {
-                      // 🆕 CRITICAL: Kiểm tra checkbox trong li
-                      const checkbox = item.querySelector(
-                        'input[type="checkbox"]'
-                      ) as HTMLInputElement | null;
-
-                      if (checkbox) {
-                        // Task list item với checkbox thực
-                        const isChecked = checkbox.checked;
-                        result += isChecked ? "- [x] " : "- [ ] ";
-
-                        // Extract text content, skipping the checkbox element
-                        const textNodes: string[] = [];
-                        const extractText = (n: Node): void => {
-                          if (n.nodeType === Node.TEXT_NODE) {
-                            const text = (n.textContent || "").trim();
-                            if (text) {
-                              textNodes.push(text);
-                            }
-                          } else if (n.nodeType === Node.ELEMENT_NODE) {
-                            const elem = n as Element;
-                            if (elem.tagName.toLowerCase() !== "input") {
-                              Array.from(elem.childNodes).forEach(extractText);
-                            }
-                          }
-                        };
-                        Array.from(item.childNodes).forEach(extractText);
-                        result += textNodes.join("").trim() + "\n";
-                      } else if (isTaskProgressList) {
-                        // 🆕 Task progress list WITHOUT checkbox element → force add "- [ ] "
-                        result += "- [ ] ";
-
-                        // Extract text content và trim để loại bỏ whitespace thừa
-                        const itemText = (item.textContent || "")
-                          .replace(/\s+/g, " ")
-                          .trim();
-                        result += itemText + "\n";
-                      } else {
-                        // Regular list item (including lists inside <thinking>)
-                        if (tag === "ol") {
-                          result += `${index + 1}. `;
-                        } else {
-                          result += "- ";
-                        }
-
-                        // 🆕 FIX: Extract content recursively VÀ GIỮ NGUYÊN paragraph structure
-                        Array.from(item.childNodes).forEach((child) => {
-                          if (child.nodeType === Node.TEXT_NODE) {
-                            result += child.textContent || "";
-                          } else if (child.nodeType === Node.ELEMENT_NODE) {
-                            const childEl = child as Element;
-                            const childTag = childEl.tagName.toLowerCase();
-
-                            // Handle <p> inside <li> - keep newline structure
-                            if (childTag === "p") {
-                              traverse(child);
-                              // Remove the automatic "\n\n" that paragraph adds
-                              // and replace with single newline for list item
-                              if (result.endsWith("\n\n")) {
-                                result = result.slice(0, -2);
-                              }
-                            } else {
-                              traverse(child);
-                            }
-                          }
-                        });
-                        result += "\n";
-                      }
-                    }
-                  });
-                  return;
-                }
-
-                // Handle headings
-                if (tag.match(/^h[1-6]$/)) {
-                  const level = parseInt(tag[1]);
-                  result += "#".repeat(level) + " ";
-                  Array.from(el.childNodes).forEach(traverse);
-                  result += "\n\n";
-                  return;
-                }
-
-                // Handle paragraphs
-                if (tag === "p") {
-                  Array.from(el.childNodes).forEach(traverse);
-                  // Only add newlines if there's actual content
-                  if (el.textContent && el.textContent.trim()) {
-                    result += "\n\n";
-                  }
-                  return;
-                }
-
-                // Handle blockquotes
-                if (tag === "blockquote") {
-                  const lines = (el.textContent || "").split("\n");
-                  lines.forEach((line) => {
-                    if (line.trim()) {
-                      result += "> " + line + "\n";
-                    }
-                  });
-                  result += "\n";
-                  return;
-                }
-
-                // Handle bold
-                if (tag === "strong" || tag === "b") {
-                  result += "**";
-                  Array.from(el.childNodes).forEach(traverse);
-                  result += "**";
-                  return;
-                }
-
-                // Handle italic
-                if (tag === "em" || tag === "i") {
-                  result += "*";
-                  Array.from(el.childNodes).forEach(traverse);
-                  result += "*";
-                  return;
-                }
-
-                // Handle divs and other containers
-                Array.from(el.childNodes).forEach(traverse);
-
-                // Add line break for block elements
-                const blockElements = [
-                  "div",
-                  "section",
-                  "article",
-                  "header",
-                  "footer",
-                  "main",
-                ];
-                if (blockElements.includes(tag)) {
-                  result += "\n";
-                }
+              if (
+                safeText.includes("<task_progress>") ||
+                safeText.includes("</task_progress>")
+              ) {
+                result += safeText;
+                return;
               }
-            };
 
-            traverse(element);
-            return result;
+              result += safeText;
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+              const el = node as Element;
+              const tag = el.tagName.toLowerCase();
+              // ✅ Safe string conversion
+              const className = String(el.className || "");
+
+              // 🆕 CRITICAL: Xử lý đặc biệt cho ds-markdown-html spans (chứa XML tags)
+              if (className.includes("ds-markdown-html")) {
+                const htmlContent = String(el.textContent || "");
+
+                // 🆕 CRITICAL: Nếu là closing tag và không có newline trước nó
+                // thì tự động thêm newline
+                if (htmlContent.startsWith("</") && !result.endsWith("\n")) {
+                  result += "\n";
+                }
+
+                result += htmlContent;
+                return;
+              }
+
+              // Handle line breaks
+              if (tag === "br") {
+                result += "\n";
+                return;
+              }
+
+              // Handle code blocks
+              if (tag === "pre") {
+                const codeEl = el.querySelector("code");
+                if (codeEl) {
+                  const lang =
+                    codeEl.className.match(/language-(\w+)/)?.[1] || "";
+                  result += "```" + lang + "\n";
+                  result += codeEl.textContent || "";
+                  result += "\n```\n";
+                } else {
+                  result += "```\n";
+                  result += el.textContent || "";
+                  result += "\n```\n";
+                }
+                return;
+              }
+
+              // Handle inline code
+              if (
+                tag === "code" &&
+                el.parentElement?.tagName.toLowerCase() !== "pre"
+              ) {
+                result += "`" + (el.textContent || "") + "`";
+                return;
+              }
+
+              // Handle lists
+              if (tag === "ul" || tag === "ol") {
+                const items = Array.from(el.children);
+
+                // 🆕 CRITICAL: Kiểm tra xem list này có phải là task_progress không
+                // Check previous sibling để tìm <task_progress> tag
+                let isTaskProgressList = false;
+                let sibling = el.previousElementSibling;
+                let checkCount = 0;
+
+                // Check tối đa 3 sibling trước đó
+                while (sibling && checkCount < 3) {
+                  const siblingText = sibling.textContent || "";
+                  if (
+                    siblingText.includes("<task_progress>") ||
+                    siblingText.includes("&lt;task_progress&gt;")
+                  ) {
+                    isTaskProgressList = true;
+                    break;
+                  }
+                  sibling = sibling.previousElementSibling;
+                  checkCount++;
+                }
+
+                items.forEach((item, index) => {
+                  if (item.tagName.toLowerCase() === "li") {
+                    // 🆕 CRITICAL: Kiểm tra checkbox trong li
+                    const checkbox = item.querySelector(
+                      'input[type="checkbox"]'
+                    ) as HTMLInputElement | null;
+
+                    if (checkbox) {
+                      // Task list item với checkbox thực
+                      const isChecked = checkbox.checked;
+                      result += isChecked ? "- [x] " : "- [ ] ";
+
+                      // Extract text content, skipping the checkbox element
+                      const textNodes: string[] = [];
+                      const extractText = (n: Node): void => {
+                        if (n.nodeType === Node.TEXT_NODE) {
+                          const text = (n.textContent || "").trim();
+                          if (text) {
+                            textNodes.push(text);
+                          }
+                        } else if (n.nodeType === Node.ELEMENT_NODE) {
+                          const elem = n as Element;
+                          if (elem.tagName.toLowerCase() !== "input") {
+                            Array.from(elem.childNodes).forEach(extractText);
+                          }
+                        }
+                      };
+                      Array.from(item.childNodes).forEach(extractText);
+                      result += textNodes.join("").trim() + "\n";
+                    } else if (isTaskProgressList) {
+                      // 🆕 Task progress list WITHOUT checkbox element → force add "- [ ] "
+                      result += "- [ ] ";
+
+                      // Extract text content và trim để loại bỏ whitespace thừa
+                      const itemText = (item.textContent || "")
+                        .replace(/\s+/g, " ")
+                        .trim();
+                      result += itemText + "\n";
+                    } else {
+                      // Regular list item (including lists inside <thinking>)
+                      if (tag === "ol") {
+                        result += `${index + 1}. `;
+                      } else {
+                        result += "- ";
+                      }
+
+                      // 🆕 FIX: Extract content recursively VÀ GIỮ NGUYÊN paragraph structure
+                      Array.from(item.childNodes).forEach((child) => {
+                        if (child.nodeType === Node.TEXT_NODE) {
+                          result += child.textContent || "";
+                        } else if (child.nodeType === Node.ELEMENT_NODE) {
+                          const childEl = child as Element;
+                          const childTag = childEl.tagName.toLowerCase();
+
+                          // Handle <p> inside <li> - keep newline structure
+                          if (childTag === "p") {
+                            traverse(child);
+                            // Remove the automatic "\n\n" that paragraph adds
+                            // and replace with single newline for list item
+                            if (result.endsWith("\n\n")) {
+                              result = result.slice(0, -2);
+                            }
+                          } else {
+                            traverse(child);
+                          }
+                        }
+                      });
+                      result += "\n";
+                    }
+                  }
+                });
+                return;
+              }
+
+              // Handle headings
+              if (tag.match(/^h[1-6]$/)) {
+                const level = parseInt(tag[1]);
+                result += "#".repeat(level) + " ";
+                Array.from(el.childNodes).forEach(traverse);
+                result += "\n\n";
+                return;
+              }
+
+              // Handle paragraphs
+              if (tag === "p") {
+                Array.from(el.childNodes).forEach(traverse);
+                // Only add newlines if there's actual content
+                if (el.textContent && el.textContent.trim()) {
+                  result += "\n\n";
+                }
+                return;
+              }
+
+              // Handle blockquotes
+              if (tag === "blockquote") {
+                const lines = (el.textContent || "").split("\n");
+                lines.forEach((line) => {
+                  if (line.trim()) {
+                    result += "> " + line + "\n";
+                  }
+                });
+                result += "\n";
+                return;
+              }
+
+              // Handle bold
+              if (tag === "strong" || tag === "b") {
+                result += "**";
+                Array.from(el.childNodes).forEach(traverse);
+                result += "**";
+                return;
+              }
+
+              // Handle italic
+              if (tag === "em" || tag === "i") {
+                result += "*";
+                Array.from(el.childNodes).forEach(traverse);
+                result += "*";
+                return;
+              }
+
+              // Handle divs and other containers
+              Array.from(el.childNodes).forEach(traverse);
+
+              // Add line break for block elements
+              const blockElements = [
+                "div",
+                "section",
+                "article",
+                "header",
+                "footer",
+                "main",
+              ];
+              if (blockElements.includes(tag)) {
+                result += "\n";
+              }
+            }
           };
 
-          let markdownText = extractMarkdown(messageContainer);
+          traverse(element);
+          return result;
+        };
 
-          markdownText = markdownText
-            .replace(/\n+(<\/?\w+>)/g, "\n$1")
-            .replace(/ {2,}/g, " ")
-            .replace(/(<task_progress>)\s+(-)/g, "$1\n$2")
-            .replace(/(-\s*\[\s*[x ]\s*\][^\n]*)\s+(-)/g, "$1\n$2")
-            .replace(
-              /(-\s*\[\s*[x ]\s*\][^\n<]*?)(<\/(?!path|thinking|read_file|write_file)\w+>)/g,
-              "$1\n$2"
-            )
+        let markdownText = extractMarkdown(messageContainer);
 
-            .replace(
-              /(<\/task_progress>)(<\/(?:read_file|write_file|execute_command)>)/g,
-              "$1$2"
-            );
+        markdownText = markdownText
+          .replace(/\n+(<\/?\w+>)/g, "\n$1")
+          .replace(/ {2,}/g, " ")
+          .replace(/(<task_progress>)\s+(-)/g, "$1\n$2")
+          .replace(/(-\s*\[\s*[x ]\s*\][^\n]*)\s+(-)/g, "$1\n$2")
+          .replace(
+            /(-\s*\[\s*[x ]\s*\][^\n<]*?)(<\/(?!path|thinking|read_file|write_file)\w+>)/g,
+            "$1\n$2"
+          )
 
-          return { content: markdownText, method: "ds-markdown-parent" };
-        }
+          .replace(
+            /(<\/task_progress>)(<\/(?:read_file|write_file|execute_command)>)/g,
+            "$1$2"
+          );
 
-        // Strategy 2: Fallback - tìm theo class "message"
-        const messageContainers = Array.from(
-          document.querySelectorAll('[class*="message"]')
-        );
-
-        if (messageContainers.length === 0) {
-          console.error("[DeepSeek Page] ❌ No message containers found");
-          return null;
-        }
-
-        const lastContainer = messageContainers[messageContainers.length - 1];
-        const textContent = lastContainer.textContent || "";
-
-        if (!textContent) {
-          console.error("[DeepSeek Page] ❌ Last message container is empty");
-          return null;
-        }
-
-        return { content: textContent, method: "fallback-message" };
+        return { content: markdownText, method: "ds-markdown-parent" };
       });
 
       if (!extractedContent) {
@@ -1289,10 +1313,25 @@ export class PromptController {
         return null;
       }
 
-      const { content } = extractedContent as {
+      // ✅ Type validation before destructuring
+      if (typeof extractedContent !== "object" || extractedContent === null) {
+        console.error(
+          `[PromptController] ❌ Invalid extractedContent type:`,
+          typeof extractedContent
+        );
+        return null;
+      }
+
+      const { content, method } = extractedContent as {
         content: string;
         method: string;
       };
+
+      console.log(
+        `[PromptController] ℹ️ Extracted via method: ${method}, length: ${
+          content?.length || 0
+        }`
+      );
 
       // Step 2: Decode HTML entities
       const decodedResult = this.decodeHtmlEntities(content);
