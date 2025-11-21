@@ -87,10 +87,33 @@ declare const browser: typeof chrome & any;
             continue;
           }
 
-          // 🆕 Combine system prompt + user prompt
+          // 🆕 Combine system prompt + user prompt + XML structure rules
+          const xmlStructureRules = `
+CRITICAL XML STRUCTURE RULES:
+1. <task_progress> MUST be placed OUTSIDE of any tool tags (like <read_file>, <write_file>, etc.)
+2. Tool tags like <read_file> should ONLY contain their required parameters (e.g., <path>)
+3. NEVER nest <task_progress> inside tool tags
+
+CORRECT FORMAT:
+<read_file>
+<path>path/to/file.py</path>
+</read_file>
+<task_progress>
+- [ ] Task 1
+- [ ] Task 2
+</task_progress>
+
+WRONG FORMAT (DO NOT USE):
+<read_file>
+<path>path/to/file.py</path>
+<task_progress>
+- [ ] Task 1
+</task_progress>
+</read_file>`;
+
           const combinedPrompt = systemPrompt
-            ? `${systemPrompt}\n\nUSER REQUEST:\n${userPrompt}`
-            : userPrompt;
+            ? `${systemPrompt}\n\n${xmlStructureRules}\n\nUSER REQUEST:\n${userPrompt}`
+            : `${xmlStructureRules}\n\nUSER REQUEST:\n${userPrompt}`;
 
           const requestKey = `processed_${requestId}`;
 

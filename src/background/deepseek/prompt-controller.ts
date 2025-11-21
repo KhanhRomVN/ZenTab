@@ -1322,8 +1322,11 @@ export class PromptController {
         `[PromptController] 🔍 DEBUG decoded length: ${decodedResult.length}`
       );
 
+      // 🆕 Step 2.5: Validate and fix XML structure
+      const xmlFixedResult = this.fixXmlStructure(decodedResult);
+
       // Clean up excessive newlines (giữ lại tối đa 2 newlines liên tiếp)
-      let cleanedResult = decodedResult.replace(/\n{3,}/g, "\n\n").trim();
+      let cleanedResult = xmlFixedResult.replace(/\n{3,}/g, "\n\n").trim();
 
       // 🆕 Additional cleanup: Fix spacing trong numbered lists
       cleanedResult = cleanedResult.replace(/(\d+\.)\s+\n/g, "$1 ");
@@ -1447,6 +1450,88 @@ export class PromptController {
     );
 
     return decoded;
+  }
+
+  /**
+   * 🆕 Validate và fix XML structure trong response
+   * Fix lỗi: <task_progress> nằm bên trong <read_file> hoặc các tool tags khác
+   */
+  private static fixXmlStructure(content: string): string {
+    console.log(`[PromptController] 🔧 Running XML structure validator/fixer`);
+
+    let fixed = content;
+    let fixCount = 0;
+
+    // Pattern 1: Fix <task_progress> inside <read_file>
+    // Match: <read_file><path>...</path><task_progress>...</task_progress></read_file>
+    // Fix to: <read_file><path>...</path></read_file><task_progress>...</task_progress>
+    const readFilePattern =
+      /(<read_file>\s*<path>[^<]+<\/path>)\s*(<task_progress>[\s\S]*?<\/task_progress>)\s*(<\/read_file>)/g;
+
+    fixed = fixed.replace(
+      readFilePattern,
+      (match, readFileStart, taskProgress, readFileEnd) => {
+        fixCount++;
+        console.log(
+          `[PromptController] 🔧 Fixed task_progress inside read_file (occurrence ${fixCount})`
+        );
+        return `${readFileStart}${readFileEnd}\n${taskProgress}`;
+      }
+    );
+
+    // Pattern 2: Fix <task_progress> inside <write_file>
+    const writeFilePattern =
+      /(<write_file>\s*<path>[^<]+<\/path>)\s*(<task_progress>[\s\S]*?<\/task_progress>)\s*(<\/write_file>)/g;
+
+    fixed = fixed.replace(
+      writeFilePattern,
+      (match, writeFileStart, taskProgress, writeFileEnd) => {
+        fixCount++;
+        console.log(
+          `[PromptController] 🔧 Fixed task_progress inside write_file (occurrence ${fixCount})`
+        );
+        return `${writeFileStart}${writeFileEnd}\n${taskProgress}`;
+      }
+    );
+
+    // Pattern 3: Fix <task_progress> inside any generic tool tag (e.g., <execute_command>, <search_files>)
+    const genericToolPattern =
+      /(<([a-z_]+)>(?:(?!<\2>)[\s\S])*?)(<task_progress>[\s\S]*?<\/task_progress>)\s*(<\/\2>)/g;
+
+    fixed = fixed.replace(
+      genericToolPattern,
+      (match, toolStart, toolName, taskProgress, toolEnd) => {
+        // Skip if tool is already task_progress itself
+        if (toolName === "task_progress") {
+          return match;
+        }
+
+        fixCount++;
+        console.log(
+          `[PromptController] 🔧 Fixed task_progress inside <${toolName}> (occurrence ${fixCount})`
+        );
+        return `${toolStart}${toolEnd}\n${taskProgress}`;
+      }
+    );
+
+    // Pattern 4: Ensure proper newlines between consecutive tool tags
+    fixed = fixed.replace(/(<\/[a-z_]+>)(<[a-z_]+>)/g, "$1\n$2");
+
+    if (fixCount > 0) {
+      console.log(
+        `[PromptController] ✅ XML structure fixed: ${fixCount} issue(s) resolved`
+      );
+      console.log(
+        `[PromptController] 🔍 Fixed content preview:`,
+        fixed.substring(0, 800)
+      );
+    } else {
+      console.log(
+        `[PromptController] ✅ XML structure is valid - no fixes needed`
+      );
+    }
+
+    return fixed;
   }
 
   private static buildOpenAIResponse(content: string): any {
