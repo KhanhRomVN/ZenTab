@@ -71,7 +71,8 @@ export class PromptController {
   static async sendPrompt(
     tabId: number,
     prompt: string,
-    requestId: string
+    requestId: string,
+    isNewTask: boolean = true
   ): Promise<boolean> {
     try {
       const validation = await this.validateTab(tabId);
@@ -133,11 +134,12 @@ export class PromptController {
       }
 
       await this.tabStateManager.markTabBusy(tabId, requestId);
-      await ChatController.clickNewChatButton(tabId);
-      await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // 🆕 FIX: Dùng prompt từ Backend (đã bao gồm system prompt)
-      // Không cần wrap nữa vì Backend đã gửi đầy đủ
+      if (isNewTask === true) {
+        await ChatController.clickNewChatButton(tabId);
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+
       const finalPrompt = prompt;
 
       let retries = 3;
@@ -627,24 +629,6 @@ export class PromptController {
 
             const currentTimestamp = Date.now();
 
-            // 🔍 LOG: Response content trước khi gửi tới Backend
-            console.log(`[PromptController] 📤 Sending response to Backend`);
-            console.log(`[PromptController] 📊 Response metadata:`, {
-              requestId: requestId,
-              tabId: tabId,
-              connectionId: targetConnectionId,
-              responseLength: responseToSend.length,
-              timestamp: currentTimestamp,
-            });
-            console.log(
-              `[PromptController] 📝 Response preview (first 500 chars):`,
-              responseToSend.substring(0, 500)
-            );
-            console.log(
-              `[PromptController] 📝 Response full content:`,
-              responseToSend
-            );
-
             const messagePayload = {
               wsOutgoingMessage: {
                 connectionId: targetConnectionId,
@@ -731,15 +715,6 @@ export class PromptController {
               this.activePollingTasks.delete(tabId);
               return;
             }
-
-            // 🔍 LOG: Fetch error trước khi gửi
-            console.log(`[PromptController] ❌ Sending fetch error to Backend`);
-            console.log(`[PromptController] 📊 Error metadata:`, {
-              requestId: requestId,
-              tabId: tabId,
-              errorType: "FETCH_FAILED",
-              errorMessage: "Failed to fetch response from DeepSeek",
-            });
 
             await browserAPI.storage.local.set({
               wsOutgoingMessage: {
@@ -829,16 +804,6 @@ export class PromptController {
             return;
           }
 
-          // 🔍 LOG: Timeout error trước khi gửi
-          console.log(`[PromptController] ⏱️ Sending timeout error to Backend`);
-          console.log(`[PromptController] 📊 Error metadata:`, {
-            requestId: requestId,
-            tabId: tabId,
-            errorType: "TIMEOUT",
-            maxPolls: this.config.maxPolls,
-            pollCount: pollCount,
-          });
-
           await browserAPI.storage.local.set({
             wsOutgoingMessage: {
               connectionId: targetConnectionId,
@@ -926,14 +891,6 @@ export class PromptController {
         // 🔍 LOG: Exception error trước khi gửi
         const errorMessage =
           error instanceof Error ? error.message : "Unknown polling error";
-        console.log(`[PromptController] 💥 Sending exception error to Backend`);
-        console.log(`[PromptController] 📊 Error metadata:`, {
-          requestId: requestId,
-          tabId: tabId,
-          errorType: "EXCEPTION",
-          errorMessage: errorMessage,
-          errorStack: error instanceof Error ? error.stack : undefined,
-        });
 
         await browserAPI.storage.local.set({
           wsOutgoingMessage: {
@@ -967,11 +924,6 @@ export class PromptController {
         // Strategy 1: Tìm tất cả ds-markdown containers
         const markdownContainers = Array.from(
           document.querySelectorAll(".ds-markdown")
-        );
-
-        console.log(
-          "[DeepSeek Page] 🔍 DEBUG markdownContainers count:",
-          markdownContainers.length
         );
 
         if (markdownContainers.length > 0) {
@@ -1331,17 +1283,13 @@ export class PromptController {
       console.log(
         `[PromptController] 🔍 DEBUG content length: ${content.length}`
       );
-      console.log(
-        `[PromptController] 🔍 DEBUG content preview:`,
-        content.substring(0, 500)
-      );
+      // console.log(
+      //   `[PromptController] 🔍 DEBUG content preview:`,
+      //   content.substring(0, 500)
+      // );
 
       // Step 2: Decode HTML entities
       const decodedResult = this.decodeHtmlEntities(content);
-
-      console.log(
-        `[PromptController] 🔍 DEBUG decoded length: ${decodedResult.length}`
-      );
 
       // 🆕 Step 2.5: Validate and fix XML structure
       const xmlFixedResult = this.fixXmlStructure(decodedResult);
@@ -1363,15 +1311,7 @@ export class PromptController {
         "$1\n$2"
       );
 
-      console.log(`[PromptController] 🔍 DEBUG final result:`, cleanedResult);
-
-      // Check for XML tags
-      const hasThinkingTag = cleanedResult.includes("<thinking>");
-      const hasReadFileTag = cleanedResult.includes("<read_file>");
-      console.log(`[PromptController] 🔍 DEBUG XML tags:`, {
-        hasThinkingTag,
-        hasReadFileTag,
-      });
+      // console.log(`[PromptController] 🔍 DEBUG final result:`, cleanedResult);
 
       // Step 3: Try to parse as JSON (if response is JSON)
       try {
@@ -1421,10 +1361,6 @@ export class PromptController {
    * Chuyển &lt; → <, &gt; → >, &amp; → &, &quot; → ", &#39; → '
    */
   private static decodeHtmlEntities(text: string): string {
-    console.log(
-      `[PromptController] 🔍 decodeHtmlEntities called with text length: ${text.length}`
-    );
-
     const entities: Record<string, string> = {
       "&lt;": "<",
       "&gt;": ">",
@@ -1456,10 +1392,6 @@ export class PromptController {
       decoded = decoded.split(entity).join(char);
     }
 
-    console.log(
-      `[PromptController] 🔍 Total entity replacements: ${replacementCount}`
-    );
-
     // Handle numeric entities: &#123; → {
     decoded = decoded.replace(/&#(\d+);/g, (_, num) =>
       String.fromCharCode(parseInt(num, 10))
@@ -1478,8 +1410,6 @@ export class PromptController {
    * Fix lỗi: <task_progress> nằm bên trong <read_file> hoặc các tool tags khác
    */
   private static fixXmlStructure(content: string): string {
-    console.log(`[PromptController] 🔧 Running XML structure validator/fixer`);
-
     let fixed = content;
     let fixCount = 0;
 
@@ -1492,10 +1422,6 @@ export class PromptController {
       console.log(
         `[PromptController] 🔍 Fixed content preview:`,
         fixed.substring(0, 800)
-      );
-    } else {
-      console.log(
-        `[PromptController] ✅ XML structure is valid - no fixes needed`
       );
     }
 

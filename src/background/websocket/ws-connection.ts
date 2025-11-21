@@ -189,6 +189,124 @@ export class WSConnection {
         return;
       }
 
+      if (message.type === "cleanupFolderLink") {
+        const folderPath = message.folderPath;
+
+        if (!folderPath) {
+          console.warn(
+            "[WSConnection] ⚠️ cleanupFolderLink missing folderPath"
+          );
+          return;
+        }
+
+        const dedupeKey = `cleanup_${folderPath}_${Date.now()}`;
+
+        try {
+          const result = await new Promise<any>((resolve) => {
+            chrome.storage.local.get([dedupeKey], (data) => {
+              resolve(data || {});
+            });
+          });
+
+          if (result[dedupeKey]) {
+            return;
+          }
+        } catch (storageError) {
+          console.error(
+            "[WSConnection] ❌ Cleanup dedupe check failed:",
+            storageError
+          );
+        }
+
+        chrome.storage.local.set({ [dedupeKey]: Date.now() });
+
+        setTimeout(() => {
+          chrome.storage.local.remove([dedupeKey]);
+        }, 5000);
+
+        const storagePayload = {
+          wsIncomingRequest: {
+            type: "cleanupFolderLink",
+            folderPath: folderPath,
+            connectionId: this.state.id,
+            timestamp: Date.now(),
+          },
+        };
+
+        chrome.storage.local.set(storagePayload, () => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "[WSConnection] ❌ Failed to set cleanupFolderLink:",
+              chrome.runtime.lastError
+            );
+            return;
+          }
+        });
+
+        return;
+      }
+
+      if (message.type === "getTabsByFolder") {
+        if (this.state.port !== 1500) {
+          return;
+        }
+
+        const requestId = message.requestId;
+        const folderPath = message.folderPath;
+
+        if (!folderPath) {
+          console.warn("[WSConnection] ⚠️ getTabsByFolder missing folderPath");
+          return;
+        }
+
+        const dedupeKey = `folder_req_${requestId}`;
+
+        try {
+          const result = await new Promise<any>((resolve) => {
+            chrome.storage.local.get([dedupeKey], (data) => {
+              resolve(data || {});
+            });
+          });
+
+          if (result[dedupeKey]) {
+            return;
+          }
+        } catch (storageError) {
+          console.error(
+            "[WSConnection] ❌ Folder request dedupe check failed:",
+            storageError
+          );
+        }
+
+        chrome.storage.local.set({ [dedupeKey]: Date.now() });
+
+        setTimeout(() => {
+          chrome.storage.local.remove([dedupeKey]);
+        }, 5000);
+
+        const storagePayload = {
+          wsIncomingRequest: {
+            type: "getTabsByFolder",
+            requestId: message.requestId,
+            folderPath: folderPath,
+            connectionId: this.state.id,
+            timestamp: Date.now(),
+          },
+        };
+
+        chrome.storage.local.set(storagePayload, () => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "[WSConnection] ❌ Failed to set getAvailableTabs:",
+              chrome.runtime.lastError
+            );
+            return;
+          }
+        });
+
+        return;
+      }
+
       if (message.type === "getAvailableTabs") {
         if (this.state.port !== 1500) {
           return;

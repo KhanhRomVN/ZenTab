@@ -52,8 +52,9 @@ export class DeepSeekController {
   static async sendPrompt(
     tabId: number,
     prompt: string,
-    requestId: string
+    requestId: string,
+    isNewTask: boolean = true
   ): Promise<boolean> {
-    return PromptController.sendPrompt(tabId, prompt, requestId);
+    return PromptController.sendPrompt(tabId, prompt, requestId, isNewTask);
   }
 }

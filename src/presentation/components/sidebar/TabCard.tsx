@@ -8,6 +8,7 @@ interface TabCardProps {
     status: "free" | "busy";
     canAccept: boolean;
     requestCount: number;
+    folderPath?: string | null;
   };
 }
 
@@ -72,23 +73,33 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
             </span>
           </div>
 
-          <div className="flex items-center gap-3 mt-1 text-xs text-text-secondary">
-            <div className="flex items-center gap-1">
-              <span className="font-mono">ID: {tab.tabId}</span>
+          <div className="flex flex-col gap-1 mt-1 text-xs text-text-secondary">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1">
+                <span className="font-mono">ID: {tab.tabId}</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Activity className="w-3 h-3" />
+                <span>{tab.requestCount} reqs</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <span
+                  className={`text-xs font-medium ${getStatusBadgeColor(
+                    tab.status
+                  )}`}
+                >
+                  {getStatusBadge(tab.status)}
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-1">
-              <Activity className="w-3 h-3" />
-              <span>{tab.requestCount} reqs</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <span
-                className={`text-xs font-medium ${getStatusBadgeColor(
-                  tab.status
-                )}`}
-              >
-                {getStatusBadge(tab.status)}
-              </span>
-            </div>
+            {tab.folderPath && (
+              <div className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
+                <span>📁</span>
+                <span className="truncate max-w-[200px]" title={tab.folderPath}>
+                  {tab.folderPath.split("/").pop() || tab.folderPath}
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </div>

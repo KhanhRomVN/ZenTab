@@ -72,7 +72,14 @@ declare const browser: typeof chrome & any;
         const latestMsg = recentMsgs[recentMsgs.length - 1];
 
         if (latestMsg.data.type === "sendPrompt") {
-          const { tabId, systemPrompt, userPrompt, requestId } = latestMsg.data;
+          const {
+            tabId,
+            systemPrompt,
+            userPrompt,
+            requestId,
+            isNewTask,
+            folderPath,
+          } = latestMsg.data;
 
           if (!tabId || !userPrompt || !requestId) {
             console.error(
@@ -83,37 +90,21 @@ declare const browser: typeof chrome & any;
               hasSystemPrompt: !!systemPrompt,
               hasUserPrompt: !!userPrompt,
               requestId,
+              isNewTask,
+              hasFolderPath: !!folderPath,
             });
             continue;
           }
 
-          // 🆕 Combine system prompt + user prompt + XML structure rules
-          const xmlStructureRules = `
-CRITICAL XML STRUCTURE RULES:
-1. <task_progress> MUST be placed OUTSIDE of any tool tags (like <read_file>, <write_file>, etc.)
-2. Tool tags like <read_file> should ONLY contain their required parameters (e.g., <path>)
-3. NEVER nest <task_progress> inside tool tags
-
-CORRECT FORMAT:
-<read_file>
-<path>path/to/file.py</path>
-</read_file>
-<task_progress>
-- [ ] Task 1
-- [ ] Task 2
-</task_progress>
-
-WRONG FORMAT (DO NOT USE):
-<read_file>
-<path>path/to/file.py</path>
-<task_progress>
-- [ ] Task 1
-</task_progress>
-</read_file>`;
+          const languageRule = `
+CRITICAL LANGUAGE RULE:
+- You MUST respond in Vietnamese (Tiếng Việt) for ALL outputs
+- All explanations, descriptions, and responses must be in Vietnamese
+- Code comments should also be in Vietnamese when possible`;
 
           const combinedPrompt = systemPrompt
-            ? `${systemPrompt}\n\n${xmlStructureRules}\n\nUSER REQUEST:\n${userPrompt}`
-            : `${xmlStructureRules}\n\nUSER REQUEST:\n${userPrompt}`;
+            ? `${systemPrompt}\n\n${languageRule}\n\nUSER REQUEST:\n${userPrompt}`
+            : `${languageRule}\n\nUSER REQUEST:\n${userPrompt}`;
 
           const requestKey = `processed_${requestId}`;
 
@@ -140,7 +131,20 @@ WRONG FORMAT (DO NOT USE):
                 );
               });
 
-              DeepSeekController.sendPrompt(tabId, combinedPrompt, requestId)
+              (async () => {
+                const isNewTaskBool = isNewTask === true;
+
+                if (isNewTaskBool && folderPath) {
+                  await tabStateManager.linkTabToFolder(tabId, folderPath);
+                }
+
+                return DeepSeekController.sendPrompt(
+                  tabId,
+                  combinedPrompt,
+                  requestId,
+                  isNewTaskBool
+                );
+              })()
                 .then((success: boolean) => {
                   if (success) {
                     setTimeout(() => {
@@ -267,6 +271,121 @@ WRONG FORMAT (DO NOT USE):
 
             // Clean up request
             browserAPI.storage.local.remove(["wsIncomingRequest"]);
+          }
+        })();
+      }
+
+      if (request.type === "cleanupFolderLink") {
+        const folderPath = request.folderPath;
+
+        if (!folderPath) {
+          console.error(
+            "[ServiceWorker] ❌ cleanupFolderLink missing folderPath"
+          );
+          chrome.storage.local.remove(["wsIncomingRequest"]);
+          return;
+        }
+
+        (async () => {
+          try {
+            if (!tabStateManager) {
+              console.error(
+                "[ServiceWorker] ❌ TabStateManager not available for cleanup!"
+              );
+              chrome.storage.local.remove(["wsIncomingRequest"]);
+              return;
+            }
+
+            await tabStateManager.unlinkFolder(folderPath);
+
+            chrome.storage.local.remove(["wsIncomingRequest"]);
+          } catch (error) {
+            console.error(
+              "[ServiceWorker] ❌ Error processing cleanupFolderLink:",
+              error
+            );
+            chrome.storage.local.remove(["wsIncomingRequest"]);
+          }
+        })();
+      }
+
+      if (request.type === "getTabsByFolder") {
+        const folderPath = request.folderPath;
+        const requestId = request.requestId;
+        const connectionId = request.connectionId;
+
+        if (!folderPath || !requestId || !connectionId) {
+          console.error(
+            "[ServiceWorker] ❌ getTabsByFolder missing required fields"
+          );
+          chrome.storage.local.remove(["wsIncomingRequest"]);
+          return;
+        }
+
+        (async () => {
+          try {
+            if (!tabStateManager) {
+              console.error(
+                "[ServiceWorker] ❌ TabStateManager not available!"
+              );
+              throw new Error("TabStateManager not initialized");
+            }
+
+            const matchingTabs = await tabStateManager.getTabsByFolder(
+              folderPath
+            );
+
+            await new Promise<void>((resolve, reject) => {
+              browserAPI.storage.local.set(
+                {
+                  wsOutgoingMessage: {
+                    connectionId: connectionId,
+                    data: {
+                      type: "availableTabs",
+                      requestId: requestId,
+                      tabs: matchingTabs,
+                      timestamp: Date.now(),
+                    },
+                    timestamp: Date.now(),
+                  },
+                },
+                () => {
+                  if (browserAPI.runtime.lastError) {
+                    console.error(
+                      "[ServiceWorker] ❌ Error sending getTabsByFolder response:",
+                      browserAPI.runtime.lastError
+                    );
+                    reject(browserAPI.runtime.lastError);
+                    return;
+                  }
+                  resolve();
+                }
+              );
+            });
+
+            chrome.storage.local.remove(["wsIncomingRequest"]);
+          } catch (error) {
+            console.error(
+              "[ServiceWorker] ❌ Error processing getTabsByFolder:",
+              error
+            );
+
+            browserAPI.storage.local.set({
+              wsOutgoingMessage: {
+                connectionId: request.connectionId,
+                data: {
+                  type: "availableTabs",
+                  requestId: request.requestId,
+                  success: false,
+                  tabs: [],
+                  error: error instanceof Error ? error.message : String(error),
+                  timestamp: Date.now(),
+                },
+                timestamp: Date.now(),
+              },
+            });
+
+            chrome.storage.local.remove(["wsIncomingRequest"]);
           }
         })();
       }

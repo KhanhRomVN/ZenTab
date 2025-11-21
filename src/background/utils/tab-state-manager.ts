@@ -2,6 +2,7 @@ export interface TabStateData {
   status: "free" | "busy";
   requestId: string | null;
   requestCount: number;
+  folderPath?: string | null;
 }
 
 export interface TabStateInfo {
@@ -12,6 +13,7 @@ export interface TabStateInfo {
   status: "free" | "busy";
   canAccept: boolean;
   requestCount: number;
+  folderPath?: string | null;
 }
 
 export class TabStateManager {
@@ -456,6 +458,7 @@ export class TabStateManager {
       const state = states[tab.id!] || {
         status: "free",
         requestCount: 0,
+        folderPath: null,
       };
       const canAccept = this.canAcceptRequest(state);
 
@@ -467,6 +470,7 @@ export class TabStateManager {
         status: state.status,
         canAccept: canAccept,
         requestCount: state.requestCount || 0,
+        folderPath: state.folderPath || null,
       };
     });
 
@@ -522,6 +526,84 @@ export class TabStateManager {
     } catch (error) {
       console.error("[TabStateManager] ❌ Error marking tab free:", error);
       return false;
+    }
+  }
+
+  public async linkTabToFolder(
+    tabId: number,
+    folderPath: string
+  ): Promise<boolean> {
+    try {
+      const result = await chrome.storage.session.get([this.STORAGE_KEY]);
+      const states = (result && result[this.STORAGE_KEY]) || {};
+      const currentState = states[tabId] || {
+        status: "free",
+        requestCount: 0,
+        requestId: null,
+      };
+
+      states[tabId] = {
+        ...currentState,
+        folderPath: folderPath,
+      };
+
+      await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
+      this.invalidateCache(tabId);
+      return true;
+    } catch (error) {
+      console.error(`[TabStateManager] ❌ Error linking tab to folder:`, error);
+      return false;
+    }
+  }
+
+  public async unlinkFolder(folderPath: string): Promise<boolean> {
+    try {
+      const result = await chrome.storage.session.get([this.STORAGE_KEY]);
+      const states = (result && result[this.STORAGE_KEY]) || {};
+
+      let unlinkedCount = 0;
+      for (const [tabIdStr, state] of Object.entries(states)) {
+        const tabState = state as TabStateData;
+        if (tabState.folderPath === folderPath) {
+          const tabId = parseInt(tabIdStr);
+          states[tabId] = {
+            ...tabState,
+            folderPath: null,
+          };
+          this.invalidateCache(tabId);
+          unlinkedCount++;
+        }
+      }
+
+      if (unlinkedCount > 0) {
+        await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
+      }
+
+      return true;
+    } catch (error) {
+      console.error(`[TabStateManager] ❌ Error unlinking folder:`, error);
+      return false;
+    }
+  }
+
+  public async getTabsByFolder(folderPath: string): Promise<TabStateInfo[]> {
+    try {
+      const allTabs = await this.getAllTabStates();
+
+      const matchingTabs = allTabs.filter(
+        (tab) =>
+          tab.folderPath === folderPath &&
+          tab.status === "free" &&
+          tab.canAccept
+      );
+
+      return matchingTabs;
+    } catch (error) {
+      console.error(
+        `[TabStateManager] ❌ Error getting tabs by folder:`,
+        error
+      );
+      return [];
     }
   }
 
