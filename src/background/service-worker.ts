@@ -72,19 +72,25 @@ declare const browser: typeof chrome & any;
         const latestMsg = recentMsgs[recentMsgs.length - 1];
 
         if (latestMsg.data.type === "sendPrompt") {
-          const { tabId, prompt, requestId } = latestMsg.data;
+          const { tabId, systemPrompt, userPrompt, requestId } = latestMsg.data;
 
-          if (!tabId || !prompt || !requestId) {
+          if (!tabId || !userPrompt || !requestId) {
             console.error(
               `[ServiceWorker] ❌ Invalid sendPrompt message - missing required fields`
             );
             console.error(`[ServiceWorker] 📊 Message data:`, {
               tabId,
-              hasPrompt: !!prompt,
+              hasSystemPrompt: !!systemPrompt,
+              hasUserPrompt: !!userPrompt,
               requestId,
             });
             continue;
           }
+
+          // 🆕 Combine system prompt + user prompt
+          const combinedPrompt = systemPrompt
+            ? `${systemPrompt}\n\nUSER REQUEST:\n${userPrompt}`
+            : userPrompt;
 
           const requestKey = `processed_${requestId}`;
 
@@ -111,7 +117,7 @@ declare const browser: typeof chrome & any;
                 );
               });
 
-              DeepSeekController.sendPrompt(tabId, prompt, requestId)
+              DeepSeekController.sendPrompt(tabId, combinedPrompt, requestId)
                 .then((success: boolean) => {
                   if (success) {
                     setTimeout(() => {
@@ -134,7 +140,7 @@ declare const browser: typeof chrome & any;
                           errorType: "SEND_FAILED",
                           details: {
                             tabId: tabId,
-                            promptLength: prompt.length,
+                            promptLength: combinedPrompt.length,
                             timestamp: Date.now(),
                           },
                         },

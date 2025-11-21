@@ -3,7 +3,6 @@ import { executeScript, getBrowserAPI } from "../utils/browser-helper";
 import { StateController } from "./state-controller";
 import { ChatController } from "./chat-controller";
 import { DEFAULT_CONFIG, DeepSeekConfig } from "./types";
-import { wrapPromptWithAPIFormat } from "./prompt-template";
 import { TabStateManager } from "../utils/tab-state-manager";
 
 export class PromptController {
@@ -137,7 +136,9 @@ export class PromptController {
       await ChatController.clickNewChatButton(tabId);
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      const wrappedPrompt = wrapPromptWithAPIFormat(prompt);
+      // 🆕 FIX: Dùng prompt từ Backend (đã bao gồm system prompt)
+      // Không cần wrap nữa vì Backend đã gửi đầy đủ
+      const finalPrompt = prompt;
 
       let retries = 3;
       let result: any = null;
@@ -205,7 +206,7 @@ export class PromptController {
                 },
               };
             },
-            [wrappedPrompt]
+            [finalPrompt]
           );
 
           if (result && result.success) {
@@ -500,19 +501,20 @@ export class PromptController {
           }
 
           await new Promise((resolve) => setTimeout(resolve, 1000));
-          const response = await this.getLatestResponseDirectly(tabId);
+          const rawResponse = await this.getLatestResponseDirectly(tabId);
 
-          if (response) {
+          if (rawResponse) {
             responseSent = true;
             await this.tabStateManager.markTabFree(tabId);
             this.activePollingTasks.delete(tabId);
 
             let responseToSend: string = "";
 
-            if (typeof response === "string") {
+            // 🆕 BUILD OPENAI JSON FORMAT từ raw text
+            if (typeof rawResponse === "string") {
               try {
-                // Try parse để validate JSON structure
-                const parsedObject = JSON.parse(response);
+                // Try parse nếu response đã là JSON
+                const parsedObject = JSON.parse(rawResponse);
 
                 // Validate structure
                 if (
@@ -520,40 +522,53 @@ export class PromptController {
                   typeof parsedObject === "object" &&
                   parsedObject.choices
                 ) {
+                  // Đã là JSON format chuẩn
                   responseToSend = JSON.stringify(parsedObject);
+                  console.log(
+                    `[PromptController] ✅ Response already in JSON format`
+                  );
                 } else {
+                  // JSON nhưng thiếu structure → rebuild
                   console.warn(
-                    `[PromptController] ⚠️ Response object missing 'choices' field`
+                    `[PromptController] ⚠️ JSON missing required fields, rebuilding...`
                   );
-                  console.warn(
-                    `[PromptController] 🔧 Falling back to raw string (no re-stringify)`
-                  );
-                  // Raw string, giữ nguyên
-                  responseToSend = response;
+                  const builtResponse = this.buildOpenAIResponse(rawResponse);
+                  responseToSend = JSON.stringify(builtResponse);
                 }
               } catch (parseError) {
-                console.error(
-                  `[PromptController] ❌ Failed to parse response:`,
-                  parseError
+                // Raw text → build JSON format
+                console.log(
+                  `[PromptController] 🔧 Building OpenAI JSON from raw text`
                 );
-                console.error(
-                  `[PromptController] 📝 Problematic response:`,
-                  response.substring(0, 500)
-                );
-                console.warn(
-                  `[PromptController] 🔧 Sending raw string as fallback`
-                );
-                // Response không phải JSON, gửi raw string
-                responseToSend = response;
+                const builtResponse = this.buildOpenAIResponse(rawResponse);
+                responseToSend = JSON.stringify(builtResponse);
               }
-            } else if (typeof response === "object") {
-              responseToSend = JSON.stringify(response);
+            } else if (
+              typeof rawResponse === "object" &&
+              rawResponse !== null
+            ) {
+              // Object → stringify
+              // 🔧 FIX: Type assertion để tránh TypeScript error
+              const responseObj = rawResponse as any;
+
+              if (responseObj.choices) {
+                responseToSend = JSON.stringify(responseObj);
+              } else {
+                // Object thiếu structure → rebuild
+                const builtResponse = this.buildOpenAIResponse(
+                  JSON.stringify(responseObj)
+                );
+                responseToSend = JSON.stringify(builtResponse);
+              }
             } else {
+              // Unknown type → convert to string và build
               console.warn(
-                `[PromptController] ⚠️ Unexpected response type: ${typeof response}`
+                `[PromptController] ⚠️ Unexpected response type: ${typeof rawResponse}`
               );
-              console.warn(`[PromptController] 🔧 Converting to string`);
-              responseToSend = String(response);
+              const builtResponse = this.buildOpenAIResponse(
+                String(rawResponse)
+              );
+              responseToSend = JSON.stringify(builtResponse);
             }
 
             if (isTestRequest) {
@@ -898,9 +913,6 @@ export class PromptController {
     setTimeout(poll, this.config.initialDelay);
   }
 
-  /**
-   * Lấy response trực tiếp từ message container (không cần copy button)
-   */
   private static async getLatestResponseDirectly(
     tabId: number
   ): Promise<string | null> {
@@ -1030,5 +1042,46 @@ export class PromptController {
       );
       return null;
     }
+  }
+
+  private static buildOpenAIResponse(content: string): any {
+    // Generate unique IDs
+    const generateHex = (length: number): string => {
+      return Array.from({ length }, () =>
+        Math.floor(Math.random() * 16).toString(16)
+      ).join("");
+    };
+
+    const responseId = `chatcmpl-${generateHex(16)}`;
+    const systemFingerprint = `fp_${generateHex(8)}`;
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    // Estimate tokens (rough approximation)
+    const contentLength = content.length;
+    const estimatedTokens = Math.ceil(contentLength / 4);
+
+    return {
+      id: responseId,
+      object: "chat.completion.chunk",
+      created: timestamp,
+      model: "deepseek-chat",
+      choices: [
+        {
+          index: 0,
+          delta: {
+            role: "assistant",
+            content: content,
+          },
+          finish_reason: "stop",
+          logprobs: null,
+        },
+      ],
+      usage: {
+        prompt_tokens: 0,
+        completion_tokens: estimatedTokens,
+        total_tokens: estimatedTokens,
+      },
+      system_fingerprint: systemFingerprint,
+    };
   }
 }
