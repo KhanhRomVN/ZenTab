@@ -213,6 +213,7 @@ export class TabStateManager {
           status: buttonState.isBusy ? "busy" : "free",
           requestId: null,
           requestCount: 0,
+          folderPath: null,
         };
       } catch (buttonError) {
         console.error(
@@ -224,6 +225,7 @@ export class TabStateManager {
           status: "free",
           requestId: null,
           requestCount: 0,
+          folderPath: null,
         };
       }
     }
@@ -462,6 +464,12 @@ export class TabStateManager {
       };
       const canAccept = this.canAcceptRequest(state);
 
+      console.log(
+        `[TabStateManager] 📊 Tab ${tab.id} state: status=${
+          state.status
+        }, folderPath=${state.folderPath || "null"}, canAccept=${canAccept}`
+      );
+
       return {
         tabId: tab.id!,
         containerName: `Tab ${tab.id}`,
@@ -495,6 +503,7 @@ export class TabStateManager {
         status: "busy",
         requestId: requestId,
         requestCount: (currentState.requestCount || 0) + 1,
+        folderPath: currentState.folderPath || null,
       };
 
       await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
@@ -517,6 +526,7 @@ export class TabStateManager {
         status: "free",
         requestId: null,
         requestCount: currentState.requestCount || 0,
+        folderPath: currentState.folderPath || null,
       };
 
       await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
@@ -540,6 +550,7 @@ export class TabStateManager {
         status: "free",
         requestCount: 0,
         requestId: null,
+        folderPath: null,
       };
 
       states[tabId] = {
@@ -549,6 +560,9 @@ export class TabStateManager {
 
       await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
       this.invalidateCache(tabId);
+      console.log(
+        `[TabStateManager] ✅ Tab ${tabId} linked to folder: ${folderPath}`
+      );
       return true;
     } catch (error) {
       console.error(`[TabStateManager] ❌ Error linking tab to folder:`, error);
@@ -588,7 +602,11 @@ export class TabStateManager {
 
   public async getTabsByFolder(folderPath: string): Promise<TabStateInfo[]> {
     try {
+      console.log(
+        `[TabStateManager] 🔍 Searching tabs for folder: ${folderPath}`
+      );
       const allTabs = await this.getAllTabStates();
+      console.log(`[TabStateManager] 📊 Total tabs found: ${allTabs.length}`);
 
       const matchingTabs = allTabs.filter(
         (tab) =>
@@ -596,6 +614,13 @@ export class TabStateManager {
           tab.status === "free" &&
           tab.canAccept
       );
+
+      console.log(`[TabStateManager] ✅ Matching tabs: ${matchingTabs.length}`);
+      matchingTabs.forEach((tab) => {
+        console.log(
+          `[TabStateManager]   → Tab ${tab.tabId}: status=${tab.status}, canAccept=${tab.canAccept}`
+        );
+      });
 
       return matchingTabs;
     } catch (error) {

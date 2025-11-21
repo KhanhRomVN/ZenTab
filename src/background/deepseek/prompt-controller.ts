@@ -510,6 +510,45 @@ export class PromptController {
             await this.tabStateManager.markTabFree(tabId);
             this.activePollingTasks.delete(tabId);
 
+            // 🆕 CRITICAL: Lấy folderPath từ wsMessages TRƯỚC KHI link
+            let folderPathToLink: string | null = null;
+            try {
+              const messagesResult = await new Promise<any>(
+                (resolve, reject) => {
+                  browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+                    if (browserAPI.runtime.lastError) {
+                      reject(browserAPI.runtime.lastError);
+                      return;
+                    }
+                    resolve(data || {});
+                  });
+                }
+              );
+
+              const wsMessages = messagesResult?.wsMessages || {};
+
+              for (const [connId, msgArray] of Object.entries(wsMessages)) {
+                const msgs = msgArray as Array<{
+                  timestamp: number;
+                  data: any;
+                }>;
+
+                const matchingMsg = msgs.find(
+                  (msg) => msg.data?.requestId === capturedRequestId
+                );
+
+                if (matchingMsg && matchingMsg.data?.folderPath) {
+                  folderPathToLink = matchingMsg.data.folderPath;
+                  break;
+                }
+              }
+            } catch (error) {
+              console.error(
+                "[PromptController] ❌ Failed to get folderPath from wsMessages:",
+                error
+              );
+            }
+
             let responseToSend: string = "";
 
             // 🆕 BUILD OPENAI JSON FORMAT từ raw text
@@ -628,6 +667,17 @@ export class PromptController {
             }
 
             const currentTimestamp = Date.now();
+
+            // 🆕 CRITICAL: Link tab VỚI folder TRƯỚC KHI gửi response
+            if (folderPathToLink) {
+              console.log(
+                `[PromptController] 🔗 Linking tab ${tabId} to folder BEFORE sending response: ${folderPathToLink}`
+              );
+              await this.tabStateManager.linkTabToFolder(
+                tabId,
+                folderPathToLink
+              );
+            }
 
             const messagePayload = {
               wsOutgoingMessage: {
@@ -959,17 +1009,6 @@ export class PromptController {
             level++;
           }
 
-          console.log(
-            "[DeepSeek Page] 🔍 DEBUG container tagName:",
-            messageContainer.tagName
-          );
-          console.log(
-            "[DeepSeek Page] 🔍 DEBUG container className:",
-            messageContainer.className
-          );
-
-          // 🆕 THAY VÌ LẤY innerHTML, parse DOM structure để giữ nguyên markdown format
-          // 🆕 THAY VÌ LẤY innerHTML, parse DOM structure để giữ nguyên markdown format
           const extractMarkdown = (element: Element): string => {
             let result = "";
 
@@ -977,8 +1016,6 @@ export class PromptController {
               if (node.nodeType === Node.TEXT_NODE) {
                 const text = node.textContent || "";
 
-                // 🆕 CRITICAL: Phát hiện XML tags đặc biệt
-                // Nếu text chứa các XML tags, cần xử lý đặc biệt
                 if (
                   text.includes("<task_progress>") ||
                   text.includes("</task_progress>")
@@ -1208,37 +1245,20 @@ export class PromptController {
 
           let markdownText = extractMarkdown(messageContainer);
 
-          // 🆕 Post-processing: Fix spacing around XML tags
           markdownText = markdownText
-            // Fix XML tags at start of line có newline thừa phía trước
             .replace(/\n+(<\/?\w+>)/g, "\n$1")
-            // Fix multiple spaces thành single space
             .replace(/ {2,}/g, " ")
-            // Fix task_progress blocks có spacing không đúng
             .replace(/(<task_progress>)\s+(-)/g, "$1\n$2")
             .replace(/(-\s*\[\s*[x ]\s*\][^\n]*)\s+(-)/g, "$1\n$2")
-            // 🆕 CRITICAL: Fix closing tags dính liền với list items
-            // Pattern: "- [ ] text</task_progress>" → "- [ ] text\n</task_progress>"
-            // BUT SKIP tags like </path>, </thinking>, </read_file> that should stay inline
             .replace(
               /(-\s*\[\s*[x ]\s*\][^\n<]*?)(<\/(?!path|thinking|read_file|write_file)\w+>)/g,
               "$1\n$2"
             )
-            // Pattern: "</task_progress></read_file>" → "</task_progress>\n</read_file>"
-            // BUT keep tool structure intact (don't add newline between tool closing tags)
+
             .replace(
               /(<\/task_progress>)(<\/(?:read_file|write_file|execute_command)>)/g,
               "$1$2"
             );
-
-          console.log(
-            "[DeepSeek Page] 🔍 DEBUG extracted markdown length:",
-            markdownText.length
-          );
-          console.log(
-            "[DeepSeek Page] 🔍 DEBUG extracted markdown preview:",
-            markdownText.substring(0, 500)
-          );
 
           return { content: markdownText, method: "ds-markdown-parent" };
         }
@@ -1246,11 +1266,6 @@ export class PromptController {
         // Strategy 2: Fallback - tìm theo class "message"
         const messageContainers = Array.from(
           document.querySelectorAll('[class*="message"]')
-        );
-
-        console.log(
-          "[DeepSeek Page] 🔍 DEBUG fallback count:",
-          messageContainers.length
         );
 
         if (messageContainers.length === 0) {
@@ -1274,19 +1289,10 @@ export class PromptController {
         return null;
       }
 
-      const { content, method } = extractedContent as {
+      const { content } = extractedContent as {
         content: string;
         method: string;
       };
-
-      console.log(`[PromptController] 🔍 DEBUG extraction method: ${method}`);
-      console.log(
-        `[PromptController] 🔍 DEBUG content length: ${content.length}`
-      );
-      // console.log(
-      //   `[PromptController] 🔍 DEBUG content preview:`,
-      //   content.substring(0, 500)
-      // );
 
       // Step 2: Decode HTML entities
       const decodedResult = this.decodeHtmlEntities(content);
@@ -1310,8 +1316,6 @@ export class PromptController {
         /(<\/[a-z_]+>)(<\/[a-z_]+>)/g,
         "$1\n$2"
       );
-
-      // console.log(`[PromptController] 🔍 DEBUG final result:`, cleanedResult);
 
       // Step 3: Try to parse as JSON (if response is JSON)
       try {
@@ -1384,9 +1388,6 @@ export class PromptController {
         ) || []
       ).length;
       if (countBefore > 0) {
-        console.log(
-          `[PromptController] 🔍 Replacing ${countBefore} occurrences of "${entity}" → "${char}"`
-        );
         replacementCount += countBefore;
       }
       decoded = decoded.split(entity).join(char);
@@ -1411,20 +1412,7 @@ export class PromptController {
    */
   private static fixXmlStructure(content: string): string {
     let fixed = content;
-    let fixCount = 0;
-
     fixed = fixed.replace(/(<\/[a-z_]+>)(<[a-z_]+>)/g, "$1\n$2");
-
-    if (fixCount > 0) {
-      console.log(
-        `[PromptController] ✅ XML structure fixed: ${fixCount} issue(s) resolved`
-      );
-      console.log(
-        `[PromptController] 🔍 Fixed content preview:`,
-        fixed.substring(0, 800)
-      );
-    }
-
     return fixed;
   }
 

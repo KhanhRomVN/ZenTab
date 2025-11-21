@@ -131,22 +131,18 @@ CRITICAL LANGUAGE RULE:
                 );
               });
 
-              (async () => {
-                const isNewTaskBool = isNewTask === true;
-
-                if (isNewTaskBool && folderPath) {
-                  await tabStateManager.linkTabToFolder(tabId, folderPath);
-                }
-
-                return DeepSeekController.sendPrompt(
-                  tabId,
-                  combinedPrompt,
-                  requestId,
-                  isNewTaskBool
-                );
-              })()
+              const isNewTaskBool = isNewTask === true;
+              DeepSeekController.sendPrompt(
+                tabId,
+                combinedPrompt,
+                requestId,
+                isNewTaskBool
+              )
                 .then((success: boolean) => {
                   if (success) {
+                    console.log(
+                      `[ServiceWorker] ✅ Prompt sent successfully, tab ${tabId} should be marked BUSY with folderPath preserved`
+                    );
                     setTimeout(() => {
                       browserAPI.storage.local.remove([requestKey]);
                     }, 120000);
@@ -286,6 +282,10 @@ CRITICAL LANGUAGE RULE:
           return;
         }
 
+        console.log(
+          `[ServiceWorker] 🧹 Processing cleanup request for folder: ${folderPath}`
+        );
+
         (async () => {
           try {
             if (!tabStateManager) {
@@ -296,7 +296,17 @@ CRITICAL LANGUAGE RULE:
               return;
             }
 
-            await tabStateManager.unlinkFolder(folderPath);
+            const unlinked = await tabStateManager.unlinkFolder(folderPath);
+
+            if (unlinked) {
+              console.log(
+                `[ServiceWorker] ✅ Successfully unlinked tabs from folder: ${folderPath}`
+              );
+            } else {
+              console.warn(
+                `[ServiceWorker] ⚠️ No tabs were unlinked from folder: ${folderPath}`
+              );
+            }
 
             chrome.storage.local.remove(["wsIncomingRequest"]);
           } catch (error) {
