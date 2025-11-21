@@ -910,14 +910,327 @@ export class PromptController {
     tabId: number
   ): Promise<string | null> {
     try {
-      const result = await executeScript(tabId, () => {
+      // Step 1: Lấy innerHTML từ page và extract markdown structure
+      const extractedContent = await executeScript(tabId, () => {
         window.scrollTo({
           top: document.documentElement.scrollHeight,
           behavior: "smooth",
         });
 
+        // Strategy 1: Tìm tất cả ds-markdown containers
+        const markdownContainers = Array.from(
+          document.querySelectorAll(".ds-markdown")
+        );
+
+        console.log(
+          "[DeepSeek Page] 🔍 DEBUG markdownContainers count:",
+          markdownContainers.length
+        );
+
+        if (markdownContainers.length > 0) {
+          const lastMarkdown =
+            markdownContainers[markdownContainers.length - 1];
+
+          // Tìm parent container chứa toàn bộ message
+          let messageContainer: Element = lastMarkdown;
+          let parent = lastMarkdown.parentElement;
+          let level = 0;
+
+          while (parent && level < 5) {
+            const parentClasses = parent.className || "";
+            if (
+              parentClasses.includes("message") ||
+              parentClasses.includes("content") ||
+              parentClasses.includes("assistant") ||
+              parentClasses.includes("response")
+            ) {
+              messageContainer = parent;
+              break;
+            }
+            const childMarkdowns = parent.querySelectorAll(".ds-markdown");
+            if (
+              childMarkdowns.length === 1 &&
+              parent.textContent &&
+              parent.textContent.length >
+                (messageContainer.textContent?.length || 0)
+            ) {
+              messageContainer = parent;
+            }
+            parent = parent.parentElement;
+            level++;
+          }
+
+          console.log(
+            "[DeepSeek Page] 🔍 DEBUG container tagName:",
+            messageContainer.tagName
+          );
+          console.log(
+            "[DeepSeek Page] 🔍 DEBUG container className:",
+            messageContainer.className
+          );
+
+          // 🆕 THAY VÌ LẤY innerHTML, parse DOM structure để giữ nguyên markdown format
+          // 🆕 THAY VÌ LẤY innerHTML, parse DOM structure để giữ nguyên markdown format
+          const extractMarkdown = (element: Element): string => {
+            let result = "";
+
+            const traverse = (node: Node): void => {
+              if (node.nodeType === Node.TEXT_NODE) {
+                const text = node.textContent || "";
+
+                // 🆕 CRITICAL: Phát hiện XML tags đặc biệt
+                // Nếu text chứa các XML tags, cần xử lý đặc biệt
+                if (
+                  text.includes("<task_progress>") ||
+                  text.includes("</task_progress>")
+                ) {
+                  result += text;
+                  return;
+                }
+
+                result += text;
+              } else if (node.nodeType === Node.ELEMENT_NODE) {
+                const el = node as Element;
+                const tag = el.tagName.toLowerCase();
+                const className = el.className || "";
+
+                // 🆕 CRITICAL: Xử lý đặc biệt cho ds-markdown-html spans (chứa XML tags)
+                if (className.includes("ds-markdown-html")) {
+                  const htmlContent = el.textContent || "";
+
+                  // 🆕 CRITICAL: Nếu là closing tag và không có newline trước nó
+                  // thì tự động thêm newline
+                  if (htmlContent.startsWith("</") && !result.endsWith("\n")) {
+                    result += "\n";
+                  }
+
+                  result += htmlContent;
+                  return;
+                }
+
+                // Handle line breaks
+                if (tag === "br") {
+                  result += "\n";
+                  return;
+                }
+
+                // Handle code blocks
+                if (tag === "pre") {
+                  const codeEl = el.querySelector("code");
+                  if (codeEl) {
+                    const lang =
+                      codeEl.className.match(/language-(\w+)/)?.[1] || "";
+                    result += "```" + lang + "\n";
+                    result += codeEl.textContent || "";
+                    result += "\n```\n";
+                  } else {
+                    result += "```\n";
+                    result += el.textContent || "";
+                    result += "\n```\n";
+                  }
+                  return;
+                }
+
+                // Handle inline code
+                if (
+                  tag === "code" &&
+                  el.parentElement?.tagName.toLowerCase() !== "pre"
+                ) {
+                  result += "`" + (el.textContent || "") + "`";
+                  return;
+                }
+
+                // Handle lists
+                if (tag === "ul" || tag === "ol") {
+                  const items = Array.from(el.children);
+
+                  // 🆕 CRITICAL: Kiểm tra xem list này có phải là task_progress không
+                  // Check previous sibling để tìm <task_progress> tag
+                  let isTaskProgressList = false;
+                  let sibling = el.previousElementSibling;
+                  let checkCount = 0;
+
+                  // Check tối đa 3 sibling trước đó
+                  while (sibling && checkCount < 3) {
+                    const siblingText = sibling.textContent || "";
+                    if (
+                      siblingText.includes("<task_progress>") ||
+                      siblingText.includes("&lt;task_progress&gt;")
+                    ) {
+                      isTaskProgressList = true;
+                      break;
+                    }
+                    sibling = sibling.previousElementSibling;
+                    checkCount++;
+                  }
+
+                  items.forEach((item, index) => {
+                    if (item.tagName.toLowerCase() === "li") {
+                      // 🆕 CRITICAL: Kiểm tra checkbox trong li
+                      const checkbox = item.querySelector(
+                        'input[type="checkbox"]'
+                      ) as HTMLInputElement | null;
+
+                      if (checkbox) {
+                        // Task list item với checkbox thực
+                        const isChecked = checkbox.checked;
+                        result += isChecked ? "- [x] " : "- [ ] ";
+
+                        // Extract text content, skipping the checkbox element
+                        const textNodes: string[] = [];
+                        const extractText = (n: Node): void => {
+                          if (n.nodeType === Node.TEXT_NODE) {
+                            const text = (n.textContent || "").trim();
+                            if (text) {
+                              textNodes.push(text);
+                            }
+                          } else if (n.nodeType === Node.ELEMENT_NODE) {
+                            const elem = n as Element;
+                            if (elem.tagName.toLowerCase() !== "input") {
+                              Array.from(elem.childNodes).forEach(extractText);
+                            }
+                          }
+                        };
+                        Array.from(item.childNodes).forEach(extractText);
+                        result += textNodes.join("").trim() + "\n";
+                      } else if (isTaskProgressList) {
+                        // 🆕 Task progress list WITHOUT checkbox element → force add "- [ ] "
+                        result += "- [ ] ";
+
+                        // Extract text content và trim để loại bỏ whitespace thừa
+                        const itemText = (item.textContent || "")
+                          .replace(/\s+/g, " ")
+                          .trim();
+                        result += itemText + "\n";
+                      } else {
+                        // Regular list item
+                        if (tag === "ol") {
+                          result += `${index + 1}. `;
+                        } else {
+                          result += "- ";
+                        }
+
+                        // Extract content recursively (không thêm text trực tiếp)
+                        Array.from(item.childNodes).forEach((child) => {
+                          if (child.nodeType === Node.TEXT_NODE) {
+                            result += (child.textContent || "").trim();
+                          } else {
+                            traverse(child);
+                          }
+                        });
+                        result += "\n";
+                      }
+                    }
+                  });
+                  return;
+                }
+
+                // Handle headings
+                if (tag.match(/^h[1-6]$/)) {
+                  const level = parseInt(tag[1]);
+                  result += "#".repeat(level) + " ";
+                  Array.from(el.childNodes).forEach(traverse);
+                  result += "\n\n";
+                  return;
+                }
+
+                // Handle paragraphs
+                if (tag === "p") {
+                  Array.from(el.childNodes).forEach(traverse);
+                  // Only add newlines if there's actual content
+                  if (el.textContent && el.textContent.trim()) {
+                    result += "\n\n";
+                  }
+                  return;
+                }
+
+                // Handle blockquotes
+                if (tag === "blockquote") {
+                  const lines = (el.textContent || "").split("\n");
+                  lines.forEach((line) => {
+                    if (line.trim()) {
+                      result += "> " + line + "\n";
+                    }
+                  });
+                  result += "\n";
+                  return;
+                }
+
+                // Handle bold
+                if (tag === "strong" || tag === "b") {
+                  result += "**";
+                  Array.from(el.childNodes).forEach(traverse);
+                  result += "**";
+                  return;
+                }
+
+                // Handle italic
+                if (tag === "em" || tag === "i") {
+                  result += "*";
+                  Array.from(el.childNodes).forEach(traverse);
+                  result += "*";
+                  return;
+                }
+
+                // Handle divs and other containers
+                Array.from(el.childNodes).forEach(traverse);
+
+                // Add line break for block elements
+                const blockElements = [
+                  "div",
+                  "section",
+                  "article",
+                  "header",
+                  "footer",
+                  "main",
+                ];
+                if (blockElements.includes(tag)) {
+                  result += "\n";
+                }
+              }
+            };
+
+            traverse(element);
+            return result;
+          };
+
+          let markdownText = extractMarkdown(messageContainer);
+
+          // 🆕 Post-processing: Fix spacing around XML tags
+          markdownText = markdownText
+            // Fix XML tags at start of line có newline thừa phía trước
+            .replace(/\n+(<\/?\w+>)/g, "\n$1")
+            // Fix multiple spaces thành single space
+            .replace(/ {2,}/g, " ")
+            // Fix task_progress blocks có spacing không đúng
+            .replace(/(<task_progress>)\s+(-)/g, "$1\n$2")
+            .replace(/(-\s*\[\s*[x ]\s*\][^\n]*)\s+(-)/g, "$1\n$2")
+            // 🆕 CRITICAL: Fix closing tags dính liền với list items
+            // Pattern: "- [ ] text</task_progress>" → "- [ ] text\n</task_progress>"
+            .replace(/(-\s*\[\s*[x ]\s*\][^\n<]*?)(<\/\w+>)/g, "$1\n$2")
+            // Pattern: "</task_progress></read_file>" → "</task_progress>\n</read_file>"
+            .replace(/(<\/\w+>)(<\/\w+>)/g, "$1\n$2");
+
+          console.log(
+            "[DeepSeek Page] 🔍 DEBUG extracted markdown length:",
+            markdownText.length
+          );
+          console.log(
+            "[DeepSeek Page] 🔍 DEBUG extracted markdown preview:",
+            markdownText.substring(0, 500)
+          );
+
+          return { content: markdownText, method: "ds-markdown-parent" };
+        }
+
+        // Strategy 2: Fallback - tìm theo class "message"
         const messageContainers = Array.from(
           document.querySelectorAll('[class*="message"]')
+        );
+
+        console.log(
+          "[DeepSeek Page] 🔍 DEBUG fallback count:",
+          messageContainers.length
         );
 
         if (messageContainers.length === 0) {
@@ -926,115 +1239,167 @@ export class PromptController {
         }
 
         const lastContainer = messageContainers[messageContainers.length - 1];
-        const textContent = lastContainer.textContent?.trim();
+        const textContent = lastContainer.textContent || "";
 
         if (!textContent) {
           console.error("[DeepSeek Page] ❌ Last message container is empty");
           return null;
         }
 
-        return textContent;
+        return { content: textContent, method: "fallback-message" };
       });
 
-      if (result) {
-        try {
-          const jsonMatch = result.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            let sanitizedJson = jsonMatch[0];
-            let sanitizationCount = 0;
-            sanitizedJson = sanitizedJson.replace(
-              /(:\s*")([^"]*(?:"(?:[^"\\]|\\.)*")*[^"]*?)("(?:\s*[,}\]]|$))/g,
-              (
-                _fullMatch: string,
-                prefix: string,
-                content: string,
-                suffix: string
-              ): string => {
-                sanitizationCount++;
-
-                const escaped = content
-                  .replace(/\\/g, "\\\\")
-                  .replace(/"/g, '\\"')
-                  .replace(/\n/g, "\\n")
-                  .replace(/\r/g, "\\r")
-                  .replace(/\t/g, "\\t");
-
-                return prefix + escaped + suffix;
-              }
-            );
-
-            const jsonResponse = JSON.parse(sanitizedJson);
-            const stringifiedResponse = JSON.stringify(jsonResponse);
-
-            return stringifiedResponse;
-          } else {
-            console.warn(
-              `[PromptController] ⚠️ No JSON pattern found in result`
-            );
-          }
-        } catch (parseError) {
-          console.error(`[PromptController] ❌ JSON PARSING FAILED:`);
-          console.error(`  - Error:`, parseError);
-          console.error(
-            `  - Error message:`,
-            parseError instanceof Error
-              ? parseError.message
-              : String(parseError)
-          );
-          console.error(
-            `  - Raw result (first 1000 chars):`,
-            result.substring(0, 1000)
-          );
-
-          if (parseError instanceof Error && parseError.message) {
-            const errorMsg = parseError.message;
-            const posMatch =
-              errorMsg.match(/position (\d+)/i) ||
-              errorMsg.match(/column (\d+)/i);
-            if (posMatch) {
-              const errorPos = parseInt(posMatch[1]);
-              console.error(`  - Error at position ${errorPos}:`);
-              console.error(
-                `  - Context (50 chars before): ${result.substring(
-                  Math.max(0, errorPos - 50),
-                  errorPos
-                )}`
-              );
-              console.error(`  - Problem char: '${result.charAt(errorPos)}'`);
-              console.error(
-                `  - Context (50 chars after): ${result.substring(
-                  errorPos,
-                  errorPos + 50
-                )}`
-              );
-            }
-          }
-        }
-
-        return result;
-      } else {
+      if (!extractedContent) {
         console.error(`[PromptController] ❌ No result from page`);
         return null;
       }
+
+      const { content, method } = extractedContent as {
+        content: string;
+        method: string;
+      };
+
+      console.log(`[PromptController] 🔍 DEBUG extraction method: ${method}`);
+      console.log(
+        `[PromptController] 🔍 DEBUG content length: ${content.length}`
+      );
+      console.log(
+        `[PromptController] 🔍 DEBUG content preview:`,
+        content.substring(0, 500)
+      );
+
+      // Step 2: Decode HTML entities
+      const decodedResult = this.decodeHtmlEntities(content);
+
+      console.log(
+        `[PromptController] 🔍 DEBUG decoded length: ${decodedResult.length}`
+      );
+
+      // Clean up excessive newlines (giữ lại tối đa 2 newlines liên tiếp)
+      let cleanedResult = decodedResult.replace(/\n{3,}/g, "\n\n").trim();
+
+      // 🆕 Additional cleanup: Fix spacing trong numbered lists
+      cleanedResult = cleanedResult.replace(/(\d+\.)\s+\n/g, "$1 ");
+
+      // 🆕 CRITICAL: Ensure proper newlines around ALL XML closing tags
+      // Pattern: "text</tag>" → "text\n</tag>" (nếu chưa có newline)
+      cleanedResult = cleanedResult.replace(/([^\n])(<\/[a-z_]+>)/g, "$1\n$2");
+
+      // 🆕 CRITICAL: Ensure proper newlines between consecutive closing tags
+      // Pattern: "</tag1></tag2>" → "</tag1>\n</tag2>"
+      cleanedResult = cleanedResult.replace(
+        /(<\/[a-z_]+>)(<\/[a-z_]+>)/g,
+        "$1\n$2"
+      );
+
+      console.log(`[PromptController] 🔍 DEBUG final result:`, cleanedResult);
+
+      // Check for XML tags
+      const hasThinkingTag = cleanedResult.includes("<thinking>");
+      const hasReadFileTag = cleanedResult.includes("<read_file>");
+      console.log(`[PromptController] 🔍 DEBUG XML tags:`, {
+        hasThinkingTag,
+        hasReadFileTag,
+      });
+
+      // Step 3: Try to parse as JSON (if response is JSON)
+      try {
+        const jsonMatch = cleanedResult.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          let sanitizedJson = jsonMatch[0];
+          sanitizedJson = sanitizedJson.replace(
+            /(:\s*")([^"]*(?:"(?:[^"\\]|\\.)*")*[^"]*?)("(?:\s*[,}\]]|$))/g,
+            (
+              _fullMatch: string,
+              prefix: string,
+              content: string,
+              suffix: string
+            ): string => {
+              const escaped = content
+                .replace(/\\/g, "\\\\")
+                .replace(/"/g, '\\"')
+                .replace(/\n/g, "\\n")
+                .replace(/\r/g, "\\r")
+                .replace(/\t/g, "\\t");
+              return prefix + escaped + suffix;
+            }
+          );
+
+          const jsonResponse = JSON.parse(sanitizedJson);
+          return JSON.stringify(jsonResponse);
+        }
+      } catch (parseError) {
+        console.warn(
+          `[PromptController] ⚠️ JSON parse failed, returning raw text`
+        );
+      }
+
+      // Return cleaned text
+      return cleanedResult;
     } catch (error) {
       console.error(
-        `[PromptController] ❌ EXCEPTION in getLatestResponseDirectly:`
-      );
-      console.error(`  - Error:`, error);
-      console.error(
-        `  - Error type:`,
-        error instanceof Error ? error.constructor.name : typeof error
-      );
-      console.error(
-        `  - Error message:`,
-        error instanceof Error ? error.message : String(error)
-      );
-      console.error(
-        `  - Stack trace:`,
-        error instanceof Error ? error.stack : "N/A"
+        `[PromptController] ❌ EXCEPTION in getLatestResponseDirectly:`,
+        error
       );
       return null;
     }
+  }
+
+  /**
+   * Decode HTML entities trong string
+   * Chuyển &lt; → <, &gt; → >, &amp; → &, &quot; → ", &#39; → '
+   */
+  private static decodeHtmlEntities(text: string): string {
+    console.log(
+      `[PromptController] 🔍 decodeHtmlEntities called with text length: ${text.length}`
+    );
+
+    const entities: Record<string, string> = {
+      "&lt;": "<",
+      "&gt;": ">",
+      "&amp;": "&",
+      "&quot;": '"',
+      "&#39;": "'",
+      "&#x27;": "'",
+      "&#x2F;": "/",
+      "&#60;": "<",
+      "&#62;": ">",
+      "&nbsp;": " ",
+    };
+
+    let decoded = text;
+    let replacementCount = 0;
+
+    for (const [entity, char] of Object.entries(entities)) {
+      const countBefore = (
+        decoded.match(
+          new RegExp(entity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")
+        ) || []
+      ).length;
+      if (countBefore > 0) {
+        console.log(
+          `[PromptController] 🔍 Replacing ${countBefore} occurrences of "${entity}" → "${char}"`
+        );
+        replacementCount += countBefore;
+      }
+      decoded = decoded.split(entity).join(char);
+    }
+
+    console.log(
+      `[PromptController] 🔍 Total entity replacements: ${replacementCount}`
+    );
+
+    // Handle numeric entities: &#123; → {
+    decoded = decoded.replace(/&#(\d+);/g, (_, num) =>
+      String.fromCharCode(parseInt(num, 10))
+    );
+
+    // Handle hex entities: &#x7B; → {
+    decoded = decoded.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16))
+    );
+
+    return decoded;
   }
 
   private static buildOpenAIResponse(content: string): any {
