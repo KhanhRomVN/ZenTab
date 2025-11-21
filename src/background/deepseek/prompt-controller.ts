@@ -522,11 +522,7 @@ export class PromptController {
                   typeof parsedObject === "object" &&
                   parsedObject.choices
                 ) {
-                  // Đã là JSON format chuẩn
                   responseToSend = JSON.stringify(parsedObject);
-                  console.log(
-                    `[PromptController] ✅ Response already in JSON format`
-                  );
                 } else {
                   // JSON nhưng thiếu structure → rebuild
                   console.warn(
@@ -537,9 +533,6 @@ export class PromptController {
                 }
               } catch (parseError) {
                 // Raw text → build JSON format
-                console.log(
-                  `[PromptController] 🔧 Building OpenAI JSON from raw text`
-                );
                 const builtResponse = this.buildOpenAIResponse(rawResponse);
                 responseToSend = JSON.stringify(builtResponse);
               }
