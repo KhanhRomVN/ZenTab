@@ -626,6 +626,25 @@ export class PromptController {
             }
 
             const currentTimestamp = Date.now();
+
+            // 🔍 LOG: Response content trước khi gửi tới Backend
+            console.log(`[PromptController] 📤 Sending response to Backend`);
+            console.log(`[PromptController] 📊 Response metadata:`, {
+              requestId: requestId,
+              tabId: tabId,
+              connectionId: targetConnectionId,
+              responseLength: responseToSend.length,
+              timestamp: currentTimestamp,
+            });
+            console.log(
+              `[PromptController] 📝 Response preview (first 500 chars):`,
+              responseToSend.substring(0, 500)
+            );
+            console.log(
+              `[PromptController] 📝 Response full content:`,
+              responseToSend
+            );
+
             const messagePayload = {
               wsOutgoingMessage: {
                 connectionId: targetConnectionId,
@@ -712,6 +731,15 @@ export class PromptController {
               this.activePollingTasks.delete(tabId);
               return;
             }
+
+            // 🔍 LOG: Fetch error trước khi gửi
+            console.log(`[PromptController] ❌ Sending fetch error to Backend`);
+            console.log(`[PromptController] 📊 Error metadata:`, {
+              requestId: requestId,
+              tabId: tabId,
+              errorType: "FETCH_FAILED",
+              errorMessage: "Failed to fetch response from DeepSeek",
+            });
 
             await browserAPI.storage.local.set({
               wsOutgoingMessage: {
@@ -801,6 +829,16 @@ export class PromptController {
             return;
           }
 
+          // 🔍 LOG: Timeout error trước khi gửi
+          console.log(`[PromptController] ⏱️ Sending timeout error to Backend`);
+          console.log(`[PromptController] 📊 Error metadata:`, {
+            requestId: requestId,
+            tabId: tabId,
+            errorType: "TIMEOUT",
+            maxPolls: this.config.maxPolls,
+            pollCount: pollCount,
+          });
+
           await browserAPI.storage.local.set({
             wsOutgoingMessage: {
               connectionId: targetConnectionId,
@@ -885,6 +923,18 @@ export class PromptController {
           return;
         }
 
+        // 🔍 LOG: Exception error trước khi gửi
+        const errorMessage =
+          error instanceof Error ? error.message : "Unknown polling error";
+        console.log(`[PromptController] 💥 Sending exception error to Backend`);
+        console.log(`[PromptController] 📊 Error metadata:`, {
+          requestId: requestId,
+          tabId: tabId,
+          errorType: "EXCEPTION",
+          errorMessage: errorMessage,
+          errorStack: error instanceof Error ? error.stack : undefined,
+        });
+
         await browserAPI.storage.local.set({
           wsOutgoingMessage: {
             connectionId: targetConnectionId,
@@ -893,10 +943,7 @@ export class PromptController {
               requestId: requestId,
               tabId: tabId,
               success: false,
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "Unknown polling error",
+              error: errorMessage,
             },
             timestamp: Date.now(),
           },
