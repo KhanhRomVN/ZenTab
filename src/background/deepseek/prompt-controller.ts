@@ -243,7 +243,7 @@ export class PromptController {
       }
 
       // Wait longer for button to enable (DeepSeek UI needs time to process events)
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
       const clickResult = await executeScript(tabId, () => {
         const sendButton = document.querySelector(
@@ -562,9 +562,6 @@ export class PromptController {
                 return;
               }
             } else {
-              console.log(
-                `[PromptController] ✅ Marking tab ${tabId} FREE (preserving existing folder link)`
-              );
               await this.tabStateManager.markTabFree(tabId);
             }
 
@@ -686,17 +683,6 @@ export class PromptController {
             }
 
             const currentTimestamp = Date.now();
-
-            // 🆕 LOG 3: Response gửi tới WebSocket (extract content only)
-            let contentToLog = responseToSend;
-            try {
-              const parsed = JSON.parse(responseToSend);
-              if (parsed.choices && parsed.choices[0]?.delta?.content) {
-                contentToLog = parsed.choices[0].delta.content;
-              }
-            } catch (e) {
-              // Keep original if parse fails
-            }
 
             const messagePayload = {
               wsOutgoingMessage: {
@@ -1385,9 +1371,12 @@ export class PromptController {
         "$1\n$2"
       );
 
+      // 🆕 Step 2.9: Clean SEARCH/REPLACE code fences in <diff> blocks (CUỐI CÙNG)
+      cleanedResult = this.cleanSearchReplaceCodeFences(cleanedResult);
+
       // 🆕 LOG 2: Response sau xử lý (full cleaned content)
       console.log(
-        `[PromptController] ✅ PROCESSED RESPONSE (CLEANED):\n${cleanedResult}`
+        `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
       );
 
       // Step 3: Try to parse as JSON (if response is JSON)
@@ -1526,6 +1515,147 @@ export class PromptController {
     unwrapped = unwrapped.replace(/(<\/[a-z_]+>)\s*\n+```/gi, "$1");
 
     return unwrapped;
+  }
+
+  /**
+   * 🆕 Loại bỏ code fence (```) bên ngoài cùng trong SEARCH/REPLACE blocks
+   * Giữ nguyên các ``` bên trong nếu code có sử dụng
+   */
+  private static cleanSearchReplaceCodeFences(content: string): string {
+    const diffBlockPattern = /<diff>([\s\S]*?)<\/diff>/g;
+    const CODE_FENCE = "```";
+    const UI_ARTIFACTS = ["text", "copy", "download"];
+
+    return content.replace(diffBlockPattern, (_match, diffContent) => {
+      const lines = diffContent.split("\n");
+      const searchMarker = "<<<<<<< SEARCH";
+      const separatorMarker = "=======";
+      const replaceMarker = "> REPLACE";
+
+      // Tìm vị trí các marker
+      let searchIdx = -1;
+      let separatorIdx = -1;
+      let replaceIdx = -1;
+
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(searchMarker)) searchIdx = i;
+        if (lines[i].includes(separatorMarker)) separatorIdx = i;
+        if (lines[i].includes(replaceMarker)) replaceIdx = i;
+      }
+
+      if (searchIdx === -1 || separatorIdx === -1 || replaceIdx === -1) {
+        return `<diff>${diffContent}</diff>`;
+      }
+
+      const linesToRemove = new Set<number>();
+
+      // Step 1: Xóa dòng trống NGAY SAU "<<<<<<< SEARCH"
+      if (searchIdx + 1 < lines.length && lines[searchIdx + 1].trim() === "") {
+        linesToRemove.add(searchIdx + 1);
+      }
+
+      // Step 2: Sau "<<<<<<< SEARCH": Tìm CODE_FENCE (bỏ qua UI artifacts và dòng trống)
+      for (let i = searchIdx + 1; i < separatorIdx; i++) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+        const isUIArtifact = UI_ARTIFACTS.includes(trimmed.toLowerCase());
+        if (trimmed !== "" && !isUIArtifact) {
+          break;
+        }
+      }
+
+      // Step 3: Xóa dòng trống NGAY TRƯỚC "======="
+      if (separatorIdx - 1 >= 0 && lines[separatorIdx - 1].trim() === "") {
+        linesToRemove.add(separatorIdx - 1);
+      }
+
+      // Step 4: Trước "=======": Tìm ngược lên CODE_FENCE (bỏ qua dòng trống đã mark)
+      for (let i = separatorIdx - 1; i > searchIdx; i--) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+        if (trimmed !== "") {
+          break;
+        }
+      }
+
+      // Step 5: Xóa dòng trống NGAY SAU "======="
+      if (
+        separatorIdx + 1 < lines.length &&
+        lines[separatorIdx + 1].trim() === ""
+      ) {
+        linesToRemove.add(separatorIdx + 1);
+      }
+
+      // Step 6: Sau "=======": Tìm CODE_FENCE (bỏ qua UI artifacts và dòng trống)
+      for (let i = separatorIdx + 1; i < replaceIdx; i++) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+        const isUIArtifact = UI_ARTIFACTS.includes(trimmed.toLowerCase());
+        if (trimmed !== "" && !isUIArtifact) {
+          break;
+        }
+      }
+
+      // Step 7: Xóa dòng trống NGAY TRƯỚC "> REPLACE"
+      if (replaceIdx - 1 >= 0 && lines[replaceIdx - 1].trim() === "") {
+        linesToRemove.add(replaceIdx - 1);
+      }
+
+      // Step 8: Trước "> REPLACE": Tìm ngược lên CODE_FENCE (bỏ qua dòng trống đã mark)
+      for (let i = replaceIdx - 1; i > separatorIdx; i--) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+        if (trimmed !== "") {
+          break;
+        }
+      }
+
+      // Step 9: Xóa CODE_FENCE nếu dòng TRÊN là marker
+      for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+
+        if (trimmed === CODE_FENCE && i > 0) {
+          let prevIdx = i - 1;
+          while (prevIdx >= 0 && lines[prevIdx].trim() === "") {
+            prevIdx--;
+          }
+
+          if (prevIdx >= 0) {
+            const prevLine = lines[prevIdx].trim();
+            if (prevLine === separatorMarker || prevLine === searchMarker) {
+              linesToRemove.add(i);
+            }
+          }
+        }
+      }
+
+      // Lọc bỏ các dòng cần xóa
+      const cleanedLines = lines.filter(
+        (_: string, idx: number) => !linesToRemove.has(idx)
+      );
+
+      return `<diff>${cleanedLines.join("\n")}</diff>`;
+    });
   }
 
   private static buildOpenAIResponse(content: string): any {

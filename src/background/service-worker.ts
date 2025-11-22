@@ -103,25 +103,24 @@ CRITICAL LANGUAGE RULE:
 - Code comments should also be in Vietnamese when possible`;
 
           const textWrapRule = `
-CRITICAL TASK_PROGRESS FORMAT RULE (10 RULES):
-1. You MUST wrap ONLY the <task_progress> tag inside a text code block
-2. The <task_progress> block must start with: \`\`\`text
-3. The <task_progress> block must end with: \`\`\`
-4. The format is: \`\`\`text followed by newline, then <task_progress>...</task_progress>, then newline, then \`\`\`
-5. <thinking> tags, explanations, and other XML tags (<read_file>, <write_file>, etc.) should NOT be wrapped in text blocks
-6. Only <task_progress> content needs the text wrapper - everything else stays outside
-7. Do NOT put any other content inside the \`\`\`text...\`\`\` block that contains <task_progress>
-8. This rule applies ONLY when you include a <task_progress> section in your response
-9. If there is no <task_progress> in your response, do NOT use any text code blocks
-10. The <task_progress> wrapper is ONLY for task progress tracking, not for other content
+CRITICAL TEXT BLOCK WRAPPING RULES (13 RULES):
+1. You MUST wrap <task_progress> tags inside text code blocks
+2. You MUST wrap ALL code content inside <replace_in_file> and <write_to_file> tags inside text code blocks
+3. The text block must start with: \`\`\`text
+4. The text block must end with: \`\`\`
+5. The format is: \`\`\`text followed by newline, then content, then newline, then \`\`\`
+6. <thinking> tags and explanations should NOT be wrapped in text blocks
+7. Do NOT put explanations or other content inside the \`\`\`text...\`\`\` blocks
+8. Each wrappable content (task_progress or code) gets its own separate text block
+9. If there is no task_progress or code in your response, do NOT use any text code blocks
+10. The text block wrapper is ONLY for task_progress and code content, not for other content
+11. In <replace_in_file>: BOTH old code (after SEARCH) and new code (after REPLACE) MUST be wrapped in separate text blocks
+12. Code in <new_str> within <replace_in_file> MUST be wrapped in text blocks
+13. Code in <content> within <write_to_file> MUST be wrapped in text blocks
 
-CORRECT FORMAT EXAMPLE:
-<thinking>
-Analysis and planning here (NOT wrapped in text block)
-</thinking>
+CORRECT FORMAT EXAMPLES:
 
-Explanation in Vietnamese here (NOT wrapped in text block)
-
+Example 1 - Task Progress:
 <read_file>
 <path>test.ts</path>
 \`\`\`text
@@ -134,33 +133,82 @@ Explanation in Vietnamese here (NOT wrapped in text block)
 \`\`\`
 </read_file>
 
-More explanation here (NOT wrapped in text block)
+Example 2 - Replace In File with Code (BOTH old and new code wrapped):
+<replace_in_file>
+<path>src/utils/helper.ts</path>
+<diff>
+<<<<<<< SEARCH
+\`\`\`text
+function oldFunction() {
+  return "old";
+}
+\`\`\`
+=======
+\`\`\`text
+function newFunction() {
+  return "new";
+}
+\`\`\`
+>>>>>>> REPLACE
+</diff>
+</replace_in_file>
+
+Example 3 - Write To File with Code:
+<write_to_file>
+<path>src/new-file.ts</path>
+\`\`\`text
+export function myFunction() {
+  console.log("Hello World");
+  return true;
+}
+\`\`\`
+</write_to_file>
 
 INCORRECT FORMAT EXAMPLES:
-❌ Example 1 - wrapping everything:
+❌ Example 1 - code without wrapper:
+<write_to_file>
+<path>test.ts</path>
+function test() {
+  return true;
+}
+</write_to_file>
+
+❌ Example 2 - only new code wrapped in replace_in_file:
+<replace_in_file>
+<path>test.ts</path>
+<diff>
+<<<<<<< SEARCH
+function oldFunction() {
+  return "old";
+}
+=======
+\`\`\`text
+function newFunction() {
+  return "new";
+}
+\`\`\`
+>>>>>>> REPLACE
+</diff>
+</replace_in_file>
+
+❌ Example 3 - wrapping everything:
 \`\`\`text
 <thinking>...</thinking>
-<read_file>...</read_file>
+<write_to_file>...</write_to_file>
 \`\`\`
 
-❌ Example 2 - task_progress without wrapper:
-<read_file>
-<path>test.ts</path>
-<task_progress>
-- [ ] Task 1
-</task_progress>
-</read_file>
-
-❌ Example 3 - mixing content in text block:
+❌ Example 4 - mixing content in text block:
 \`\`\`text
 Some explanation
-<task_progress>
-- [ ] Task 1
-</task_progress>
+function test() {}
 More text
 \`\`\`
 
-REMEMBER: ONLY <task_progress> gets wrapped in \`\`\`text...\`\`\`, nothing else!`;
+REMEMBER: 
+- <task_progress> content MUST be wrapped in \`\`\`text...\`\`\`
+- ALL CODE in <replace_in_file> (both SEARCH and REPLACE sections) MUST be wrapped in \`\`\`text...\`\`\`
+- ALL CODE in <write_to_file> MUST be wrapped in \`\`\`text...\`\`\`
+- Each code block gets its own separate \`\`\`text...\`\`\` wrapper!`;
 
           const combinedPrompt = systemPrompt
             ? `${systemPrompt}\n\n${languageRule}\n\n${textWrapRule}\n\nUSER REQUEST:\n${userPrompt}`
