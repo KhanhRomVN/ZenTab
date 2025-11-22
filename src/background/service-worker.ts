@@ -102,9 +102,69 @@ CRITICAL LANGUAGE RULE:
 - All explanations, descriptions, and responses must be in Vietnamese
 - Code comments should also be in Vietnamese when possible`;
 
+          const textWrapRule = `
+CRITICAL TASK_PROGRESS FORMAT RULE (10 RULES):
+1. You MUST wrap ONLY the <task_progress> tag inside a text code block
+2. The <task_progress> block must start with: \`\`\`text
+3. The <task_progress> block must end with: \`\`\`
+4. The format is: \`\`\`text followed by newline, then <task_progress>...</task_progress>, then newline, then \`\`\`
+5. <thinking> tags, explanations, and other XML tags (<read_file>, <write_file>, etc.) should NOT be wrapped in text blocks
+6. Only <task_progress> content needs the text wrapper - everything else stays outside
+7. Do NOT put any other content inside the \`\`\`text...\`\`\` block that contains <task_progress>
+8. This rule applies ONLY when you include a <task_progress> section in your response
+9. If there is no <task_progress> in your response, do NOT use any text code blocks
+10. The <task_progress> wrapper is ONLY for task progress tracking, not for other content
+
+CORRECT FORMAT EXAMPLE:
+<thinking>
+Analysis and planning here (NOT wrapped in text block)
+</thinking>
+
+Explanation in Vietnamese here (NOT wrapped in text block)
+
+<read_file>
+<path>test.ts</path>
+\`\`\`text
+<task_progress>
+- [ ] Phân tích cấu trúc dự án
+- [ ] Kiểm tra file hiện tại
+- [ ] Thêm hàm mới
+- [ ] Xác nhận kết quả
+</task_progress>
+\`\`\`
+</read_file>
+
+More explanation here (NOT wrapped in text block)
+
+INCORRECT FORMAT EXAMPLES:
+❌ Example 1 - wrapping everything:
+\`\`\`text
+<thinking>...</thinking>
+<read_file>...</read_file>
+\`\`\`
+
+❌ Example 2 - task_progress without wrapper:
+<read_file>
+<path>test.ts</path>
+<task_progress>
+- [ ] Task 1
+</task_progress>
+</read_file>
+
+❌ Example 3 - mixing content in text block:
+\`\`\`text
+Some explanation
+<task_progress>
+- [ ] Task 1
+</task_progress>
+More text
+\`\`\`
+
+REMEMBER: ONLY <task_progress> gets wrapped in \`\`\`text...\`\`\`, nothing else!`;
+
           const combinedPrompt = systemPrompt
-            ? `${systemPrompt}\n\n${languageRule}\n\nUSER REQUEST:\n${userPrompt}`
-            : `${languageRule}\n\nUSER REQUEST:\n${userPrompt}`;
+            ? `${systemPrompt}\n\n${languageRule}\n\n${textWrapRule}\n\nUSER REQUEST:\n${userPrompt}`
+            : `${languageRule}\n\n${textWrapRule}\n\nUSER REQUEST:\n${userPrompt}`;
 
           const requestKey = `processed_${requestId}`;
 

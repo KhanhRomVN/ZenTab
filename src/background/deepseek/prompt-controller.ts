@@ -1352,8 +1352,19 @@ export class PromptController {
       // 🆕 Step 2.5: Validate and fix XML structure
       const xmlFixedResult = this.fixXmlStructure(decodedResult);
 
+      // 🆕 Step 2.6: Unwrap task_progress blocks from ```text wrappers
+      const unwrappedResult = this.unwrapTaskProgress(xmlFixedResult);
+
+      // 🆕 Step 2.7: Remove UI artifacts (Copy, Download buttons text)
+      let artifactCleanedResult = unwrappedResult
+        .replace(/\n*Copy\s*\n*/gi, "\n")
+        .replace(/\n*Download\s*\n*/gi, "\n")
+        .replace(/\btext\s*\n+/gi, "\n");
+
       // Clean up excessive newlines (giữ lại tối đa 2 newlines liên tiếp)
-      let cleanedResult = xmlFixedResult.replace(/\n{3,}/g, "\n\n").trim();
+      let cleanedResult = artifactCleanedResult
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
 
       // 🆕 Additional cleanup: Fix spacing trong numbered lists
       cleanedResult = cleanedResult.replace(/(\d+\.)\s+\n/g, "$1 ");
@@ -1471,6 +1482,32 @@ export class PromptController {
     let fixed = content;
     fixed = fixed.replace(/(<\/[a-z_]+>)(<[a-z_]+>)/g, "$1\n$2");
     return fixed;
+  }
+
+  /**
+   * 🆕 Unwrap <task_progress> blocks nếu chúng bị wrap trong ```text code blocks
+   * Pattern: ```text...any text...<task_progress>...</task_progress>...``` → <task_progress>...</task_progress>
+   * Xử lý cả trường hợp có "Copy", "Download" hoặc text khác giữa ```text và <task_progress>
+   */
+  private static unwrapTaskProgress(content: string): string {
+    // Pattern 1: Unwrap task_progress từ ```text blocks
+    // Loại bỏ hoàn toàn wrapper ```text...``` và các UI artifacts (Copy, Download)
+    const textBlockPattern =
+      /```text[\s\S]*?(<task_progress>[\s\S]*?<\/task_progress>)[\s\S]*?```/g;
+
+    let unwrapped = content.replace(textBlockPattern, "$1");
+
+    // Pattern 2: Loại bỏ các UI button text (Copy, Download) xuất hiện trước/sau XML tags
+    // Xử lý trường hợp: "Copy\nDownload\n\n<tag>..."
+    unwrapped = unwrapped.replace(
+      /(Copy\s*(?:Download)?\s*\n+)(<[a-z_]+>)/gi,
+      "$2"
+    );
+
+    // Pattern 3: Loại bỏ "text" keyword đơn lẻ trước XML tags
+    unwrapped = unwrapped.replace(/\btext\s*\n+(<[a-z_]+>)/gi, "$1");
+
+    return unwrapped;
   }
 
   private static buildOpenAIResponse(content: string): any {
