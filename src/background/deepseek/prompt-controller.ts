@@ -687,6 +687,17 @@ export class PromptController {
 
             const currentTimestamp = Date.now();
 
+            // 🆕 LOG 3: Response gửi tới WebSocket (extract content only)
+            let contentToLog = responseToSend;
+            try {
+              const parsed = JSON.parse(responseToSend);
+              if (parsed.choices && parsed.choices[0]?.delta?.content) {
+                contentToLog = parsed.choices[0].delta.content;
+              }
+            } catch (e) {
+              // Keep original if parse fails
+            }
+
             const messagePayload = {
               wsOutgoingMessage: {
                 connectionId: targetConnectionId,
@@ -705,11 +716,6 @@ export class PromptController {
             await browserAPI.storage.local.set(messagePayload);
             this.activePollingTasks.delete(tabId);
           } else {
-            console.error(
-              "[PromptController] ❌ Failed to fetch response from DeepSeek for requestId:",
-              capturedRequestId
-            );
-
             await this.tabStateManager.markTabFree(tabId);
 
             if (isTestRequest) {
@@ -1330,15 +1336,14 @@ export class PromptController {
         return null;
       }
 
-      const { content, method } = extractedContent as {
+      const { content } = extractedContent as {
         content: string;
         method: string;
       };
 
+      // 🆕 LOG 1: Raw HTML content nhận từ DeepSeek (full content)
       console.log(
-        `[PromptController] ℹ️ Extracted via method: ${method}, length: ${
-          content?.length || 0
-        }`
+        `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
       );
 
       // Step 2: Decode HTML entities
@@ -1362,6 +1367,11 @@ export class PromptController {
       cleanedResult = cleanedResult.replace(
         /(<\/[a-z_]+>)(<\/[a-z_]+>)/g,
         "$1\n$2"
+      );
+
+      // 🆕 LOG 2: Response sau xử lý (full cleaned content)
+      console.log(
+        `[PromptController] ✅ PROCESSED RESPONSE (CLEANED):\n${cleanedResult}`
       );
 
       // Step 3: Try to parse as JSON (if response is JSON)
@@ -1391,7 +1401,7 @@ export class PromptController {
           return JSON.stringify(jsonResponse);
         }
       } catch (parseError) {
-        console.warn(
+        console.error(
           `[PromptController] ⚠️ JSON parse failed, returning raw text`
         );
       }
@@ -1479,7 +1489,7 @@ export class PromptController {
     const contentLength = content.length;
     const estimatedTokens = Math.ceil(contentLength / 4);
 
-    return {
+    const responseObject = {
       id: responseId,
       object: "chat.completion.chunk",
       created: timestamp,
@@ -1502,5 +1512,7 @@ export class PromptController {
       },
       system_fingerprint: systemFingerprint,
     };
+
+    return responseObject;
   }
 }
