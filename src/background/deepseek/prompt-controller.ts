@@ -507,7 +507,6 @@ export class PromptController {
 
           if (rawResponse) {
             responseSent = true;
-            await this.tabStateManager.markTabFree(tabId);
             this.activePollingTasks.delete(tabId);
 
             // 🆕 CRITICAL: Lấy folderPath từ wsMessages TRƯỚC KHI link
@@ -547,6 +546,31 @@ export class PromptController {
                 "[PromptController] ❌ Failed to get folderPath from wsMessages:",
                 error
               );
+            }
+
+            // 🔥 CRITICAL: Chỉ dùng atomic operation KHI CÓ folderPath (new task)
+            // Nếu không có folderPath (existing task) → dùng markTabFree() để giữ nguyên folder hiện tại
+            if (folderPathToLink) {
+              console.log(
+                `[PromptController] 🔗 Marking tab ${tabId} FREE with NEW folder: ${folderPathToLink}`
+              );
+              const freeSuccess =
+                await this.tabStateManager.markTabFreeWithFolder(
+                  tabId,
+                  folderPathToLink
+                );
+
+              if (!freeSuccess) {
+                console.error(
+                  `[PromptController] ❌ Failed to mark tab free with folder, aborting response`
+                );
+                return;
+              }
+            } else {
+              console.log(
+                `[PromptController] ✅ Marking tab ${tabId} FREE (preserving existing folder link)`
+              );
+              await this.tabStateManager.markTabFree(tabId);
             }
 
             let responseToSend: string = "";
@@ -667,17 +691,6 @@ export class PromptController {
             }
 
             const currentTimestamp = Date.now();
-
-            // 🆕 CRITICAL: Link tab VỚI folder TRƯỚC KHI gửi response
-            if (folderPathToLink) {
-              console.log(
-                `[PromptController] 🔗 Linking tab ${tabId} to folder BEFORE sending response: ${folderPathToLink}`
-              );
-              await this.tabStateManager.linkTabToFolder(
-                tabId,
-                folderPathToLink
-              );
-            }
 
             const messagePayload = {
               wsOutgoingMessage: {

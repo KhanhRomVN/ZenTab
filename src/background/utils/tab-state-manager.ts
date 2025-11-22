@@ -495,19 +495,56 @@ export class TabStateManager {
 
   public async markTabBusy(tabId: number, requestId: string): Promise<boolean> {
     try {
-      const result = await chrome.storage.session.get([this.STORAGE_KEY]);
-      const states = (result && result[this.STORAGE_KEY]) || {};
-      const currentState = states[tabId] || { requestCount: 0 };
+      // 🔥 CRITICAL: Wrap storage.get() để đảm bảo async completion
+      const result = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
 
+      const states = (result && result[this.STORAGE_KEY]) || {};
+      const currentState = states[tabId] || {
+        requestCount: 0,
+        folderPath: null,
+      };
+
+      // 🆕 DEBUG: Log current state BEFORE marking busy
+      console.log(
+        `[TabStateManager] 🔍 markTabBusy - BEFORE update: tabId=${tabId}, currentState=`,
+        JSON.stringify(currentState, null, 2)
+      );
+
+      // 🔥 CRITICAL: Preserve folderPath - use currentState.folderPath directly
+      // KHÔNG dùng || null vì có thể gây mất dữ liệu
       states[tabId] = {
         status: "busy",
         requestId: requestId,
         requestCount: (currentState.requestCount || 0) + 1,
-        folderPath: currentState.folderPath || null,
+        folderPath: currentState.folderPath ?? null, // ✅ Dùng ?? thay vì ||
       };
 
-      await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
+      // 🔥 CRITICAL: Wrap storage.set() để đảm bảo async completion
+      await new Promise<void>((resolve, reject) => {
+        chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve();
+        });
+      });
+
       this.invalidateCache(tabId);
+
+      console.log(
+        `[TabStateManager] ✅ Tab ${tabId} marked BUSY, folderPath preserved: ${
+          currentState.folderPath ?? "null"
+        }`
+      );
 
       return true;
     } catch (error) {
@@ -518,23 +555,166 @@ export class TabStateManager {
 
   public async markTabFree(tabId: number): Promise<boolean> {
     try {
-      const result = await chrome.storage.session.get([this.STORAGE_KEY]);
-      const states = (result && result[this.STORAGE_KEY]) || {};
-      const currentState = states[tabId] || { requestCount: 0 };
+      // 🆕 CRITICAL: ĐỌC state MỚI NHẤT từ storage (không dùng cache)
+      const result = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
 
+      const states = (result && result[this.STORAGE_KEY]) || {};
+      const currentState = states[tabId] || {
+        requestCount: 0,
+        folderPath: null,
+      };
+
+      // 🆕 DEBUG: Log state BEFORE update
+      console.log(
+        `[TabStateManager] 🔍 markTabFree - BEFORE update: tabId=${tabId}, currentState=`,
+        JSON.stringify(currentState, null, 2)
+      );
+
+      // 🔥 QUAN TRỌNG: GIỮ NGUYÊN folderPath từ storage (KHÔNG PHẢI từ cache)
       states[tabId] = {
         status: "free",
         requestId: null,
         requestCount: currentState.requestCount || 0,
-        folderPath: currentState.folderPath || null,
+        folderPath: currentState.folderPath || null, // ✅ Từ storage, KHÔNG phải cache
       };
 
-      await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
+      // 🔥 CRITICAL: Wrap storage.set in Promise để đảm bảo async/await
+      await new Promise<void>((resolve, reject) => {
+        chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve();
+        });
+      });
+
+      // 🆕 CRITICAL: Verify write success
+      const verifyResult = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const verifyStates =
+        (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
+      const verifyState = verifyStates[tabId];
+
+      // 🆕 CRITICAL: Invalidate cache SAU KHI đã save (để force đọc lại storage lần sau)
       this.invalidateCache(tabId);
+
+      console.log(
+        `[TabStateManager] ✅ Tab ${tabId} marked FREE, folderPath preserved: ${
+          currentState.folderPath || "null"
+        } (verified: ${verifyState?.folderPath || "null"})`
+      );
 
       return true;
     } catch (error) {
       console.error("[TabStateManager] ❌ Error marking tab free:", error);
+      return false;
+    }
+  }
+
+  public async markTabFreeWithFolder(
+    tabId: number,
+    folderPath: string | null
+  ): Promise<boolean> {
+    try {
+      // 🔥 ATOMIC OPERATION: Đọc → Update → Ghi trong 1 lần
+      const result = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const states = (result && result[this.STORAGE_KEY]) || {};
+      const currentState = states[tabId] || {
+        requestCount: 0,
+        folderPath: null,
+      };
+
+      // 🔥 CRITICAL: Update BOTH status and folderPath atomically
+      states[tabId] = {
+        status: "free",
+        requestId: null,
+        requestCount: currentState.requestCount || 0,
+        folderPath: folderPath, // Use provided folderPath (not from currentState)
+      };
+
+      // 🔥 CRITICAL: Single write operation
+      await new Promise<void>((resolve, reject) => {
+        chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve();
+        });
+      });
+
+      // 🔥 CRITICAL: Verify
+      const verifyResult = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const verifyStates =
+        (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
+      const verifyState = verifyStates[tabId];
+
+      if (
+        verifyState &&
+        verifyState.status === "free" &&
+        verifyState.folderPath === folderPath
+      ) {
+        this.invalidateCache(tabId);
+        console.log(
+          `[TabStateManager] ✅ Tab ${tabId} marked FREE with folderPath: ${
+            folderPath || "null"
+          } (atomic operation verified)`
+        );
+        return true;
+      } else {
+        console.error(
+          `[TabStateManager] ❌ Atomic operation verification failed!`
+        );
+        console.error(
+          `[TabStateManager] 🔍 Expected: status=free, folderPath=${folderPath}`
+        );
+        console.error(
+          `[TabStateManager] 🔍 Got: status=${
+            verifyState?.status || "unknown"
+          }, folderPath=${verifyState?.folderPath || "null"}`
+        );
+        return false;
+      }
+    } catch (error) {
+      console.error(
+        `[TabStateManager] ❌ Error in markTabFreeWithFolder:`,
+        error
+      );
       return false;
     }
   }
@@ -544,7 +724,17 @@ export class TabStateManager {
     folderPath: string
   ): Promise<boolean> {
     try {
-      const result = await chrome.storage.session.get([this.STORAGE_KEY]);
+      // 🔥 CRITICAL: ĐỢI storage.get() hoàn thành TRƯỚC KHI đọc states
+      const result = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
       const states = (result && result[this.STORAGE_KEY]) || {};
       const currentState = states[tabId] || {
         status: "free",
@@ -553,17 +743,60 @@ export class TabStateManager {
         folderPath: null,
       };
 
+      // 🆕 LOG: Debug current state trước khi update
+      console.log(
+        `[TabStateManager] 🔍 Current state before link: status=${currentState.status}, requestId=${currentState.requestId}, folderPath=${currentState.folderPath}`
+      );
+
       states[tabId] = {
         ...currentState,
         folderPath: folderPath,
       };
 
-      await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
-      this.invalidateCache(tabId);
-      console.log(
-        `[TabStateManager] ✅ Tab ${tabId} linked to folder: ${folderPath}`
-      );
-      return true;
+      // 🔥 CRITICAL: Đợi storage.set() hoàn thành VÀ verify
+      await new Promise<void>((resolve, reject) => {
+        chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve();
+        });
+      });
+
+      // 🔥 CRITICAL: Verify data đã được ghi thành công
+      const verifyResult = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const verifyStates =
+        (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
+      const verifyState = verifyStates[tabId];
+
+      if (verifyState && verifyState.folderPath === folderPath) {
+        this.invalidateCache(tabId);
+        console.log(
+          `[TabStateManager] ✅ Tab ${tabId} linked to folder: ${folderPath} (verified)`
+        );
+        return true;
+      } else {
+        console.error(
+          `[TabStateManager] ❌ Verification failed! Expected folderPath: ${folderPath}, got: ${
+            verifyState?.folderPath || "null"
+          }`
+        );
+        console.error(
+          `[TabStateManager] 🔍 Full verify state:`,
+          JSON.stringify(verifyState, null, 2)
+        );
+        return false;
+      }
     } catch (error) {
       console.error(`[TabStateManager] ❌ Error linking tab to folder:`, error);
       return false;
