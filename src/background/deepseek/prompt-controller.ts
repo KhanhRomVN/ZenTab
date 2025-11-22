@@ -1361,6 +1361,11 @@ export class PromptController {
         .replace(/\n*Download\s*\n*/gi, "\n")
         .replace(/\btext\s*\n+/gi, "\n");
 
+      // 🆕 Step 2.8: Remove any remaining code block markers around XML tags
+      artifactCleanedResult = artifactCleanedResult
+        .replace(/```\s*\n+(<[a-z_]+>)/gi, "$1")
+        .replace(/(<\/[a-z_]+>)\s*\n+```/gi, "$1");
+
       // Clean up excessive newlines (giữ lại tối đa 2 newlines liên tiếp)
       let cleanedResult = artifactCleanedResult
         .replace(/\n{3,}/g, "\n\n")
@@ -1506,6 +1511,19 @@ export class PromptController {
 
     // Pattern 3: Loại bỏ "text" keyword đơn lẻ trước XML tags
     unwrapped = unwrapped.replace(/\btext\s*\n+(<[a-z_]+>)/gi, "$1");
+
+    // Pattern 4: Loại bỏ các code block markers còn sót lại xung quanh XML tags
+    // Xử lý: ```\n<task_progress>...</task_progress>\n```
+    unwrapped = unwrapped.replace(
+      /```\s*\n*(<task_progress>[\s\S]*?<\/task_progress>)\s*\n*```/g,
+      "$1"
+    );
+
+    // Pattern 5: Loại bỏ ``` đơn lẻ trước XML tags
+    unwrapped = unwrapped.replace(/```\s*\n+(<[a-z_]+>)/gi, "$1");
+
+    // Pattern 6: Loại bỏ ``` đơn lẻ sau XML closing tags
+    unwrapped = unwrapped.replace(/(<\/[a-z_]+>)\s*\n+```/gi, "$1");
 
     return unwrapped;
   }
