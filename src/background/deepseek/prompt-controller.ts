@@ -548,12 +548,7 @@ export class PromptController {
               );
             }
 
-            // 🔥 CRITICAL: Chỉ dùng atomic operation KHI CÓ folderPath (new task)
-            // Nếu không có folderPath (existing task) → dùng markTabFree() để giữ nguyên folder hiện tại
             if (folderPathToLink) {
-              console.log(
-                `[PromptController] 🔗 Marking tab ${tabId} FREE with NEW folder: ${folderPathToLink}`
-              );
               const freeSuccess =
                 await this.tabStateManager.markTabFreeWithFolder(
                   tabId,

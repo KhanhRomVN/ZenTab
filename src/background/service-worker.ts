@@ -140,9 +140,6 @@ CRITICAL LANGUAGE RULE:
               )
                 .then((success: boolean) => {
                   if (success) {
-                    console.log(
-                      `[ServiceWorker] ✅ Prompt sent successfully, tab ${tabId} should be marked BUSY with folderPath preserved`
-                    );
                     setTimeout(() => {
                       browserAPI.storage.local.remove([requestKey]);
                     }, 120000);
@@ -281,10 +278,6 @@ CRITICAL LANGUAGE RULE:
           chrome.storage.local.remove(["wsIncomingRequest"]);
           return;
         }
-
-        console.log(
-          `[ServiceWorker] 🧹 Processing cleanup request for folder: ${folderPath}`
-        );
 
         (async () => {
           try {

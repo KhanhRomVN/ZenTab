@@ -464,12 +464,6 @@ export class TabStateManager {
       };
       const canAccept = this.canAcceptRequest(state);
 
-      console.log(
-        `[TabStateManager] 📊 Tab ${tab.id} state: status=${
-          state.status
-        }, folderPath=${state.folderPath || "null"}, canAccept=${canAccept}`
-      );
-
       return {
         tabId: tab.id!,
         containerName: `Tab ${tab.id}`,
@@ -512,12 +506,6 @@ export class TabStateManager {
         folderPath: null,
       };
 
-      // 🆕 DEBUG: Log current state BEFORE marking busy
-      console.log(
-        `[TabStateManager] 🔍 markTabBusy - BEFORE update: tabId=${tabId}, currentState=`,
-        JSON.stringify(currentState, null, 2)
-      );
-
       // 🔥 CRITICAL: Preserve folderPath - use currentState.folderPath directly
       // KHÔNG dùng || null vì có thể gây mất dữ liệu
       states[tabId] = {
@@ -539,12 +527,6 @@ export class TabStateManager {
       });
 
       this.invalidateCache(tabId);
-
-      console.log(
-        `[TabStateManager] ✅ Tab ${tabId} marked BUSY, folderPath preserved: ${
-          currentState.folderPath ?? "null"
-        }`
-      );
 
       return true;
     } catch (error) {
@@ -572,12 +554,6 @@ export class TabStateManager {
         folderPath: null,
       };
 
-      // 🆕 DEBUG: Log state BEFORE update
-      console.log(
-        `[TabStateManager] 🔍 markTabFree - BEFORE update: tabId=${tabId}, currentState=`,
-        JSON.stringify(currentState, null, 2)
-      );
-
       // 🔥 QUAN TRỌNG: GIỮ NGUYÊN folderPath từ storage (KHÔNG PHẢI từ cache)
       states[tabId] = {
         status: "free",
@@ -597,29 +573,8 @@ export class TabStateManager {
         });
       });
 
-      // 🆕 CRITICAL: Verify write success
-      const verifyResult = await new Promise<any>((resolve, reject) => {
-        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
-          if (chrome.runtime.lastError) {
-            reject(chrome.runtime.lastError);
-            return;
-          }
-          resolve(data || {});
-        });
-      });
-
-      const verifyStates =
-        (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
-      const verifyState = verifyStates[tabId];
-
       // 🆕 CRITICAL: Invalidate cache SAU KHI đã save (để force đọc lại storage lần sau)
       this.invalidateCache(tabId);
-
-      console.log(
-        `[TabStateManager] ✅ Tab ${tabId} marked FREE, folderPath preserved: ${
-          currentState.folderPath || "null"
-        } (verified: ${verifyState?.folderPath || "null"})`
-      );
 
       return true;
     } catch (error) {
@@ -690,11 +645,6 @@ export class TabStateManager {
         verifyState.folderPath === folderPath
       ) {
         this.invalidateCache(tabId);
-        console.log(
-          `[TabStateManager] ✅ Tab ${tabId} marked FREE with folderPath: ${
-            folderPath || "null"
-          } (atomic operation verified)`
-        );
         return true;
       } else {
         console.error(
@@ -743,11 +693,6 @@ export class TabStateManager {
         folderPath: null,
       };
 
-      // 🆕 LOG: Debug current state trước khi update
-      console.log(
-        `[TabStateManager] 🔍 Current state before link: status=${currentState.status}, requestId=${currentState.requestId}, folderPath=${currentState.folderPath}`
-      );
-
       states[tabId] = {
         ...currentState,
         folderPath: folderPath,
@@ -781,9 +726,6 @@ export class TabStateManager {
 
       if (verifyState && verifyState.folderPath === folderPath) {
         this.invalidateCache(tabId);
-        console.log(
-          `[TabStateManager] ✅ Tab ${tabId} linked to folder: ${folderPath} (verified)`
-        );
         return true;
       } else {
         console.error(
@@ -835,25 +777,13 @@ export class TabStateManager {
 
   public async getTabsByFolder(folderPath: string): Promise<TabStateInfo[]> {
     try {
-      console.log(
-        `[TabStateManager] 🔍 Searching tabs for folder: ${folderPath}`
-      );
       const allTabs = await this.getAllTabStates();
-      console.log(`[TabStateManager] 📊 Total tabs found: ${allTabs.length}`);
-
       const matchingTabs = allTabs.filter(
         (tab) =>
           tab.folderPath === folderPath &&
           tab.status === "free" &&
           tab.canAccept
       );
-
-      console.log(`[TabStateManager] ✅ Matching tabs: ${matchingTabs.length}`);
-      matchingTabs.forEach((tab) => {
-        console.log(
-          `[TabStateManager]   → Tab ${tab.tabId}: status=${tab.status}, canAccept=${tab.canAccept}`
-        );
-      });
 
       return matchingTabs;
     } catch (error) {
