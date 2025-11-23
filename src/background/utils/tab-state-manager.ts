@@ -1,5 +1,5 @@
 export interface TabStateData {
-  status: "free" | "busy";
+  status: "free" | "busy" | "sleep";
   requestId: string | null;
   requestCount: number;
   folderPath?: string | null;
@@ -10,7 +10,7 @@ export interface TabStateInfo {
   containerName: string;
   title: string;
   url?: string;
-  status: "free" | "busy";
+  status: "free" | "busy" | "sleep";
   canAccept: boolean;
   requestCount: number;
   folderPath?: string | null;
@@ -43,24 +43,12 @@ export class TabStateManager {
   private setupTabListeners(): void {
     // Listen for new tabs created
     chrome.tabs.onCreated.addListener((tab) => {
-      console.log(
-        `[TabStateManager] 🔍 Tab created: ${tab.id}, URL: ${
-          tab.url || tab.pendingUrl || "unknown"
-        }`
-      );
-
       if (
         tab.url?.includes("deepseek.com") ||
         tab.pendingUrl?.includes("deepseek.com")
       ) {
-        console.log(
-          `[TabStateManager] 🆕 New DeepSeek tab detected: ${tab.id}, scheduling initialization...`
-        );
         // Wait for tab to fully load before initializing
         setTimeout(() => {
-          console.log(
-            `[TabStateManager] ⏰ Starting delayed initialization for tab ${tab.id}`
-          );
           this.initializeNewTab(tab.id!);
         }, 2000);
       }
@@ -78,9 +66,6 @@ export class TabStateManager {
           const existingState = states[tabId];
 
           if (!existingState) {
-            console.log(
-              `[TabStateManager] 🔄 Tab ${tabId} navigated to DeepSeek, initializing...`
-            );
             this.initializeNewTab(tabId);
           }
         });
@@ -92,6 +77,27 @@ export class TabStateManager {
       this.invalidateCache(tabId);
       this.removeTabState(tabId);
     });
+  }
+
+  /**
+   * 🆕 Kiểm tra xem tab có phải sleep tab không
+   * Dựa vào:
+   * 1. Tab bị discarded (tab.discarded === true)
+   * 2. Title chứa emoji "💤" (do Auto Tab Discard extension thêm vào)
+   */
+  private isSleepTab(tab: chrome.tabs.Tab): boolean {
+    // Check 1: Tab discarded property
+    if (tab.discarded === true) {
+      return true;
+    }
+
+    // Check 2: Title chứa "💤"
+    const title = tab.title || "";
+    if (title.includes("💤")) {
+      return true;
+    }
+
+    return false;
   }
 
   private getCachedState(tabId: number): TabStateData | null {
@@ -118,10 +124,6 @@ export class TabStateManager {
 
   private async initializeNewTab(tabId: number): Promise<void> {
     try {
-      console.log(
-        `[TabStateManager] 🔧 Initializing state for new tab ${tabId}...`
-      );
-
       // Check if tab still exists
       const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
         chrome.tabs.get(tabId, (result) => {
@@ -138,18 +140,29 @@ export class TabStateManager {
         return;
       }
 
-      // Check button state to determine initial status
-      const buttonState = await Promise.race([
-        this.checkButtonState(tabId),
-        new Promise<{ isBusy: false }>((resolve) =>
-          setTimeout(() => {
-            console.warn(
-              `[TabStateManager] ⏱️ Button check timeout for tab ${tabId}, assuming free`
-            );
-            resolve({ isBusy: false });
-          }, 3000)
-        ),
-      ]);
+      // 🆕 Kiểm tra sleep state trước
+      const isSleepTab = this.isSleepTab(tab);
+
+      let initialStatus: "free" | "busy" | "sleep" = "free";
+
+      if (isSleepTab) {
+        initialStatus = "sleep";
+      } else {
+        // Check button state to determine initial status
+        const buttonState = await Promise.race([
+          this.checkButtonState(tabId),
+          new Promise<{ isBusy: false }>((resolve) =>
+            setTimeout(() => {
+              console.warn(
+                `[TabStateManager] ⏱️ Button check timeout for tab ${tabId}, assuming free`
+              );
+              resolve({ isBusy: false });
+            }, 3000)
+          ),
+        ]);
+
+        initialStatus = buttonState.isBusy ? "busy" : "free";
+      }
 
       // Get current states
       const result = await new Promise<any>((resolve, reject) => {
@@ -166,7 +179,7 @@ export class TabStateManager {
 
       // Add new tab state
       states[tabId] = {
-        status: buttonState.isBusy ? "busy" : "free",
+        status: initialStatus,
         requestId: null,
         requestCount: 0,
         folderPath: null,
@@ -179,11 +192,6 @@ export class TabStateManager {
             reject(chrome.runtime.lastError);
             return;
           }
-          console.log(
-            `[TabStateManager] ✅ Tab ${tabId} initialized with status: ${
-              buttonState.isBusy ? "busy" : "free"
-            }`
-          );
           resolve();
         });
       });
@@ -197,9 +205,6 @@ export class TabStateManager {
 
         // Double check: Nếu UI vẫn chưa update sau 2s, force thêm 1 lần nữa
         setTimeout(() => {
-          console.log(
-            `[TabStateManager] 🔄 Double-check notification for tab ${tabId}`
-          );
           this.notifyUIUpdate();
         }, 2000);
       }, 100);
@@ -350,6 +355,19 @@ export class TabStateManager {
       }
 
       try {
+        // 🆕 Kiểm tra sleep state TRƯỚC (dựa vào title hoặc discarded property)
+        const isSleepTab = this.isSleepTab(tab);
+
+        if (isSleepTab) {
+          states[tab.id] = {
+            status: "sleep",
+            requestId: null,
+            requestCount: 0,
+            folderPath: null,
+          };
+          continue;
+        }
+
         const buttonState = await Promise.race([
           this.checkButtonState(tab.id),
           new Promise<{ isBusy: false }>((resolve) =>
@@ -612,14 +630,22 @@ export class TabStateManager {
         requestCount: 0,
         folderPath: null,
       };
-      const canAccept = this.canAcceptRequest(state);
+
+      // 🆕 Override status nếu phát hiện sleep tab (real-time check)
+      const isSleepTab = this.isSleepTab(tab);
+      const actualStatus = isSleepTab ? "sleep" : state.status;
+
+      const canAccept = this.canAcceptRequest({
+        ...state,
+        status: actualStatus,
+      });
 
       return {
         tabId: tab.id!,
         containerName: `Tab ${tab.id}`,
         title: tab.title || "Untitled",
         url: tab.url,
-        status: state.status,
+        status: actualStatus,
         canAccept: canAccept,
         requestCount: state.requestCount || 0,
         folderPath: state.folderPath || null,
@@ -630,10 +656,11 @@ export class TabStateManager {
   }
 
   private canAcceptRequest(state: TabStateData): boolean {
+    // Tab chỉ có thể nhận request khi status là "free"
+    // Status "busy" hoặc "sleep" đều KHÔNG thể nhận request
     if (state.status !== "free") {
       return false;
     }
-
     return true;
   }
 
@@ -729,6 +756,158 @@ export class TabStateManager {
       return true;
     } catch (error) {
       console.error("[TabStateManager] ❌ Error marking tab free:", error);
+      return false;
+    }
+  }
+
+  public async markTabSleep(tabId: number): Promise<boolean> {
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const states = (result && result[this.STORAGE_KEY]) || {};
+      const currentState = states[tabId] || {
+        requestCount: 0,
+        folderPath: null,
+      };
+
+      // Set status = "sleep", giữ nguyên các field khác
+      states[tabId] = {
+        status: "sleep",
+        requestId: null,
+        requestCount: currentState.requestCount || 0,
+        folderPath: currentState.folderPath || null,
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve();
+        });
+      });
+
+      this.invalidateCache(tabId);
+
+      // 🆕 VERIFY: Đọc lại state để đảm bảo đã save đúng
+      const verifyResult = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const verifyStates =
+        (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
+      const verifyState = verifyStates[tabId];
+
+      if (verifyState && verifyState.status === "sleep") {
+        this.notifyUIUpdate();
+        return true;
+      } else {
+        console.error(
+          `[TabStateManager] ❌ Verification failed! Tab ${tabId} status: ${
+            verifyState?.status || "unknown"
+          }`
+        );
+        return false;
+      }
+    } catch (error) {
+      console.error("[TabStateManager] ❌ Error marking tab sleep:", error);
+      return false;
+    }
+  }
+
+  public async wakeUpTab(tabId: number): Promise<boolean> {
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const states = (result && result[this.STORAGE_KEY]) || {};
+      const currentState = states[tabId];
+
+      if (!currentState) {
+        console.warn(
+          `[TabStateManager] ⚠️ Tab ${tabId} state not found, cannot wake up`
+        );
+        return false;
+      }
+
+      // Chỉ wake up nếu tab đang sleep
+      if (currentState.status !== "sleep") {
+        console.warn(
+          `[TabStateManager] ⚠️ Tab ${tabId} is not sleeping (status: ${currentState.status})`
+        );
+        return false;
+      }
+
+      // Set status = "free"
+      states[tabId] = {
+        ...currentState,
+        status: "free",
+        requestId: null,
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve();
+        });
+      });
+
+      this.invalidateCache(tabId);
+
+      // 🔥 FIX: Verify phải check status === "free", KHÔNG PHẢI "sleep"!
+      const verifyResult = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const verifyStates =
+        (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
+      const verifyState = verifyStates[tabId];
+
+      // ✅ ĐÚNG: Sau khi wake up, status phải là "free"
+      if (verifyState && verifyState.status === "free") {
+        this.notifyUIUpdate();
+        return true;
+      } else {
+        console.error(
+          `[TabStateManager] ❌ Verification failed! Tab ${tabId} status: ${
+            verifyState?.status || "unknown"
+          }`
+        );
+        return false;
+      }
+    } catch (error) {
+      console.error("[TabStateManager] ❌ Error waking up tab:", error);
       return false;
     }
   }
@@ -977,10 +1156,6 @@ export class TabStateManager {
         return null;
       }
 
-      // Nếu LÀ DeepSeek tab nhưng chưa có state → init và retry
-      console.log(
-        `[TabStateManager] 🔧 DeepSeek tab ${tabId} missing state, initializing...`
-      );
       await this.initializeNewTab(tabId);
 
       // Retry đọc state sau khi init
@@ -1101,9 +1276,6 @@ export class TabStateManager {
               reject(chrome.runtime.lastError);
               return;
             }
-            console.log(
-              `[TabStateManager] 🗑️ Removed state for closed tab ${tabId}`
-            );
             resolve();
           });
         });
@@ -1120,8 +1292,6 @@ export class TabStateManager {
 
   private notifyUIUpdate(): void {
     try {
-      console.log("[TabStateManager] 📢 Notifying UI to update tabs...");
-
       // Send message to UI to refresh tab list
       const promise = chrome.runtime.sendMessage({
         action: "tabsUpdated",

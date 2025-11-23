@@ -5,7 +5,7 @@ interface TabCardProps {
   tab: {
     tabId: number;
     title: string;
-    status: "free" | "busy";
+    status: "free" | "busy" | "sleep";
     canAccept: boolean;
     requestCount: number;
     folderPath?: string | null;
@@ -14,35 +14,27 @@ interface TabCardProps {
 
 const TabCard: React.FC<TabCardProps> = ({ tab }) => {
   const getStatusColor = (status: string): string => {
-    return status === "busy"
-      ? "text-yellow-600 dark:text-yellow-400"
-      : "text-green-600 dark:text-green-400";
+    if (status === "busy") return "text-yellow-600 dark:text-yellow-400";
+    if (status === "sleep") return "text-purple-600 dark:text-purple-400";
+    return "text-green-600 dark:text-green-400";
   };
 
   const getStatusIcon = (status: string): string => {
-    return status === "busy" ? "⏳" : "✅";
+    if (status === "busy") return "⏳";
+    if (status === "sleep") return "💤";
+    return "✅";
   };
 
   const getStatusBadge = (status: string): string => {
-    return status === "busy" ? "Processing" : "Idle";
+    if (status === "busy") return "Processing";
+    if (status === "sleep") return "Sleeping";
+    return "Free";
   };
 
   const getStatusBadgeColor = (status: string): string => {
-    return status === "busy"
-      ? "text-blue-600 dark:text-blue-400"
-      : "text-gray-600 dark:text-gray-400";
-  };
-
-  const getRunningState = (canAccept: boolean, status: string): string => {
-    if (status === "busy") return "Running";
-    return canAccept ? "Ready" : "Cooldown";
-  };
-
-  const getRunningStateColor = (canAccept: boolean, status: string): string => {
-    if (status === "busy") return "text-blue-600 dark:text-blue-400";
-    return canAccept
-      ? "text-green-600 dark:text-green-400"
-      : "text-gray-600 dark:text-gray-400";
+    if (status === "busy") return "text-orange-600 dark:text-orange-400";
+    if (status === "sleep") return "text-purple-600 dark:text-purple-400";
+    return "text-green-600 dark:text-green-400";
   };
 
   return (
@@ -52,7 +44,13 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
         <div
           className={`w-8 h-8 flex items-center justify-center rounded-md ${getStatusColor(
             tab.status
-          )} bg-gray-100 dark:bg-gray-800`}
+          )} ${
+            tab.status === "busy"
+              ? "bg-yellow-50 dark:bg-yellow-900/20"
+              : tab.status === "sleep"
+              ? "bg-purple-50 dark:bg-purple-900/20"
+              : "bg-green-50 dark:bg-green-900/20"
+          }`}
         >
           <span className="text-sm">{getStatusIcon(tab.status)}</span>
         </div>
@@ -62,14 +60,6 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium truncate text-text-primary">
               {tab.title}
-            </span>
-            <span
-              className={`text-xs font-medium ${getRunningStateColor(
-                tab.canAccept,
-                tab.status
-              )}`}
-            >
-              {getRunningState(tab.canAccept, tab.status)}
             </span>
           </div>
 

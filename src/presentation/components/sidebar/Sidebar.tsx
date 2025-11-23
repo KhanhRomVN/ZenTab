@@ -227,6 +227,13 @@ const Sidebar: React.FC = () => {
       }
 
       const tabStates = response.tabStates || [];
+
+      // 🔍 DEBUG: Log tab states để kiểm tra
+      console.log(
+        "[Sidebar] 📊 Received tab states:",
+        JSON.stringify(tabStates, null, 2)
+      );
+
       setTabs(tabStates);
 
       const activeTabIds: Set<string> = new Set(
