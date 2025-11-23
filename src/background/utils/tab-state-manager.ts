@@ -37,6 +37,61 @@ export class TabStateManager {
   private constructor() {
     this.enable();
     this.startAutoRecovery();
+    this.setupTabListeners();
+  }
+
+  private setupTabListeners(): void {
+    // Listen for new tabs created
+    chrome.tabs.onCreated.addListener((tab) => {
+      console.log(
+        `[TabStateManager] 🔍 Tab created: ${tab.id}, URL: ${
+          tab.url || tab.pendingUrl || "unknown"
+        }`
+      );
+
+      if (
+        tab.url?.includes("deepseek.com") ||
+        tab.pendingUrl?.includes("deepseek.com")
+      ) {
+        console.log(
+          `[TabStateManager] 🆕 New DeepSeek tab detected: ${tab.id}, scheduling initialization...`
+        );
+        // Wait for tab to fully load before initializing
+        setTimeout(() => {
+          console.log(
+            `[TabStateManager] ⏰ Starting delayed initialization for tab ${tab.id}`
+          );
+          this.initializeNewTab(tab.id!);
+        }, 2000);
+      }
+    });
+
+    // Listen for tab URL changes (when user navigates to DeepSeek)
+    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+      if (
+        changeInfo.status === "complete" &&
+        tab.url?.includes("deepseek.com")
+      ) {
+        // 🆕 Đọc trực tiếp từ storage thay vì gọi getTabState() (tránh warn)
+        chrome.storage.session.get([this.STORAGE_KEY], (result) => {
+          const states = (result && result[this.STORAGE_KEY]) || {};
+          const existingState = states[tabId];
+
+          if (!existingState) {
+            console.log(
+              `[TabStateManager] 🔄 Tab ${tabId} navigated to DeepSeek, initializing...`
+            );
+            this.initializeNewTab(tabId);
+          }
+        });
+      }
+    });
+
+    // Listen for tab removal (cleanup)
+    chrome.tabs.onRemoved.addListener((tabId) => {
+      this.invalidateCache(tabId);
+      this.removeTabState(tabId);
+    });
   }
 
   private getCachedState(tabId: number): TabStateData | null {
@@ -59,6 +114,101 @@ export class TabStateManager {
       state: state,
       timestamp: Date.now(),
     });
+  }
+
+  private async initializeNewTab(tabId: number): Promise<void> {
+    try {
+      console.log(
+        `[TabStateManager] 🔧 Initializing state for new tab ${tabId}...`
+      );
+
+      // Check if tab still exists
+      const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
+        chrome.tabs.get(tabId, (result) => {
+          if (chrome.runtime.lastError) {
+            console.warn(`[TabStateManager] ⚠️ Tab ${tabId} no longer exists`);
+            resolve(null);
+            return;
+          }
+          resolve(result);
+        });
+      });
+
+      if (!tab) {
+        return;
+      }
+
+      // Check button state to determine initial status
+      const buttonState = await Promise.race([
+        this.checkButtonState(tabId),
+        new Promise<{ isBusy: false }>((resolve) =>
+          setTimeout(() => {
+            console.warn(
+              `[TabStateManager] ⏱️ Button check timeout for tab ${tabId}, assuming free`
+            );
+            resolve({ isBusy: false });
+          }, 3000)
+        ),
+      ]);
+
+      // Get current states
+      const result = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const states = (result && result[this.STORAGE_KEY]) || {};
+
+      // Add new tab state
+      states[tabId] = {
+        status: buttonState.isBusy ? "busy" : "free",
+        requestId: null,
+        requestCount: 0,
+        folderPath: null,
+      };
+
+      // Save updated states
+      await new Promise<void>((resolve, reject) => {
+        chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          console.log(
+            `[TabStateManager] ✅ Tab ${tabId} initialized with status: ${
+              buttonState.isBusy ? "busy" : "free"
+            }`
+          );
+          resolve();
+        });
+      });
+
+      // Invalidate cache to force UI refresh
+      this.invalidateCache(tabId);
+
+      // Notify UI about state change - với delay để đảm bảo storage đã sync
+      setTimeout(() => {
+        this.notifyUIUpdate();
+
+        // Double check: Nếu UI vẫn chưa update sau 2s, force thêm 1 lần nữa
+        setTimeout(() => {
+          console.log(
+            `[TabStateManager] 🔄 Double-check notification for tab ${tabId}`
+          );
+          this.notifyUIUpdate();
+        }, 2000);
+      }, 100);
+    } catch (error) {
+      console.error(
+        `[TabStateManager] ❌ Error initializing new tab ${tabId}:`,
+        error
+      );
+    }
   }
 
   private invalidateCache(tabId?: number): void {
@@ -810,26 +960,41 @@ export class TabStateManager {
       return state;
     }
 
-    console.warn(
-      `[TabStateManager] ⚠️ Tab ${tabId} not found in storage, trying fallback...`
-    );
-
+    // 🆕 Kiểm tra xem tab có phải DeepSeek tab không TRƯỚC KHI warn
     try {
-      const allStates = await this.getAllTabStates();
-      const tabState = allStates.find((t) => t.tabId === tabId);
+      const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
+        chrome.tabs.get(tabId, (result) => {
+          if (chrome.runtime.lastError) {
+            resolve(null);
+            return;
+          }
+          resolve(result);
+        });
+      });
 
-      if (tabState) {
-        const fallbackState: TabStateData = {
-          status: tabState.status,
-          requestId: null,
-          requestCount: tabState.requestCount,
-        };
-        this.setCachedState(tabId, fallbackState);
-        return fallbackState;
+      // Nếu KHÔNG PHẢI DeepSeek tab → return null ngay (không warn)
+      if (!tab || !tab.url?.includes("deepseek.com")) {
+        return null;
+      }
+
+      // Nếu LÀ DeepSeek tab nhưng chưa có state → init và retry
+      console.log(
+        `[TabStateManager] 🔧 DeepSeek tab ${tabId} missing state, initializing...`
+      );
+      await this.initializeNewTab(tabId);
+
+      // Retry đọc state sau khi init
+      const retryResult = await chrome.storage.session.get([this.STORAGE_KEY]);
+      const retryStates = (retryResult && retryResult[this.STORAGE_KEY]) || {};
+      const retryState = retryStates[tabId] || null;
+
+      if (retryState) {
+        this.setCachedState(tabId, retryState);
+        return retryState;
       }
     } catch (error) {
       console.error(
-        `[TabStateManager] ❌ Fallback validation failed for tab ${tabId}:`,
+        `[TabStateManager] ❌ Error in getTabState fallback for tab ${tabId}:`,
         error
       );
     }
@@ -911,6 +1076,90 @@ export class TabStateManager {
     console.warn(`[TabStateManager] 🔧 Force resetting tab ${tabId}`);
     this.invalidateCache(tabId);
     return await this.markTabFree(tabId);
+  }
+
+  private async removeTabState(tabId: number): Promise<void> {
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const states = (result && result[this.STORAGE_KEY]) || {};
+
+      if (states[tabId]) {
+        delete states[tabId];
+
+        await new Promise<void>((resolve, reject) => {
+          chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
+            if (chrome.runtime.lastError) {
+              reject(chrome.runtime.lastError);
+              return;
+            }
+            console.log(
+              `[TabStateManager] 🗑️ Removed state for closed tab ${tabId}`
+            );
+            resolve();
+          });
+        });
+
+        this.notifyUIUpdate();
+      }
+    } catch (error) {
+      console.error(
+        `[TabStateManager] ❌ Error removing tab state ${tabId}:`,
+        error
+      );
+    }
+  }
+
+  private notifyUIUpdate(): void {
+    try {
+      console.log("[TabStateManager] 📢 Notifying UI to update tabs...");
+
+      // Send message to UI to refresh tab list
+      const promise = chrome.runtime.sendMessage({
+        action: "tabsUpdated",
+        timestamp: Date.now(),
+      });
+
+      if (promise && typeof promise.catch === "function") {
+        promise.catch((error) => {
+          console.warn(
+            "[TabStateManager] ⚠️ Failed to send tabsUpdated message (no receivers?):",
+            error
+          );
+
+          // Retry after short delay (UI might still be initializing)
+          setTimeout(() => {
+            try {
+              const retryPromise = chrome.runtime.sendMessage({
+                action: "tabsUpdated",
+                timestamp: Date.now(),
+                retry: true,
+              });
+
+              if (retryPromise && typeof retryPromise.catch === "function") {
+                retryPromise.catch(() => {
+                  console.warn(
+                    "[TabStateManager] ⚠️ Retry also failed, UI might not be ready"
+                  );
+                });
+              }
+            } catch (retryError) {
+              // Final ignore
+            }
+          }, 500);
+        });
+      }
+    } catch (error) {
+      console.warn("[TabStateManager] ⚠️ Exception in notifyUIUpdate:", error);
+    }
   }
 }
 

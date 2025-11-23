@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import TabCard from "./TabCard";
 import CustomButton from "../common/CustomButton";
-import CustomCombobox from "../common/CustomCombobox";
 import { Settings, Power, PowerOff } from "lucide-react";
 import { WSHelper } from "@/shared/lib/ws-helper";
 
@@ -43,19 +42,48 @@ const Sidebar: React.FC = () => {
     initializeSidebar();
 
     const messageListener = (message: any) => {
+      console.log("[Sidebar] 📨 Received message:", message);
       if (message.action === "tabsUpdated") {
+        console.log("[Sidebar] 🔄 Reloading tabs due to tabsUpdated message");
         loadTabs();
       }
     };
 
     chrome.runtime.onMessage.addListener(messageListener);
 
-    const tabListener = () => {
+    const tabCreatedListener = (tab: chrome.tabs.Tab) => {
+      console.log(
+        `[Sidebar] 🔄 Tab created (ID: ${tab.id}), reloading tabs...`
+      );
       loadTabs();
     };
 
-    chrome.tabs.onCreated.addListener(tabListener);
-    chrome.tabs.onRemoved.addListener(tabListener);
+    const tabRemovedListener = (tabId: number) => {
+      console.log(`[Sidebar] 🔄 Tab removed (ID: ${tabId}), reloading tabs...`);
+      loadTabs();
+    };
+
+    const tabUpdatedListener = (
+      tabId: number,
+      changeInfo: { status?: string; url?: string; title?: string },
+      tab: chrome.tabs.Tab
+    ) => {
+      if (
+        changeInfo.status === "complete" &&
+        tab.url?.includes("deepseek.com")
+      ) {
+        console.log(
+          `[Sidebar] 🔄 DeepSeek tab ${tabId} fully loaded, reloading tabs...`
+        );
+        setTimeout(() => {
+          loadTabs();
+        }, 1000);
+      }
+    };
+
+    chrome.tabs.onCreated.addListener(tabCreatedListener);
+    chrome.tabs.onRemoved.addListener(tabRemovedListener);
+    chrome.tabs.onUpdated.addListener(tabUpdatedListener);
 
     const storageListener = (
       changes: { [key: string]: chrome.storage.StorageChange },
@@ -72,7 +100,6 @@ const Sidebar: React.FC = () => {
         const FIXED_CONNECTION_ID = "ws-default-1500";
         const state = states[FIXED_CONNECTION_ID];
 
-        // Chỉ kiểm tra connection với ID cố định
         if (state) {
           const typedState = state as {
             status: string;
@@ -97,8 +124,9 @@ const Sidebar: React.FC = () => {
 
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
-      chrome.tabs.onCreated.removeListener(tabListener);
-      chrome.tabs.onRemoved.removeListener(tabListener);
+      chrome.tabs.onCreated.removeListener(tabCreatedListener);
+      chrome.tabs.onRemoved.removeListener(tabRemovedListener);
+      chrome.tabs.onUpdated.removeListener(tabUpdatedListener);
       chrome.storage.onChanged.removeListener(storageListener);
     };
   }, []);
