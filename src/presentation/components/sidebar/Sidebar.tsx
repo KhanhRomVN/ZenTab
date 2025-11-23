@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import TabCard from "./TabCard";
 import CustomButton from "../common/CustomButton";
+import CustomCombobox from "../common/CustomCombobox";
 import { Settings, Power, PowerOff } from "lucide-react";
 import { WSHelper } from "@/shared/lib/ws-helper";
 

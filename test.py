@@ -1,2 +1,3 @@
-def add(a: int, b: int) -> int:
-    return a + b
+function add(a: any, b: any): number {
+  return a + b;
+}
