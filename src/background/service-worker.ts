@@ -96,169 +96,6 @@ declare const browser: typeof chrome & any;
             continue;
           }
 
-          const languageRule = `
-CRITICAL LANGUAGE RULE:
-- You MUST respond in Vietnamese (Tiếng Việt) for ALL outputs
-- All explanations, descriptions, and responses must be in Vietnamese
-- Code comments should also be in Vietnamese when possible`;
-
-          const textWrapRule = `
-CRITICAL TEXT BLOCK WRAPPING RULES (16 RULES):
-1. You MUST wrap <task_progress> tags inside text code blocks
-2. You MUST wrap ALL code content inside <content> tags of <write_to_file> inside text code blocks
-3. You MUST wrap ALL code content inside <diff> tags of <replace_in_file> inside text code blocks
-4. The text block must start with: \`\`\`text
-5. The text block must end with: \`\`\`
-6. <thinking> tags and explanations should NOT be wrapped in text blocks
-7. Do NOT put explanations or other content inside the \`\`\`text...\`\`\` blocks
-8. Each wrappable content (task_progress or code) gets its own separate text block
-9. If there is no task_progress or code in your response, do NOT use any text code blocks
-10. The text block wrapper is ONLY for task_progress and code content, not for other content
-11. In <replace_in_file>: BOTH old code (after SEARCH) and new code (after REPLACE) MUST be wrapped in separate text blocks
-12. Code in <new_str> within <replace_in_file> MUST be wrapped in text blocks
-13. Code in <content> within <write_to_file> MUST be wrapped in text blocks
-14. YOU MUST ALWAYS USE <content></content> tags inside <write_to_file> - NEVER omit them
-15. The <content> tag is REQUIRED and MANDATORY in all <write_to_file> operations
-16. You MUST preserve EXACT indentation (spaces/tabs) from original code - do NOT reformat or change spacing
-
-CRITICAL INDENTATION RULES:
-- Read and preserve the EXACT number of spaces or tabs at the beginning of each line
-- If original code uses 2 spaces for indentation, keep 2 spaces
-- If original code uses 4 spaces, keep 4 spaces
-- If original code uses tabs, keep tabs
-- Do NOT apply auto-formatting (like Prettier, ESLint, or PEP8)
-- Do NOT change indentation to match your preferred style
-- Example: If you see "  return a + b;" (2 spaces), you MUST write "  return a + b;" (2 spaces)
-- When using <replace_in_file>, the SEARCH block MUST match indentation EXACTLY character-by-character
-- When using <write_to_file>, preserve the indentation style of existing files in the project
-
-CORRECT FORMAT EXAMPLES:
-
-Example 1 - Task Progress:
-<read_file>
-<path>test.ts</path>
-\`\`\`text
-<task_progress>
-- [ ] Phân tích cấu trúc dự án
-- [ ] Kiểm tra file hiện tại
-- [ ] Thêm hàm mới
-- [ ] Xác nhận kết quả
-</task_progress>
-\`\`\`
-</read_file>
-
-Example 2 - Replace In File with Code (BOTH old and new code wrapped, preserving 2-space indent):
-<replace_in_file>
-<path>src/utils/helper.ts</path>
-<diff>
-<<<<<<< SEARCH
-\`\`\`text
-function oldFunction() {
-  return "old";  // Exactly 2 spaces - MUST match original file
-}
-\`\`\`
-=======
-\`\`\`text
-function newFunction() {
-  return "new";
-}
-\`\`\`
->>>>>>> REPLACE
-</diff>
-</replace_in_file>
-
-Example 3 - Write To File with Code (CORRECT - has <content> tag and preserves 2-space indent):
-<write_to_file>
-<path>src/new-file.ts</path>
-<content>
-\`\`\`text
-export function myFunction() {
-  console.log("Hello World");  // Exactly 2 spaces indent
-  return true;                 // Exactly 2 spaces indent
-}
-\`\`\`
-</content>
-</write_to_file>
-
-INCORRECT FORMAT EXAMPLES:
-❌ Example 1 - Missing <content> tag (CRITICAL ERROR):
-<write_to_file>
-<path>test.ts</path>
-\`\`\`text
-function test() {
-  return true;
-}
-\`\`\`
-</write_to_file>
-
-❌ Example 2 - code without text wrapper:
-<write_to_file>
-<path>test.ts</path>
-<content>
-function test() {
-  return true;
-}
-</content>
-</write_to_file>
-
-❌ Example 3 - only new code wrapped in replace_in_file:
-<replace_in_file>
-<path>test.ts</path>
-<diff>
-<<<<<<< SEARCH
-function oldFunction() {
-  return "old";
-}
-=======
-\`\`\`text
-function newFunction() {
-  return "new";
-}
-\`\`\`
->>>>>>> REPLACE
-</diff>
-</replace_in_file>
-
-❌ Example 4 - wrapping everything:
-\`\`\`text
-<thinking>...</thinking>
-<write_to_file>...</write_to_file>
-\`\`\`
-
-❌ Example 5 - mixing content in text block:
-\`\`\`text
-Some explanation
-function test() {}
-More text
-\`\`\`
-
-❌ Example 6 - wrong indentation (file uses 2 spaces, but you wrote 4 spaces):
-<write_to_file>
-<path>test.ts</path>
-<content>
-\`\`\`text
-function test() {
-    return true;  // ❌ WRONG: 4 spaces, but file uses 2 spaces
-}
-\`\`\`
-</content>
-</write_to_file>
-
-REMEMBER: 
-- <task_progress> content MUST be wrapped in \`\`\`text...\`\`\`
-- ALL CODE in <replace_in_file> (both SEARCH and REPLACE sections) MUST be wrapped in \`\`\`text...\`\`\`
-- ALL CODE in <write_to_file> MUST be wrapped in \`\`\`text...\`\`\` AND placed inside <content></content> tags
-- The <content></content> tags are MANDATORY in <write_to_file> - NEVER skip them
-- Each code block gets its own separate \`\`\`text...\`\`\` wrapper!
-- Structure: <write_to_file><path>...</path><content>\`\`\`text...code...\`\`\`</content></write_to_file>
-- CRITICAL: Preserve EXACT indentation (spaces/tabs) from original code - count spaces carefully!
-- When using <replace_in_file>, SEARCH block MUST match original indentation character-by-character
-- Example: "  return a + b;" (2 spaces) → you MUST write "  return a + b;" (2 spaces), NOT "    return a + b;" (4 spaces)`;
-
-          const combinedPrompt = systemPrompt
-            ? `${systemPrompt}\n\n${languageRule}\n\n${textWrapRule}\n\nUSER REQUEST:\n${userPrompt}`
-            : `${languageRule}\n\n${textWrapRule}\n\nUSER REQUEST:\n${userPrompt}`;
-
           const requestKey = `processed_${requestId}`;
 
           // Wrap in async IIFE to use await
@@ -285,9 +122,13 @@ REMEMBER:
               });
 
               const isNewTaskBool = isNewTask === true;
+
+              // Gọi sendPrompt với overload signature mới (5 arguments)
+              // Signature: sendPrompt(tabId, systemPrompt, userPrompt, requestId, isNewTask)
               DeepSeekController.sendPrompt(
                 tabId,
-                combinedPrompt,
+                systemPrompt || null,
+                userPrompt,
                 requestId,
                 isNewTaskBool
               )
@@ -313,7 +154,8 @@ REMEMBER:
                           errorType: "SEND_FAILED",
                           details: {
                             tabId: tabId,
-                            promptLength: combinedPrompt.length,
+                            userPromptLength: userPrompt.length,
+                            hasSystemPrompt: !!systemPrompt,
                             timestamp: Date.now(),
                           },
                         },

@@ -48,13 +48,49 @@ export class DeepSeekController {
     return StateController.getLatestResponse(tabId);
   }
 
-  // Prompt operations
+  // Prompt operations - Overload 1 (backward compatible)
   static async sendPrompt(
     tabId: number,
     prompt: string,
     requestId: string,
-    isNewTask: boolean = true
+    isNewTask?: boolean
+  ): Promise<boolean>;
+
+  // Prompt operations - Overload 2 (systemPrompt + userPrompt)
+  static async sendPrompt(
+    tabId: number,
+    systemPrompt: string | null,
+    userPrompt: string,
+    requestId: string,
+    isNewTask?: boolean
+  ): Promise<boolean>;
+
+  // Implementation
+  static async sendPrompt(
+    tabId: number,
+    promptOrSystemPrompt: string | null,
+    userPromptOrRequestId: string,
+    requestIdOrIsNewTask?: string | boolean,
+    isNewTask?: boolean
   ): Promise<boolean> {
-    return PromptController.sendPrompt(tabId, prompt, requestId, isNewTask);
+    // Delegate to PromptController với đúng arguments
+    if (typeof requestIdOrIsNewTask === "string") {
+      // Overload 2: (tabId, systemPrompt, userPrompt, requestId, isNewTask?)
+      return PromptController.sendPrompt(
+        tabId,
+        promptOrSystemPrompt,
+        userPromptOrRequestId,
+        requestIdOrIsNewTask,
+        isNewTask
+      );
+    } else {
+      // Overload 1: (tabId, prompt, requestId, isNewTask?)
+      return PromptController.sendPrompt(
+        tabId,
+        promptOrSystemPrompt || "",
+        userPromptOrRequestId,
+        requestIdOrIsNewTask
+      );
+    }
   }
 }
