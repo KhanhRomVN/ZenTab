@@ -795,9 +795,29 @@ REMEMBER:
 
             // 🆕 BUILD OPENAI JSON FORMAT từ raw text
             if (typeof rawResponse === "string") {
+              // 🆕 LOG: Raw response trước khi xử lý
+              console.log(
+                `[PromptController] 🔍 Raw response type: ${typeof rawResponse}, length: ${
+                  rawResponse.length
+                }`
+              );
+              console.log(
+                `[PromptController] 🔍 Raw response preview (first 500 chars):\n${rawResponse.substring(
+                  0,
+                  500
+                )}`
+              );
+
               try {
                 // Try parse nếu response đã là JSON
                 const parsedObject = JSON.parse(rawResponse);
+
+                // 🆕 LOG: Parsed object structure
+                console.log(
+                  `[PromptController] 🔍 Parsed as JSON object, keys: ${Object.keys(
+                    parsedObject
+                  ).join(", ")}`
+                );
 
                 // Validate structure
                 if (
@@ -805,17 +825,25 @@ REMEMBER:
                   typeof parsedObject === "object" &&
                   parsedObject.choices
                 ) {
+                  console.log(
+                    `[PromptController] ✅ Valid OpenAI format detected, using as-is`
+                  );
                   responseToSend = JSON.stringify(parsedObject);
                 } else {
                   // JSON nhưng thiếu structure → rebuild
                   console.warn(
-                    `[PromptController] ⚠️ JSON missing required fields, rebuilding...`
+                    `[PromptController] ⚠️ JSON missing required fields (has: ${Object.keys(
+                      parsedObject
+                    ).join(", ")}), rebuilding...`
                   );
                   const builtResponse = this.buildOpenAIResponse(rawResponse);
                   responseToSend = JSON.stringify(builtResponse);
                 }
               } catch (parseError) {
                 // Raw text → build JSON format
+                console.log(
+                  `[PromptController] ℹ️ Not valid JSON, building OpenAI format wrapper`
+                );
                 const builtResponse = this.buildOpenAIResponse(rawResponse);
                 responseToSend = JSON.stringify(builtResponse);
               }
@@ -924,6 +952,51 @@ REMEMBER:
                 timestamp: currentTimestamp,
               },
             };
+
+            // 🆕 LOG: Extract và log field "content" từ response JSON
+            try {
+              const parsedResponse = JSON.parse(responseToSend);
+              const contentField =
+                parsedResponse?.choices?.[0]?.delta?.content || "";
+              console.log(
+                `[PromptController] 📄 Response JSON structure: ${Object.keys(
+                  parsedResponse
+                ).join(", ")}`
+              );
+              console.log(
+                `[PromptController] 📄 Content field length: ${contentField.length} chars`
+              );
+              console.log(
+                `[PromptController] 📄 Content field (first 2000 chars):\n${contentField.substring(
+                  0,
+                  2000
+                )}`
+              );
+
+              // 🆕 Validation: Check nếu content rỗng hoặc quá ngắn
+              if (contentField.length < 50) {
+                console.error(
+                  `[PromptController] ⚠️ WARNING: Content field is suspiciously short (${contentField.length} chars)`
+                );
+                console.error(
+                  `[PromptController] 🔍 Full responseToSend (first 1000 chars):\n${responseToSend.substring(
+                    0,
+                    1000
+                  )}`
+                );
+              }
+            } catch (logError) {
+              console.error(
+                `[PromptController] ❌ Failed to parse response for logging:`,
+                logError
+              );
+              console.error(
+                `[PromptController] 🔍 responseToSend value (first 1000 chars):\n${responseToSend.substring(
+                  0,
+                  1000
+                )}`
+              );
+            }
 
             await browserAPI.storage.local.set(messagePayload);
             this.activePollingTasks.delete(tabId);
@@ -1608,36 +1681,49 @@ REMEMBER:
         `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
       );
 
-      // Step 3: Try to parse as JSON (if response is JSON)
+      // Step 3: Try to parse as JSON ONLY if ENTIRE response is JSON (không chứa XML tags)
       try {
-        const jsonMatch = cleanedResult.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          let sanitizedJson = jsonMatch[0];
-          sanitizedJson = sanitizedJson.replace(
-            /(:\s*")([^"]*(?:"(?:[^"\\]|\\.)*")*[^"]*?)("(?:\s*[,}\]]|$))/g,
-            (
-              _fullMatch: string,
-              prefix: string,
-              content: string,
-              suffix: string
-            ): string => {
-              const escaped = content
-                .replace(/\\/g, "\\\\")
-                .replace(/"/g, '\\"')
-                .replace(/\n/g, "\\n")
-                .replace(/\r/g, "\\r")
-                .replace(/\t/g, "\\t");
-              return prefix + escaped + suffix;
-            }
-          );
+        // 🆕 CRITICAL: Kiểm tra xem có XML tags không (nếu có thì KHÔNG parse JSON)
+        const hasXmlTags =
+          /<[a-z_]+>/.test(cleanedResult) || /<\/[a-z_]+>/.test(cleanedResult);
 
-          const jsonResponse = JSON.parse(sanitizedJson);
+        if (hasXmlTags) {
+          console.log(
+            `[PromptController] ℹ️ Response contains XML tags, skipping JSON parse`
+          );
+          return cleanedResult;
+        }
+
+        // 🆕 Kiểm tra xem response CÓ BẮT ĐẦU VÀ KẾT THÚC bằng {} không
+        const trimmed = cleanedResult.trim();
+        if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+          console.log(
+            `[PromptController] ℹ️ Response is not a complete JSON object, returning as text`
+          );
+          return cleanedResult;
+        }
+
+        // Try parse toàn bộ response
+        const jsonResponse = JSON.parse(trimmed);
+
+        // Validate structure
+        if (
+          jsonResponse &&
+          typeof jsonResponse === "object" &&
+          jsonResponse.choices
+        ) {
+          console.log(
+            `[PromptController] ✅ Valid OpenAI JSON format detected`
+          );
           return JSON.stringify(jsonResponse);
+        } else {
+          console.log(
+            `[PromptController] ⚠️ Parsed JSON but missing OpenAI structure, returning as text`
+          );
+          return cleanedResult;
         }
       } catch (parseError) {
-        console.error(
-          `[PromptController] ⚠️ JSON parse failed, returning raw text`
-        );
+        console.log(`[PromptController] ℹ️ Not valid JSON, returning as text`);
       }
 
       // Return cleaned text
