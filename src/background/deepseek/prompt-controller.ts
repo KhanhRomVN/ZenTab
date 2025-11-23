@@ -19,23 +19,157 @@ CRITICAL LANGUAGE RULE:
 
   // 🆕 Text wrapping rules - quy tắc format XML tags và code blocks
   private static readonly TEXT_WRAP_RULE = `
-CRITICAL TEXT BLOCK WRAPPING RULES (16 RULES):
-1. You MUST wrap <task_progress> tags inside text code blocks
-2. You MUST wrap ALL code content inside <content> tags of <write_to_file> inside text code blocks
-3. You MUST wrap ALL code content inside <diff> tags of <replace_in_file> inside text code blocks
-4. The text block must start with: \`\`\`text
-5. The text block must end with: \`\`\`
-6. <thinking> tags and explanations should NOT be wrapped in text blocks
-7. Do NOT put explanations or other content inside the \`\`\`text...\`\`\` blocks
-8. Each wrappable content (task_progress or code) gets its own separate text block
-9. If there is no task_progress or code in your response, do NOT use any text code blocks
-10. The text block wrapper is ONLY for task_progress and code content, not for other content
-11. In <replace_in_file>: BOTH old code (after SEARCH) and new code (after REPLACE) MUST be wrapped in separate text blocks
-12. Code in <new_str> within <replace_in_file> MUST be wrapped in text blocks
-13. Code in <content> within <write_to_file> MUST be wrapped in text blocks
-14. YOU MUST ALWAYS USE <content></content> tags inside <write_to_file> - NEVER omit them
-15. The <content> tag is REQUIRED and MANDATORY in all <write_to_file> operations
-16. You MUST preserve EXACT indentation (spaces/tabs) from original code - do NOT reformat or change spacing
+CRITICAL TEXT BLOCK WRAPPING RULES (20 RULES - STRICTLY ENFORCED):
+
+═══════════════════════════════════════════════════════════════════
+RULE GROUP 1: WHAT MUST BE WRAPPED (MANDATORY)
+═══════════════════════════════════════════════════════════════════
+1. <task_progress> content MUST ALWAYS be wrapped in \`\`\`text code blocks
+   - NO EXCEPTIONS - Even if it's just 1 task item
+   - Format: \`\`\`text\n<task_progress>...</task_progress>\n\`\`\`
+
+2. ALL code inside <content> tags of <write_to_file> MUST be wrapped in \`\`\`text
+   - Format: <content>\n\`\`\`text\nYOUR_CODE_HERE\n\`\`\`\n</content>
+
+3. ALL code in <diff> tags (BOTH SEARCH and REPLACE sections) MUST be wrapped in \`\`\`text
+   - Format: <<<<<<< SEARCH\n\`\`\`text\nOLD_CODE\n\`\`\`\n=======\n\`\`\`text\nNEW_CODE\n\`\`\`\n>>>>>>> REPLACE
+
+═══════════════════════════════════════════════════════════════════
+RULE GROUP 2: WRAPPER FORMAT (EXACT SYNTAX)
+═══════════════════════════════════════════════════════════════════
+4. Text block MUST start with exactly: \`\`\`text (lowercase "text", no spaces)
+5. Text block MUST end with exactly: \`\`\` (three backticks, nothing else)
+6. NO content allowed before \`\`\`text or after closing \`\`\`
+7. Each wrappable item gets its OWN separate \`\`\`text...\`\`\` block
+
+═══════════════════════════════════════════════════════════════════
+RULE GROUP 3: WHAT SHOULD NOT BE WRAPPED
+═══════════════════════════════════════════════════════════════════
+8. <thinking> tags and explanations should NOT be wrapped
+9. XML tool tags themselves (<read_file>, <write_to_file>, etc.) should NOT be wrapped
+10. Vietnamese explanatory text should NOT be wrapped
+11. Do NOT wrap multiple different elements in one text block
+
+═══════════════════════════════════════════════════════════════════
+RULE GROUP 4: STRUCTURE REQUIREMENTS
+═══════════════════════════════════════════════════════════════════
+12. <content></content> tags are MANDATORY inside ALL <write_to_file> operations
+13. NEVER omit <content> tags - this will cause parsing errors
+14. Code inside <content> MUST be wrapped: <content>\`\`\`text\nCODE\`\`\`</content>
+
+═══════════════════════════════════════════════════════════════════
+RULE GROUP 5: INDENTATION PRESERVATION (CRITICAL)
+═══════════════════════════════════════════════════════════════════
+15. You MUST preserve EXACT indentation (spaces/tabs) from original code
+16. Count spaces carefully - if original uses 2 spaces, keep 2 spaces
+17. Do NOT apply auto-formatting (Prettier, ESLint, PEP8, etc.)
+18. In <replace_in_file>, SEARCH block MUST match indentation EXACTLY character-by-character
+
+═══════════════════════════════════════════════════════════════════
+RULE GROUP 6: VALIDATION CHECKLIST (BEFORE SENDING RESPONSE)
+═══════════════════════════════════════════════════════════════════
+19. Before sending response, verify:
+    ✓ Every <task_progress> is wrapped in \`\`\`text...\`\`\`
+    ✓ Every <content> block has \`\`\`text wrapper
+    ✓ Every SEARCH/REPLACE section has \`\`\`text wrapper
+    ✓ No explanatory text inside \`\`\`text blocks
+    ✓ Indentation matches original code exactly
+
+20. If you forget to wrap <task_progress>, the system will reject your response
+
+═══════════════════════════════════════════════════════════════════
+CORRECT FORMAT EXAMPLES
+═══════════════════════════════════════════════════════════════════
+
+✅ Example 1 - Task Progress (CORRECT):
+<read_file>
+<path>test.ts</path>
+\`\`\`text
+<task_progress>
+- [ ] Phân tích cấu trúc dự án
+- [ ] Kiểm tra file hiện tại
+- [ ] Thêm hàm mới
+</task_progress>
+\`\`\`
+</read_file>
+
+✅ Example 2 - Write To File (CORRECT):
+<write_to_file>
+<path>src/new-file.ts</path>
+<content>
+\`\`\`text
+export function myFunction() {
+  console.log("Hello");  // 2 spaces indent
+  return true;
+}
+\`\`\`
+</content>
+</write_to_file>
+
+✅ Example 3 - Replace In File (CORRECT):
+<replace_in_file>
+<path>src/helper.ts</path>
+<diff>
+<<<<<<< SEARCH
+\`\`\`text
+function oldFunction() {
+  return "old";
+}
+\`\`\`
+=======
+\`\`\`text
+function newFunction() {
+  return "new";
+}
+\`\`\`
+>>>>>>> REPLACE
+</diff>
+</replace_in_file>
+
+═══════════════════════════════════════════════════════════════════
+INCORRECT FORMAT EXAMPLES (WILL BE REJECTED)
+═══════════════════════════════════════════════════════════════════
+
+❌ Example 1 - Task Progress NOT wrapped (CRITICAL ERROR):
+<read_file>
+<path>test.ts</path>
+<task_progress>
+- [ ] Do something
+</task_progress>
+</read_file>
+
+❌ Example 2 - Missing <content> tag:
+<write_to_file>
+<path>test.ts</path>
+\`\`\`text
+function test() {}
+\`\`\`
+</write_to_file>
+
+❌ Example 3 - Code not wrapped:
+<write_to_file>
+<path>test.ts</path>
+<content>
+function test() {}
+</content>
+</write_to_file>
+
+❌ Example 4 - Mixing content in text block:
+\`\`\`text
+Some explanation text here
+<task_progress>
+- [ ] Task 1
+</task_progress>
+More text here
+\`\`\`
+
+═══════════════════════════════════════════════════════════════════
+FINAL REMINDER
+═══════════════════════════════════════════════════════════════════
+If you output <task_progress> without wrapping it in \`\`\`text...\`\`\`, 
+the system will FAIL to parse your response and the user will see an error.
+ALWAYS wrap <task_progress> in \`\`\`text code blocks - NO EXCEPTIONS!
+═══════════════════════════════════════════════════════════════════
 
 CRITICAL INDENTATION RULES:
 - Read and preserve the EXACT number of spaces or tabs at the beginning of each line
@@ -178,10 +312,18 @@ REMEMBER:
     systemPrompt: string | null | undefined,
     userPrompt: string
   ): string {
-    if (systemPrompt) {
-      return `${systemPrompt}\n\n${this.LANGUAGE_RULE}\n\n${this.TEXT_WRAP_RULE}\n\nUSER REQUEST:\n${userPrompt}`;
-    }
-    return `${this.LANGUAGE_RULE}\n\n${this.TEXT_WRAP_RULE}\n\nUSER REQUEST:\n${userPrompt}`;
+    const finalPrompt = systemPrompt
+      ? `${systemPrompt}\n\n${this.LANGUAGE_RULE}\n\n${this.TEXT_WRAP_RULE}\n\nUSER REQUEST:\n${userPrompt}`
+      : `${this.LANGUAGE_RULE}\n\n${this.TEXT_WRAP_RULE}\n\nUSER REQUEST:\n${userPrompt}`;
+
+    console.log(
+      `[PromptController] 📝 Final prompt length: ${finalPrompt.length} chars`
+    );
+    console.log(
+      `[PromptController] 📝 TEXT_WRAP_RULE length: ${this.TEXT_WRAP_RULE.length} chars`
+    );
+
+    return finalPrompt;
   }
 
   private static async validateTab(
