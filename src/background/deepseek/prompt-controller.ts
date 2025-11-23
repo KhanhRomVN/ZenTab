@@ -925,6 +925,9 @@ REMEMBER:
               await this.tabStateManager.markTabFree(tabId);
             }
 
+            // ✅ NEW: Force invalidate cache và notify UI
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
             let responseToSend: string = "";
 
             // 🆕 BUILD OPENAI JSON FORMAT từ raw text
@@ -1064,12 +1067,12 @@ REMEMBER:
               const parsedResponse = JSON.parse(responseToSend);
               const contentField =
                 parsedResponse?.choices?.[0]?.delta?.content || "";
-              console.log(
-                `[PromptController] 📄 Content field (first 2000 chars):\n${contentField.substring(
-                  0,
-                  2000
-                )}`
-              );
+              // console.log(
+              //   `[PromptController] 📄 Content field (first 2000 chars):\n${contentField.substring(
+              //     0,
+              //     2000
+              //   )}`
+              // );
 
               // 🆕 Validation: Check nếu content rỗng hoặc quá ngắn
               if (contentField.length < 50) {
@@ -1725,9 +1728,9 @@ REMEMBER:
       };
 
       // 🆕 LOG 1: Raw HTML content nhận từ DeepSeek (full content)
-      console.log(
-        `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
-      );
+      // console.log(
+      //   `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
+      // );
 
       // Step 2: Decode HTML entities
       const decodedResult = this.decodeHtmlEntities(content);
@@ -1775,9 +1778,9 @@ REMEMBER:
       cleanedResult = this.cleanContentCodeFences(cleanedResult);
 
       // 🆕 LOG 2: Response sau xử lý (full cleaned content)
-      console.log(
-        `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
-      );
+      // console.log(
+      //   `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
+      // );
 
       // Step 3: Try to parse as JSON ONLY if ENTIRE response is JSON (không chứa XML tags)
       try {

@@ -47,7 +47,12 @@ const Sidebar: React.FC = () => {
 
     const messageListener = (message: any) => {
       if (message.action === "tabsUpdated") {
+        console.log(
+          `[Sidebar] 🔄 tabsUpdated message received, calling loadTabs()...`
+        );
         loadTabs();
+      } else {
+        console.log(`[Sidebar] ⚠️ Unknown message action: ${message.action}`);
       }
     };
 
@@ -131,6 +136,7 @@ const Sidebar: React.FC = () => {
     status: string;
     port: number;
   }) => {
+    console.log(`[Sidebar] 📍 loadTabs() CALLED`);
     try {
       let wsState = providedWsState;
 
@@ -223,6 +229,10 @@ const Sidebar: React.FC = () => {
       }
 
       const tabStates = response.tabStates || [];
+
+      console.log(
+        `[Sidebar] 📊 Received ${tabStates.length} tab states from background`
+      );
 
       setTabs(tabStates);
 
