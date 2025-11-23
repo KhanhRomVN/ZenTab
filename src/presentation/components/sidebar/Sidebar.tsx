@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import TabCard from "./TabCard";
 import CustomButton from "../common/CustomButton";
+import MenuDrawer from "./MenuDrawer";
+import SettingDrawer from "./SettingDrawer";
 import { Settings, Power, PowerOff } from "lucide-react";
 import { WSHelper } from "@/shared/lib/ws-helper";
 
@@ -12,6 +14,7 @@ interface TabStateResponse {
 
 const Sidebar: React.FC = () => {
   const [tabs, setTabs] = useState<any[]>([]);
+  const [showMenuDrawer, setShowMenuDrawer] = useState(false);
   const [showSettingDrawer, setShowSettingDrawer] = useState(false);
   const [, setActiveTabs] = useState<Set<string>>(new Set());
   const [wsConnection, setWsConnection] = useState<{
@@ -20,6 +23,7 @@ const Sidebar: React.FC = () => {
     port: number;
   } | null>(null);
   const [isTogglingWs, setIsTogglingWs] = useState(false);
+  const [apiProvider, setApiProvider] = useState<string>("localhost");
 
   useEffect(() => {
     const initializeSidebar = async () => {
@@ -97,8 +101,9 @@ const Sidebar: React.FC = () => {
 
       if (changes.wsStates) {
         const states = changes.wsStates.newValue || {};
-        const FIXED_CONNECTION_ID = "ws-default-1500";
-        const state = states[FIXED_CONNECTION_ID];
+
+        const currentConnectionId = wsConnection?.id || "ws-default-1500";
+        const state = states[currentConnectionId];
 
         if (state) {
           const typedState = state as {
@@ -108,7 +113,7 @@ const Sidebar: React.FC = () => {
           const newStatus = typedState.status as any;
 
           setWsConnection({
-            id: FIXED_CONNECTION_ID,
+            id: currentConnectionId,
             status: newStatus,
             port: typedState.port,
           });
@@ -249,13 +254,20 @@ const Sidebar: React.FC = () => {
   };
 
   const loadWebSocketStatus = async () => {
-    const FIXED_CONNECTION_ID = "ws-default-1500";
-
     try {
-      const result = await chrome.storage.local.get(["wsStates"]);
+      const result = await chrome.storage.local.get([
+        "wsStates",
+        "wsDefaultConnectionId",
+        "apiProvider",
+      ]);
       const states = result?.wsStates || {};
+      const defaultConnectionId =
+        result?.wsDefaultConnectionId || "ws-default-1500";
 
-      const state = states[FIXED_CONNECTION_ID];
+      const state = states[defaultConnectionId];
+
+      // Set API Provider
+      setApiProvider(result?.apiProvider || "localhost");
 
       if (state) {
         const typedState = state as {
@@ -264,15 +276,19 @@ const Sidebar: React.FC = () => {
         };
 
         setWsConnection({
-          id: FIXED_CONNECTION_ID,
+          id: defaultConnectionId,
           status: typedState.status as any,
           port: typedState.port,
         });
       } else {
+        const portFromId = parseInt(
+          defaultConnectionId.split("-").pop() || "1500",
+          10
+        );
         setWsConnection({
-          id: FIXED_CONNECTION_ID,
+          id: defaultConnectionId,
           status: "disconnected",
-          port: 1500,
+          port: portFromId,
         });
       }
     } catch (error) {
@@ -283,6 +299,60 @@ const Sidebar: React.FC = () => {
         port: 1500,
       });
     }
+  };
+
+  const handlePortChange = async (newPort: number) => {
+    console.log(`[Sidebar] 🔧 Port change requested: ${newPort}`);
+    const newConnectionId = `ws-default-${newPort}`;
+
+    if (wsConnection?.status === "connected") {
+      console.log(
+        `[Sidebar] 🔌 Disconnecting current connection: ${wsConnection.id}`
+      );
+      try {
+        await WSHelper.disconnect(wsConnection.id);
+      } catch (error) {
+        console.error(
+          "[Sidebar] ❌ Error disconnecting before port change:",
+          error
+        );
+      }
+    }
+
+    console.log(
+      `[Sidebar] 💾 Saving new connection ID to storage: ${newConnectionId}`
+    );
+    await chrome.storage.local.set({
+      wsDefaultConnectionId: newConnectionId,
+    });
+
+    // 🔥 FIX: Force update state NGAY LẬP TỨC với port mới
+    console.log(
+      `[Sidebar] 🔄 Force updating wsConnection state with new port: ${newPort}`
+    );
+    setWsConnection({
+      id: newConnectionId,
+      status: "disconnected",
+      port: newPort,
+    });
+
+    // 🔥 REMOVED: Không gọi loadWebSocketStatus() vì nó sẽ ghi đè state
+    // await loadWebSocketStatus();
+
+    console.log(`[Sidebar] ✅ Port change completed. New state:`, {
+      id: newConnectionId,
+      port: newPort,
+      status: "disconnected",
+    });
+  };
+
+  const handleApiProviderChange = async (newProvider: string) => {
+    console.log(`[Sidebar] 🔧 API Provider change requested: ${newProvider}`);
+    await chrome.storage.local.set({
+      apiProvider: newProvider,
+    });
+    setApiProvider(newProvider);
+    console.log(`[Sidebar] ✅ API Provider changed to: ${newProvider}`);
   };
 
   const handleToggleWebSocket = async () => {
@@ -325,16 +395,9 @@ const Sidebar: React.FC = () => {
                   : "bg-gray-400"
               }`}
             />
-            <span className="text-xs font-medium text-text-primary">
-              {wsConnection?.status === "connected"
-                ? "Backend Connected"
-                : wsConnection?.status === "connecting"
-                ? "Connecting..."
-                : wsConnection?.status === "error"
-                ? "Connection Error"
-                : "Disconnected"}
+            <span className="text-xs text-text-secondary">
+              {apiProvider}:{wsConnection?.port || 1500}
             </span>
-            <span className="text-xs text-text-secondary">• Port 1500</span>
           </div>
           <CustomButton
             variant={
@@ -386,12 +449,27 @@ const Sidebar: React.FC = () => {
           variant="ghost"
           size="sm"
           icon={Settings}
-          onClick={() => setShowSettingDrawer(!showSettingDrawer)}
-          aria-label="Open settings menu"
+          onClick={() => setShowMenuDrawer(true)}
+          aria-label="Open menu"
           className="!p-3 !text-lg"
           children={undefined}
         />
       </div>
+
+      {/* Drawers */}
+      <MenuDrawer
+        isOpen={showMenuDrawer}
+        onClose={() => setShowMenuDrawer(false)}
+        onOpenSettings={() => setShowSettingDrawer(true)}
+      />
+      <SettingDrawer
+        isOpen={showSettingDrawer}
+        onClose={() => setShowSettingDrawer(false)}
+        currentPort={wsConnection?.port || 1500}
+        currentApiProvider={apiProvider}
+        onPortChange={handlePortChange}
+        onApiProviderChange={handleApiProviderChange}
+      />
     </div>
   );
 };
