@@ -1597,8 +1597,11 @@ REMEMBER:
         "$1\n$2"
       );
 
-      // 🆕 Step 2.9: Clean SEARCH/REPLACE code fences in <diff> blocks (CUỐI CÙNG)
+      // 🆕 Step 2.9: Clean SEARCH/REPLACE code fences in <diff> blocks
       cleanedResult = this.cleanSearchReplaceCodeFences(cleanedResult);
+
+      // 🆕 Step 2.10: Clean code fences in <content> blocks of <write_to_file>
+      cleanedResult = this.cleanContentCodeFences(cleanedResult);
 
       // 🆕 LOG 2: Response sau xử lý (full cleaned content)
       console.log(
@@ -1881,6 +1884,75 @@ REMEMBER:
       );
 
       return `<diff>${cleanedLines.join("\n")}</diff>`;
+    });
+  }
+
+  /**
+   * 🆕 Loại bỏ code fence (```) bên ngoài cùng trong <content> blocks của <write_to_file>
+   * Giữ nguyên các ``` bên trong nếu content có sử dụng
+   */
+  private static cleanContentCodeFences(content: string): string {
+    const contentBlockPattern = /<content>([\s\S]*?)<\/content>/g;
+    const CODE_FENCE = "```";
+    const UI_ARTIFACTS = ["text", "copy", "download"];
+
+    return content.replace(contentBlockPattern, (_match, contentBlock) => {
+      const lines = contentBlock.split("\n");
+
+      if (lines.length === 0) {
+        return `<content>${contentBlock}</content>`;
+      }
+
+      const linesToRemove = new Set<number>();
+
+      // Step 1: Xóa dòng trống đầu tiên (ngay sau <content>)
+      if (lines[0].trim() === "") {
+        linesToRemove.add(0);
+      }
+
+      // Step 2: Tìm và xóa CODE_FENCE đầu tiên (bỏ qua UI artifacts và dòng trống)
+      for (let i = 0; i < lines.length; i++) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+
+        const isUIArtifact = UI_ARTIFACTS.includes(trimmed.toLowerCase());
+        if (trimmed !== "" && !isUIArtifact) {
+          break;
+        }
+      }
+
+      // Step 3: Xóa dòng trống cuối cùng (ngay trước </content>)
+      const lastIdx = lines.length - 1;
+      if (lastIdx >= 0 && lines[lastIdx].trim() === "") {
+        linesToRemove.add(lastIdx);
+      }
+
+      // Step 4: Tìm và xóa CODE_FENCE cuối cùng (bỏ qua dòng trống đã đánh dấu)
+      for (let i = lastIdx; i >= 0; i--) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+
+        if (trimmed !== "") {
+          break;
+        }
+      }
+
+      // Lọc bỏ các dòng cần xóa
+      const cleanedLines = lines.filter(
+        (_: string, idx: number) => !linesToRemove.has(idx)
+      );
+
+      return `<content>${cleanedLines.join("\n")}</content>`;
     });
   }
 
