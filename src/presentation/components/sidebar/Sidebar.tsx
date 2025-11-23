@@ -46,29 +46,23 @@ const Sidebar: React.FC = () => {
     initializeSidebar();
 
     const messageListener = (message: any) => {
-      console.log("[Sidebar] 📨 Received message:", message);
       if (message.action === "tabsUpdated") {
-        console.log("[Sidebar] 🔄 Reloading tabs due to tabsUpdated message");
         loadTabs();
       }
     };
 
     chrome.runtime.onMessage.addListener(messageListener);
 
-    const tabCreatedListener = (tab: chrome.tabs.Tab) => {
-      console.log(
-        `[Sidebar] 🔄 Tab created (ID: ${tab.id}), reloading tabs...`
-      );
+    const tabCreatedListener = () => {
       loadTabs();
     };
 
-    const tabRemovedListener = (tabId: number) => {
-      console.log(`[Sidebar] 🔄 Tab removed (ID: ${tabId}), reloading tabs...`);
+    const tabRemovedListener = () => {
       loadTabs();
     };
 
     const tabUpdatedListener = (
-      tabId: number,
+      _tabId: number,
       changeInfo: { status?: string; url?: string; title?: string },
       tab: chrome.tabs.Tab
     ) => {
@@ -76,9 +70,6 @@ const Sidebar: React.FC = () => {
         changeInfo.status === "complete" &&
         tab.url?.includes("deepseek.com")
       ) {
-        console.log(
-          `[Sidebar] 🔄 DeepSeek tab ${tabId} fully loaded, reloading tabs...`
-        );
         setTimeout(() => {
           loadTabs();
         }, 1000);
@@ -233,12 +224,6 @@ const Sidebar: React.FC = () => {
 
       const tabStates = response.tabStates || [];
 
-      // 🔍 DEBUG: Log tab states để kiểm tra
-      console.log(
-        "[Sidebar] 📊 Received tab states:",
-        JSON.stringify(tabStates, null, 2)
-      );
-
       setTabs(tabStates);
 
       const activeTabIds: Set<string> = new Set(
@@ -302,13 +287,9 @@ const Sidebar: React.FC = () => {
   };
 
   const handlePortChange = async (newPort: number) => {
-    console.log(`[Sidebar] 🔧 Port change requested: ${newPort}`);
     const newConnectionId = `ws-default-${newPort}`;
 
     if (wsConnection?.status === "connected") {
-      console.log(
-        `[Sidebar] 🔌 Disconnecting current connection: ${wsConnection.id}`
-      );
       try {
         await WSHelper.disconnect(wsConnection.id);
       } catch (error) {
@@ -319,40 +300,22 @@ const Sidebar: React.FC = () => {
       }
     }
 
-    console.log(
-      `[Sidebar] 💾 Saving new connection ID to storage: ${newConnectionId}`
-    );
     await chrome.storage.local.set({
       wsDefaultConnectionId: newConnectionId,
     });
 
-    // 🔥 FIX: Force update state NGAY LẬP TỨC với port mới
-    console.log(
-      `[Sidebar] 🔄 Force updating wsConnection state with new port: ${newPort}`
-    );
     setWsConnection({
       id: newConnectionId,
       status: "disconnected",
       port: newPort,
     });
-
-    // 🔥 REMOVED: Không gọi loadWebSocketStatus() vì nó sẽ ghi đè state
-    // await loadWebSocketStatus();
-
-    console.log(`[Sidebar] ✅ Port change completed. New state:`, {
-      id: newConnectionId,
-      port: newPort,
-      status: "disconnected",
-    });
   };
 
   const handleApiProviderChange = async (newProvider: string) => {
-    console.log(`[Sidebar] 🔧 API Provider change requested: ${newProvider}`);
     await chrome.storage.local.set({
       apiProvider: newProvider,
     });
     setApiProvider(newProvider);
-    console.log(`[Sidebar] ✅ API Provider changed to: ${newProvider}`);
   };
 
   const handleToggleWebSocket = async () => {

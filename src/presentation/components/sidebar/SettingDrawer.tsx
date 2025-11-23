@@ -26,14 +26,10 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
   const [portError, setPortError] = useState<string>("");
 
   useEffect(() => {
-    console.log(`[SettingDrawer] 📥 Received currentPort prop: ${currentPort}`);
     setWsPort(String(currentPort));
   }, [currentPort]);
 
   useEffect(() => {
-    console.log(
-      `[SettingDrawer] 📥 Received currentApiProvider prop: ${currentApiProvider}`
-    );
     setApiProvider(currentApiProvider);
   }, [currentApiProvider]);
 
@@ -48,16 +44,12 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
 
   const handleWsPortChange = (value: string | string[]) => {
     const portValue = Array.isArray(value) ? value[0] : value;
-    console.log(`[SettingDrawer] 🔢 Port input changed: ${portValue}`);
-
     if (/^\d{4}$/.test(portValue)) {
       const portNumber = parseInt(portValue, 10);
-      console.log(`[SettingDrawer] ✅ Valid port: ${portNumber}`);
       setWsPort(portValue);
       setPortError("");
       onPortChange(portNumber);
     } else {
-      console.log(`[SettingDrawer] ❌ Invalid port format: ${portValue}`);
       setWsPort(portValue);
       setPortError("Port must be exactly 4 digits");
     }
@@ -65,7 +57,6 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
 
   const handleApiProviderChange = (value: string | string[]) => {
     const providerValue = Array.isArray(value) ? value[0] : value;
-    console.log(`[SettingDrawer] 🔧 API Provider changed to: ${providerValue}`);
     setApiProvider(providerValue);
     onApiProviderChange(providerValue);
   };
