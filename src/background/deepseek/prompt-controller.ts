@@ -315,14 +315,6 @@ REMEMBER:
     const finalPrompt = systemPrompt
       ? `${systemPrompt}\n\n${this.LANGUAGE_RULE}\n\n${this.TEXT_WRAP_RULE}\n\nUSER REQUEST:\n${userPrompt}`
       : `${this.LANGUAGE_RULE}\n\n${this.TEXT_WRAP_RULE}\n\nUSER REQUEST:\n${userPrompt}`;
-
-    console.log(
-      `[PromptController] 📝 Final prompt length: ${finalPrompt.length} chars`
-    );
-    console.log(
-      `[PromptController] 📝 TEXT_WRAP_RULE length: ${this.TEXT_WRAP_RULE.length} chars`
-    );
-
     return finalPrompt;
   }
 
@@ -937,39 +929,15 @@ REMEMBER:
 
             // 🆕 BUILD OPENAI JSON FORMAT từ raw text
             if (typeof rawResponse === "string") {
-              // 🆕 LOG: Raw response trước khi xử lý
-              console.log(
-                `[PromptController] 🔍 Raw response type: ${typeof rawResponse}, length: ${
-                  rawResponse.length
-                }`
-              );
-              console.log(
-                `[PromptController] 🔍 Raw response preview (first 500 chars):\n${rawResponse.substring(
-                  0,
-                  500
-                )}`
-              );
-
               try {
                 // Try parse nếu response đã là JSON
                 const parsedObject = JSON.parse(rawResponse);
-
-                // 🆕 LOG: Parsed object structure
-                console.log(
-                  `[PromptController] 🔍 Parsed as JSON object, keys: ${Object.keys(
-                    parsedObject
-                  ).join(", ")}`
-                );
-
                 // Validate structure
                 if (
                   parsedObject &&
                   typeof parsedObject === "object" &&
                   parsedObject.choices
                 ) {
-                  console.log(
-                    `[PromptController] ✅ Valid OpenAI format detected, using as-is`
-                  );
                   responseToSend = JSON.stringify(parsedObject);
                 } else {
                   // JSON nhưng thiếu structure → rebuild
@@ -982,10 +950,6 @@ REMEMBER:
                   responseToSend = JSON.stringify(builtResponse);
                 }
               } catch (parseError) {
-                // Raw text → build JSON format
-                console.log(
-                  `[PromptController] ℹ️ Not valid JSON, building OpenAI format wrapper`
-                );
                 const builtResponse = this.buildOpenAIResponse(rawResponse);
                 responseToSend = JSON.stringify(builtResponse);
               }
@@ -1100,14 +1064,6 @@ REMEMBER:
               const parsedResponse = JSON.parse(responseToSend);
               const contentField =
                 parsedResponse?.choices?.[0]?.delta?.content || "";
-              console.log(
-                `[PromptController] 📄 Response JSON structure: ${Object.keys(
-                  parsedResponse
-                ).join(", ")}`
-              );
-              console.log(
-                `[PromptController] 📄 Content field length: ${contentField.length} chars`
-              );
               console.log(
                 `[PromptController] 📄 Content field (first 2000 chars):\n${contentField.substring(
                   0,
@@ -1830,18 +1786,12 @@ REMEMBER:
           /<[a-z_]+>/.test(cleanedResult) || /<\/[a-z_]+>/.test(cleanedResult);
 
         if (hasXmlTags) {
-          console.log(
-            `[PromptController] ℹ️ Response contains XML tags, skipping JSON parse`
-          );
           return cleanedResult;
         }
 
         // 🆕 Kiểm tra xem response CÓ BẮT ĐẦU VÀ KẾT THÚC bằng {} không
         const trimmed = cleanedResult.trim();
         if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
-          console.log(
-            `[PromptController] ℹ️ Response is not a complete JSON object, returning as text`
-          );
           return cleanedResult;
         }
 
@@ -1854,19 +1804,11 @@ REMEMBER:
           typeof jsonResponse === "object" &&
           jsonResponse.choices
         ) {
-          console.log(
-            `[PromptController] ✅ Valid OpenAI JSON format detected`
-          );
           return JSON.stringify(jsonResponse);
         } else {
-          console.log(
-            `[PromptController] ⚠️ Parsed JSON but missing OpenAI structure, returning as text`
-          );
           return cleanedResult;
         }
-      } catch (parseError) {
-        console.log(`[PromptController] ℹ️ Not valid JSON, returning as text`);
-      }
+      } catch (parseError) {}
 
       // Return cleaned text
       return cleanedResult;
