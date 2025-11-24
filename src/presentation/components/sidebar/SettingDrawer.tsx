@@ -35,7 +35,7 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
   const handleApiProviderChange = (value: string | string[]) => {
     const providerValue = Array.isArray(value) ? value[0] : value;
 
-    // 🆕 VALIDATION: Warn nếu user nhập production URL
+    // VALIDATION: Warn nếu user nhập production URL
     const isProductionUrl =
       providerValue &&
       (providerValue.includes("render.com") ||

@@ -23,7 +23,7 @@ export class WSManagerNew {
         return true;
       }
 
-      // 🆕 NEW: Handler để Sidebar query connection info
+      // NEW: Handler để Sidebar query connection info
       if (message.action === "getWSConnectionInfo") {
         // Get default connection ID and state
         const connectionIds = Array.from(this.connections.keys());
@@ -74,7 +74,7 @@ export class WSManagerNew {
 
     let apiProvider = storageResult?.apiProvider;
 
-    // 🆕 CRITICAL: Reset production URL về localhost
+    // CRITICAL: Reset production URL về localhost
     const isProductionUrl =
       apiProvider &&
       (apiProvider.includes("render.com") ||

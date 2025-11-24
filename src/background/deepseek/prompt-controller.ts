@@ -10,14 +10,14 @@ export class PromptController {
   private static config: DeepSeekConfig = DEFAULT_CONFIG;
   private static tabStateManager = TabStateManager.getInstance();
 
-  // 🆕 Language rule - yêu cầu AI trả lời bằng tiếng Việt
+  // Language rule - yêu cầu AI trả lời bằng tiếng Việt
   private static readonly LANGUAGE_RULE = `
 CRITICAL LANGUAGE RULE:
 - You MUST respond in Vietnamese (Tiếng Việt) for ALL outputs
 - All explanations, descriptions, and responses must be in Vietnamese
 - Code comments should also be in Vietnamese when possible`;
 
-  // 🆕 Text wrapping rules - quy tắc format XML tags và code blocks
+  // Text wrapping rules - quy tắc format XML tags và code blocks
   private static readonly TEXT_WRAP_RULE = `
 CRITICAL TEXT BLOCK WRAPPING RULES (20 RULES - STRICTLY ENFORCED):
 
@@ -306,7 +306,7 @@ REMEMBER:
 - Example: "  return a + b;" (2 spaces) → you MUST write "  return a + b;" (2 spaces), NOT "    return a + b;" (4 spaces)`;
 
   /**
-   * 🆕 Combine system prompt, user prompt với language và text wrap rules
+   * Combine system prompt, user prompt với language và text wrap rules
    */
   private static buildFinalPrompt(
     systemPrompt: string | null | undefined,
@@ -377,7 +377,7 @@ REMEMBER:
   }
 
   /**
-   * 🆕 Overload 1: Accept pre-combined prompt (for backward compatibility)
+   * Overload 1: Accept pre-combined prompt (for backward compatibility)
    */
   static async sendPrompt(
     tabId: number,
@@ -387,7 +387,7 @@ REMEMBER:
   ): Promise<boolean>;
 
   /**
-   * 🆕 Overload 2: Accept systemPrompt + userPrompt separately (recommended)
+   * Overload 2: Accept systemPrompt + userPrompt separately (recommended)
    */
   static async sendPrompt(
     tabId: number,
@@ -412,29 +412,17 @@ REMEMBER:
     requestIdOrIsNewTask?: string | boolean,
     isNewTask?: boolean
   ): Promise<boolean> {
-    // 🆕 Declare variables ở phạm vi method để accessible trong catch block
     let finalPrompt: string = "";
     let requestId: string = "unknown";
     let isNewTaskFlag: boolean = false;
 
-    console.log(`[PromptController] 📥 sendPrompt called:`, {
-      tabId,
-      promptLength: promptOrSystemPrompt?.length || 0,
-      hasUserPrompt: !!userPromptOrRequestId,
-      requestIdOrIsNewTask,
-      isNewTask,
-    });
-
     try {
-      // 🆕 Parse arguments để hỗ trợ cả 2 overload signatures
       if (typeof requestIdOrIsNewTask === "string") {
-        // Overload 2: (tabId, systemPrompt, userPrompt, requestId, isNewTask?)
         const systemPrompt = promptOrSystemPrompt;
         const userPrompt = userPromptOrRequestId;
         requestId = requestIdOrIsNewTask;
         isNewTaskFlag = isNewTask === true;
 
-        // 🆕 Build final prompt với rules
         finalPrompt = this.buildFinalPrompt(systemPrompt, userPrompt);
       } else {
         // Overload 1: (tabId, prompt, requestId, isNewTask?)
@@ -495,22 +483,11 @@ REMEMBER:
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
-      console.log(
-        `[PromptController] 📝 Starting textarea fill for tab ${tabId}`
-      );
-      console.log(
-        `[PromptController] 🔍 Prompt length: ${finalPrompt.length} chars`
-      );
-
       let retries = 3;
       let result: any = null;
 
       while (retries > 0 && !result) {
         try {
-          console.log(
-            `[PromptController] 🔄 Textarea fill attempt ${4 - retries}/3`
-          );
-
           result = await executeScript(
             tabId,
             (text: string) => {
@@ -606,11 +583,8 @@ REMEMBER:
         return false;
       }
 
-      // Wait longer for button to enable (DeepSeek UI needs time to process events)
-      console.log(`[PromptController] ⏳ Waiting 1.5s for button to enable...`);
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
-      console.log(`[PromptController] 🖱️ Attempting to click send button...`);
       const clickResult = await executeScript(tabId, () => {
         const sendButton = document.querySelector(
           ".ds-icon-button._7436101"
@@ -719,9 +693,6 @@ REMEMBER:
       });
 
       if (clickResult && clickResult.success) {
-        console.log(
-          `[PromptController] ✅ Button clicked successfully, starting monitoring...`
-        );
         const clickTimestamp = Date.now();
         this.monitorButtonStateUntilComplete(tabId, requestId, clickTimestamp);
       } else {
@@ -836,20 +807,12 @@ REMEMBER:
     setTimeout(checkState, 1000);
   }
 
-  /**
-   * Polling để đợi AI trả lời xong - CẬP NHẬT: đánh dấu tab free khi hoàn thành
-   */
   private static async startResponsePolling(
     tabId: number,
     requestId: string
   ): Promise<void> {
     const capturedRequestId = requestId;
     const isTestRequest = requestId.startsWith("test-");
-
-    console.log(
-      `[PromptController] 🔄 Starting polling for tab ${tabId}, request ${requestId}`
-    );
-
     const browserAPI = getBrowserAPI();
     let pollCount = 0;
     let responseSent = false;
@@ -857,12 +820,6 @@ REMEMBER:
     const poll = async () => {
       pollCount++;
 
-      // Log mỗi 10 polls (mỗi 10s)
-      if (pollCount % 10 === 1) {
-        console.log(
-          `[PromptController] ⏳ Polling #${pollCount} for tab ${tabId}...`
-        );
-      }
       const currentActiveRequest = this.activePollingTasks.get(tabId);
       if (currentActiveRequest !== capturedRequestId) {
         return;
@@ -876,18 +833,7 @@ REMEMBER:
 
       try {
         const isGenerating = await StateController.isGenerating(tabId);
-
-        // Log every 10 polls
-        if (pollCount % 10 === 1 || (!isGenerating && pollCount >= 3)) {
-          console.log(
-            `[PromptController] 🔍 Poll #${pollCount}: isGenerating=${isGenerating}`
-          );
-        }
-
         if (!isGenerating && pollCount >= 3) {
-          console.log(
-            `[PromptController] ✅ AI completed, fetching response...`
-          );
           if (responseSent) {
             console.warn(
               `[PromptController] 🚫 DUPLICATE RESPONSE PREVENTED: ${capturedRequestId}`
@@ -902,7 +848,6 @@ REMEMBER:
             responseSent = true;
             this.activePollingTasks.delete(tabId);
 
-            // 🆕 CRITICAL: Lấy folderPath từ wsMessages TRƯỚC KHI link
             let folderPathToLink: string | null = null;
             try {
               const messagesResult = await new Promise<any>(
@@ -963,7 +908,7 @@ REMEMBER:
 
             let responseToSend: string = "";
 
-            // 🆕 BUILD OPENAI JSON FORMAT từ raw text
+            // BUILD OPENAI JSON FORMAT từ raw text
             if (typeof rawResponse === "string") {
               try {
                 // Try parse nếu response đã là JSON
@@ -1097,9 +1042,6 @@ REMEMBER:
                       reject(browserAPI.runtime.lastError);
                       return;
                     }
-                    console.log(
-                      `[PromptController] ✅ Response queued for sending via WebSocket`
-                    );
                     resolve();
                   }
                 );
@@ -1534,11 +1476,11 @@ REMEMBER:
               // ✅ Safe string conversion
               const className = String(el.className || "");
 
-              // 🆕 CRITICAL: Xử lý đặc biệt cho ds-markdown-html spans (chứa XML tags)
+              // CRITICAL: Xử lý đặc biệt cho ds-markdown-html spans (chứa XML tags)
               if (className.includes("ds-markdown-html")) {
                 const htmlContent = String(el.textContent || "");
 
-                // 🆕 CRITICAL: Nếu là closing tag và không có newline trước nó
+                // CRITICAL: Nếu là closing tag và không có newline trước nó
                 // thì tự động thêm newline
                 if (htmlContent.startsWith("</") && !result.endsWith("\n")) {
                   result += "\n";
@@ -1584,7 +1526,7 @@ REMEMBER:
               if (tag === "ul" || tag === "ol") {
                 const items = Array.from(el.children);
 
-                // 🆕 CRITICAL: Kiểm tra xem list này có phải là task_progress không
+                // CRITICAL: Kiểm tra xem list này có phải là task_progress không
                 // Check previous sibling để tìm <task_progress> tag
                 let isTaskProgressList = false;
                 let sibling = el.previousElementSibling;
@@ -1606,7 +1548,7 @@ REMEMBER:
 
                 items.forEach((item, index) => {
                   if (item.tagName.toLowerCase() === "li") {
-                    // 🆕 CRITICAL: Kiểm tra checkbox trong li
+                    // CRITICAL: Kiểm tra checkbox trong li
                     const checkbox = item.querySelector(
                       'input[type="checkbox"]'
                     ) as HTMLInputElement | null;
@@ -1634,7 +1576,7 @@ REMEMBER:
                       Array.from(item.childNodes).forEach(extractText);
                       result += textNodes.join("").trim() + "\n";
                     } else if (isTaskProgressList) {
-                      // 🆕 Task progress list WITHOUT checkbox element → force add "- [ ] "
+                      // Task progress list WITHOUT checkbox element → force add "- [ ] "
                       result += "- [ ] ";
 
                       // Extract text content và trim để loại bỏ whitespace thừa
@@ -1650,7 +1592,7 @@ REMEMBER:
                         result += "- ";
                       }
 
-                      // 🆕 FIX: Extract content recursively VÀ GIỮ NGUYÊN paragraph structure
+                      // FIX: Extract content recursively VÀ GIỮ NGUYÊN paragraph structure
                       Array.from(item.childNodes).forEach((child) => {
                         if (child.nodeType === Node.TEXT_NODE) {
                           result += child.textContent || "";
@@ -1786,27 +1728,27 @@ REMEMBER:
         method: string;
       };
 
-      // 🆕 LOG 1: Raw HTML content nhận từ DeepSeek (full content)
-      console.log(
-        `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
-      );
+      // LOG 1: Raw HTML content nhận từ DeepSeek (full content)
+      // console.log(
+      //   `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
+      // );
 
       // Step 2: Decode HTML entities
       const decodedResult = this.decodeHtmlEntities(content);
 
-      // 🆕 Step 2.5: Validate and fix XML structure
+      // Step 2.5: Validate and fix XML structure
       const xmlFixedResult = this.fixXmlStructure(decodedResult);
 
-      // 🆕 Step 2.6: Unwrap task_progress blocks from ```text wrappers
+      // Step 2.6: Unwrap task_progress blocks from ```text wrappers
       const unwrappedResult = this.unwrapTaskProgress(xmlFixedResult);
 
-      // 🆕 Step 2.7: Remove UI artifacts (Copy, Download buttons text)
+      // Step 2.7: Remove UI artifacts (Copy, Download buttons text)
       let artifactCleanedResult = unwrappedResult
         .replace(/\n*Copy\s*\n*/gi, "\n")
         .replace(/\n*Download\s*\n*/gi, "\n")
         .replace(/\btext\s*\n+/gi, "\n");
 
-      // 🆕 Step 2.8: Remove any remaining code block markers around XML tags
+      // Step 2.8: Remove any remaining code block markers around XML tags
       artifactCleanedResult = artifactCleanedResult
         .replace(/```\s*\n+(<[a-z_]+>)/gi, "$1")
         .replace(/(<\/[a-z_]+>)\s*\n+```/gi, "$1");
@@ -1816,34 +1758,34 @@ REMEMBER:
         .replace(/\n{3,}/g, "\n\n")
         .trim();
 
-      // 🆕 Additional cleanup: Fix spacing trong numbered lists
+      // Additional cleanup: Fix spacing trong numbered lists
       cleanedResult = cleanedResult.replace(/(\d+\.)\s+\n/g, "$1 ");
 
-      // 🆕 CRITICAL: Ensure proper newlines around ALL XML closing tags
+      // CRITICAL: Ensure proper newlines around ALL XML closing tags
       // Pattern: "text</tag>" → "text\n</tag>" (nếu chưa có newline)
       cleanedResult = cleanedResult.replace(/([^\n])(<\/[a-z_]+>)/g, "$1\n$2");
 
-      // 🆕 CRITICAL: Ensure proper newlines between consecutive closing tags
+      // CRITICAL: Ensure proper newlines between consecutive closing tags
       // Pattern: "</tag1></tag2>" → "</tag1>\n</tag2>"
       cleanedResult = cleanedResult.replace(
         /(<\/[a-z_]+>)(<\/[a-z_]+>)/g,
         "$1\n$2"
       );
 
-      // 🆕 Step 2.9: Clean SEARCH/REPLACE code fences in <diff> blocks
+      // Step 2.9: Clean SEARCH/REPLACE code fences in <diff> blocks
       cleanedResult = this.cleanSearchReplaceCodeFences(cleanedResult);
 
-      // 🆕 Step 2.10: Clean code fences in <content> blocks of <write_to_file>
+      // Step 2.10: Clean code fences in <content> blocks of <write_to_file>
       cleanedResult = this.cleanContentCodeFences(cleanedResult);
 
-      // 🆕 LOG 2: Response sau xử lý (full cleaned content)
-      console.log(
-        `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
-      );
+      // LOG 2: Response sau xử lý (full cleaned content)
+      // console.log(
+      //   `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
+      // );
 
       // Step 3: Try to parse as JSON ONLY if ENTIRE response is JSON (không chứa XML tags)
       try {
-        // 🆕 CRITICAL: Kiểm tra xem có XML tags không (nếu có thì KHÔNG parse JSON)
+        // CRITICAL: Kiểm tra xem có XML tags không (nếu có thì KHÔNG parse JSON)
         const hasXmlTags =
           /<[a-z_]+>/.test(cleanedResult) || /<\/[a-z_]+>/.test(cleanedResult);
 
@@ -1851,7 +1793,7 @@ REMEMBER:
           return cleanedResult;
         }
 
-        // 🆕 Kiểm tra xem response CÓ BẮT ĐẦU VÀ KẾT THÚC bằng {} không
+        // Kiểm tra xem response CÓ BẮT ĐẦU VÀ KẾT THÚC bằng {} không
         const trimmed = cleanedResult.trim();
         if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
           return cleanedResult;
@@ -1930,7 +1872,7 @@ REMEMBER:
   }
 
   /**
-   * 🆕 Validate và fix XML structure trong response
+   * Validate và fix XML structure trong response
    * Fix lỗi: <task_progress> nằm bên trong <read_file> hoặc các tool tags khác
    */
   private static fixXmlStructure(content: string): string {
@@ -1940,7 +1882,7 @@ REMEMBER:
   }
 
   /**
-   * 🆕 Unwrap <task_progress> blocks nếu chúng bị wrap trong ```text code blocks
+   * Unwrap <task_progress> blocks nếu chúng bị wrap trong ```text code blocks
    * Pattern: ```text...any text...<task_progress>...</task_progress>...``` → <task_progress>...</task_progress>
    * Xử lý cả trường hợp có "Copy", "Download" hoặc text khác giữa ```text và <task_progress>
    */
@@ -1979,7 +1921,7 @@ REMEMBER:
   }
 
   /**
-   * 🆕 Loại bỏ code fence (```) bên ngoài cùng trong SEARCH/REPLACE blocks
+   * Loại bỏ code fence (```) bên ngoài cùng trong SEARCH/REPLACE blocks
    * Giữ nguyên các ``` bên trong nếu code có sử dụng
    */
   private static cleanSearchReplaceCodeFences(content: string): string {
@@ -2120,7 +2062,7 @@ REMEMBER:
   }
 
   /**
-   * 🆕 Loại bỏ code fence (```) bên ngoài cùng trong <content> blocks của <write_to_file>
+   * Loại bỏ code fence (```) bên ngoài cùng trong <content> blocks của <write_to_file>
    * Giữ nguyên các ``` bên trong nếu content có sử dụng
    */
   private static cleanContentCodeFences(content: string): string {

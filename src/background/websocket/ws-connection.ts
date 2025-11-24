@@ -24,7 +24,7 @@ export class WSConnection {
   private manualDisconnect = false;
   private forwardedRequests: Set<string> = new Set();
   private lastPingTime: number = 0;
-  private readonly PING_TIMEOUT = 45000; // 45 seconds (30s backend ping + 15s buffer)
+  private readonly PING_TIMEOUT = 90000; // 45 seconds (30s backend ping + 15s buffer)
 
   public state: WSConnectionState;
 
@@ -39,7 +39,7 @@ export class WSConnection {
 
     this.notifyStateChange();
 
-    // 🆕 CRITICAL: Setup storage listener để forward wsOutgoingMessage qua WebSocket
+    // CRITICAL: Setup storage listener để forward wsOutgoingMessage qua WebSocket
     this.setupOutgoingMessageListener();
   }
 
@@ -88,10 +88,10 @@ export class WSConnection {
           this.state.lastConnected = Date.now();
           this.state.reconnectAttempts = 0;
           this.retryStartTime = undefined;
-          this.lastPingTime = Date.now(); // 🆕 Initialize ping time
+          this.lastPingTime = Date.now(); // Initialize ping time
           this.notifyStateChange();
 
-          // 🆕 Start health monitoring
+          // Start health monitoring
           this.startHealthMonitor();
 
           resolve();
@@ -138,12 +138,6 @@ export class WSConnection {
         };
 
         this.ws.onmessage = (event) => {
-          console.log(`[WSConnection] 📩 Message received from backend:`, {
-            dataType: typeof event.data,
-            dataLength: event.data?.length || 0,
-            preview: event.data?.substring(0, 200),
-          });
-
           this.handleMessage(event.data);
         };
       } catch (error) {
@@ -175,20 +169,12 @@ export class WSConnection {
     try {
       const message = JSON.parse(data);
 
-      // 🆕 LOG: Message đã parse
-      console.log(`[WSConnection] 🔍 Parsed message:`, {
-        type: message.type,
-        hasTimestamp: !!message.timestamp,
-        keys: Object.keys(message),
-      });
-
       if (!message.timestamp) {
         message.timestamp = Date.now();
       }
 
-      // 🆕 CRITICAL: Handle ping messages - reply with pong
+      // CRITICAL: Handle ping messages - reply with pong
       if (message.type === "ping") {
-        console.log(`[WSConnection] 🏓 Received ping, sending pong...`);
         try {
           if (this.ws && this.state.status === "connected") {
             const pongMessage = {
@@ -196,7 +182,6 @@ export class WSConnection {
               timestamp: Date.now(),
             };
             this.ws.send(JSON.stringify(pongMessage));
-            console.log(`[WSConnection] ✅ Pong sent successfully`);
           } else {
             console.warn(
               `[WSConnection] ⚠️ Cannot send pong - WebSocket not ready`
@@ -389,9 +374,6 @@ export class WSConnection {
             );
             return;
           }
-          console.log(
-            `[WSConnection] ✅ Forwarded getAvailableTabs request: ${requestId}`
-          );
         });
 
         return;
@@ -561,7 +543,7 @@ export class WSConnection {
   }
 
   /**
-   * 🆕 Listen for wsOutgoingMessage from ServiceWorker và forward qua WebSocket
+   * Listen for wsOutgoingMessage from ServiceWorker và forward qua WebSocket
    */
   private setupOutgoingMessageListener(): void {
     chrome.storage.onChanged.addListener((changes, areaName) => {
@@ -577,22 +559,10 @@ export class WSConnection {
           return;
         }
 
-        console.log(
-          `[WSConnection] 📤 Forwarding outgoing message to backend:`,
-          {
-            type: outgoingMessage.data?.type,
-            requestId: outgoingMessage.data?.requestId,
-            hasData: !!outgoingMessage.data,
-          }
-        );
-
         // Forward qua WebSocket
         if (this.ws && this.state.status === "connected") {
           try {
             this.ws.send(JSON.stringify(outgoingMessage.data));
-            console.log(
-              `[WSConnection] ✅ Message sent to backend successfully`
-            );
           } catch (error) {
             console.error(`[WSConnection] ❌ Failed to send message:`, error);
           }
@@ -611,7 +581,7 @@ export class WSConnection {
   }
 
   /**
-   * 🆕 Monitor connection health based on ping/pong
+   * Monitor connection health based on ping/pong
    */
   private startHealthMonitor(): void {
     const checkInterval = setInterval(() => {

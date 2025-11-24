@@ -89,7 +89,7 @@ export class TabStateManager {
         changeInfo.status === "complete" &&
         tab.url?.includes("deepseek.com")
       ) {
-        // 🆕 Đọc trực tiếp từ storage thay vì gọi getTabState() (tránh warn)
+        // Đọc trực tiếp từ storage thay vì gọi getTabState() (tránh warn)
         chrome.storage.session.get([this.STORAGE_KEY], (result) => {
           const states = (result && result[this.STORAGE_KEY]) || {};
           const existingState = states[tabId];
@@ -109,7 +109,7 @@ export class TabStateManager {
   }
 
   /**
-   * 🆕 Kiểm tra xem tab có phải sleep tab không
+   * Kiểm tra xem tab có phải sleep tab không
    * Dựa vào:
    * 1. Tab bị discarded (tab.discarded === true)
    * 2. Title chứa emoji "💤" (do Auto Tab Discard extension thêm vào)
@@ -169,7 +169,7 @@ export class TabStateManager {
         return;
       }
 
-      // 🆕 Kiểm tra sleep state trước
+      // Kiểm tra sleep state trước
       const isSleepTab = this.isSleepTab(tab);
 
       let initialStatus: "free" | "busy" | "sleep" = "free";
@@ -384,7 +384,7 @@ export class TabStateManager {
       }
 
       try {
-        // 🆕 Kiểm tra sleep state TRƯỚC (dựa vào title hoặc discarded property)
+        // Kiểm tra sleep state TRƯỚC (dựa vào title hoặc discarded property)
         const isSleepTab = this.isSleepTab(tab);
 
         if (isSleepTab) {
@@ -665,7 +665,7 @@ export class TabStateManager {
         folderPath: null,
       };
 
-      // 🆕 Override status nếu phát hiện sleep tab (real-time check)
+      // Override status nếu phát hiện sleep tab (real-time check)
       const isSleepTab = this.isSleepTab(tab);
       const actualStatus = isSleepTab ? "sleep" : state.status;
 
@@ -778,7 +778,7 @@ export class TabStateManager {
 
   private async markTabFreeInternal(tabId: number): Promise<boolean> {
     try {
-      // 🆕 CRITICAL: ĐỌC state MỚI NHẤT từ storage (không dùng cache)
+      // CRITICAL: ĐỌC state MỚI NHẤT từ storage (không dùng cache)
       const result = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
           if (chrome.runtime.lastError) {
@@ -891,7 +891,7 @@ export class TabStateManager {
 
       this.invalidateCache(tabId);
 
-      // 🆕 VERIFY: Đọc lại state để đảm bảo đã save đúng
+      // VERIFY: Đọc lại state để đảm bảo đã save đúng
       const verifyResult = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
           if (chrome.runtime.lastError) {
@@ -1232,7 +1232,7 @@ export class TabStateManager {
       return state;
     }
 
-    // 🆕 Kiểm tra xem tab có phải DeepSeek tab không TRƯỚC KHI warn
+    // Kiểm tra xem tab có phải DeepSeek tab không TRƯỚC KHI warn
     try {
       const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
         chrome.tabs.get(tabId, (result) => {

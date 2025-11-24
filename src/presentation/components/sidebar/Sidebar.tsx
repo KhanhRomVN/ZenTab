@@ -86,7 +86,7 @@ const Sidebar: React.FC = () => {
         const storageResult = await chrome.storage.local.get(["apiProvider"]);
         const provider = storageResult?.apiProvider || "localhost:3030";
 
-        // 🆕 CRITICAL: Validate và reset production URL
+        // CRITICAL: Validate và reset production URL
         const isProductionUrl =
           provider &&
           (provider.includes("render.com") ||
@@ -194,7 +194,7 @@ const Sidebar: React.FC = () => {
 
     chrome.storage.onChanged.addListener(storageListener);
 
-    // 🆕 POLLING: Check connection status mỗi 5 giây để update UI
+    // POLLING: Check connection status mỗi 5 giây để update UI
     const connectionPollingInterval = setInterval(async () => {
       try {
         const storageResult = await chrome.storage.local.get([
@@ -233,7 +233,7 @@ const Sidebar: React.FC = () => {
       chrome.tabs.onRemoved.removeListener(tabRemovedListener);
       chrome.tabs.onUpdated.removeListener(tabUpdatedListener);
       chrome.storage.onChanged.removeListener(storageListener);
-      clearInterval(connectionPollingInterval); // 🆕 Cleanup polling
+      clearInterval(connectionPollingInterval); // Cleanup polling
     };
   }, [wsConnection?.status]); // 🔥 FIX: Thêm dependency để re-run khi status thay đổi
 
