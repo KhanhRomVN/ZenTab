@@ -417,6 +417,14 @@ REMEMBER:
     let requestId: string = "unknown";
     let isNewTaskFlag: boolean = false;
 
+    console.log(`[PromptController] 📥 sendPrompt called:`, {
+      tabId,
+      promptLength: promptOrSystemPrompt?.length || 0,
+      hasUserPrompt: !!userPromptOrRequestId,
+      requestIdOrIsNewTask,
+      isNewTask,
+    });
+
     try {
       // 🆕 Parse arguments để hỗ trợ cả 2 overload signatures
       if (typeof requestIdOrIsNewTask === "string") {
@@ -487,11 +495,22 @@ REMEMBER:
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
+      console.log(
+        `[PromptController] 📝 Starting textarea fill for tab ${tabId}`
+      );
+      console.log(
+        `[PromptController] 🔍 Prompt length: ${finalPrompt.length} chars`
+      );
+
       let retries = 3;
       let result: any = null;
 
       while (retries > 0 && !result) {
         try {
+          console.log(
+            `[PromptController] 🔄 Textarea fill attempt ${4 - retries}/3`
+          );
+
           result = await executeScript(
             tabId,
             (text: string) => {
@@ -588,8 +607,10 @@ REMEMBER:
       }
 
       // Wait longer for button to enable (DeepSeek UI needs time to process events)
+      console.log(`[PromptController] ⏳ Waiting 1.5s for button to enable...`);
       await new Promise((resolve) => setTimeout(resolve, 1500));
 
+      console.log(`[PromptController] 🖱️ Attempting to click send button...`);
       const clickResult = await executeScript(tabId, () => {
         const sendButton = document.querySelector(
           ".ds-icon-button._7436101"
@@ -698,6 +719,9 @@ REMEMBER:
       });
 
       if (clickResult && clickResult.success) {
+        console.log(
+          `[PromptController] ✅ Button clicked successfully, starting monitoring...`
+        );
         const clickTimestamp = Date.now();
         this.monitorButtonStateUntilComplete(tabId, requestId, clickTimestamp);
       } else {
@@ -822,11 +846,23 @@ REMEMBER:
     const capturedRequestId = requestId;
     const isTestRequest = requestId.startsWith("test-");
 
+    console.log(
+      `[PromptController] 🔄 Starting polling for tab ${tabId}, request ${requestId}`
+    );
+
     const browserAPI = getBrowserAPI();
     let pollCount = 0;
     let responseSent = false;
 
     const poll = async () => {
+      pollCount++;
+
+      // Log mỗi 10 polls (mỗi 10s)
+      if (pollCount % 10 === 1) {
+        console.log(
+          `[PromptController] ⏳ Polling #${pollCount} for tab ${tabId}...`
+        );
+      }
       const currentActiveRequest = this.activePollingTasks.get(tabId);
       if (currentActiveRequest !== capturedRequestId) {
         return;
@@ -841,7 +877,17 @@ REMEMBER:
       try {
         const isGenerating = await StateController.isGenerating(tabId);
 
+        // Log every 10 polls
+        if (pollCount % 10 === 1 || (!isGenerating && pollCount >= 3)) {
+          console.log(
+            `[PromptController] 🔍 Poll #${pollCount}: isGenerating=${isGenerating}`
+          );
+        }
+
         if (!isGenerating && pollCount >= 3) {
+          console.log(
+            `[PromptController] ✅ AI completed, fetching response...`
+          );
           if (responseSent) {
             console.warn(
               `[PromptController] 🚫 DUPLICATE RESPONSE PREVENTED: ${capturedRequestId}`
@@ -984,7 +1030,7 @@ REMEMBER:
               return;
             }
 
-            // Gửi response qua WSManager thay vì storage
+            // 🔥 FIX: Gửi response qua wsOutgoingMessage storage
             const responseData = {
               type: "promptResponse",
               requestId: requestId,
@@ -994,24 +1040,70 @@ REMEMBER:
               timestamp: Date.now(),
             };
 
-            // Broadcast response (WSManager sẽ tự tìm đúng connection)
             try {
-              const sendMessagePromise = browserAPI.runtime.sendMessage({
-                action: "ws.sendResponse",
-                requestId: requestId,
-                data: responseData,
-              });
+              // Đọc connectionId từ wsMessages để biết gửi cho connection nào
+              const messagesResult = await new Promise<any>(
+                (resolve, reject) => {
+                  browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+                    if (browserAPI.runtime.lastError) {
+                      reject(browserAPI.runtime.lastError);
+                      return;
+                    }
+                    resolve(data || {});
+                  });
+                }
+              );
 
-              if (
-                sendMessagePromise &&
-                typeof sendMessagePromise.catch === "function"
-              ) {
-                sendMessagePromise.catch(() => {
-                  console.error(
-                    "[PromptController] ❌ Failed to send response via runtime.sendMessage"
-                  );
-                });
+              const wsMessages = messagesResult?.wsMessages || {};
+              let targetConnectionId: string | null = null;
+
+              // Tìm connectionId từ original sendPrompt message
+              for (const [connId, msgArray] of Object.entries(wsMessages)) {
+                const msgs = msgArray as Array<{
+                  timestamp: number;
+                  data: any;
+                }>;
+                const matchingMsg = msgs.find(
+                  (msg) =>
+                    msg.data?.requestId === requestId &&
+                    msg.data?.type === "sendPrompt"
+                );
+                if (matchingMsg) {
+                  targetConnectionId = connId;
+                  break;
+                }
               }
+
+              if (!targetConnectionId) {
+                console.error(
+                  "[PromptController] ❌ Cannot find connectionId for request:",
+                  requestId
+                );
+                return;
+              }
+
+              // Gửi response qua wsOutgoingMessage
+              await new Promise<void>((resolve, reject) => {
+                browserAPI.storage.local.set(
+                  {
+                    wsOutgoingMessage: {
+                      connectionId: targetConnectionId,
+                      data: responseData,
+                      timestamp: Date.now(),
+                    },
+                  },
+                  () => {
+                    if (browserAPI.runtime.lastError) {
+                      reject(browserAPI.runtime.lastError);
+                      return;
+                    }
+                    console.log(
+                      `[PromptController] ✅ Response queued for sending via WebSocket`
+                    );
+                    resolve();
+                  }
+                );
+              });
             } catch (sendError) {
               console.error(
                 "[PromptController] ❌ Exception sending response:",
@@ -1068,7 +1160,7 @@ REMEMBER:
               return;
             }
 
-            // Gửi error response qua WSManager
+            // 🔥 FIX: Gửi error response qua wsOutgoingMessage
             const errorData = {
               type: "promptResponse",
               requestId: requestId,
@@ -1079,17 +1171,57 @@ REMEMBER:
             };
 
             try {
-              const sendMessagePromise = browserAPI.runtime.sendMessage({
-                action: "ws.sendResponse",
-                requestId: requestId,
-                data: errorData,
-              });
+              // Tìm connectionId từ wsMessages
+              const messagesResult = await new Promise<any>(
+                (resolve, reject) => {
+                  browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+                    if (browserAPI.runtime.lastError) {
+                      reject(browserAPI.runtime.lastError);
+                      return;
+                    }
+                    resolve(data || {});
+                  });
+                }
+              );
 
-              if (
-                sendMessagePromise &&
-                typeof sendMessagePromise.catch === "function"
-              ) {
-                sendMessagePromise.catch(() => {});
+              const wsMessages = messagesResult?.wsMessages || {};
+              let targetConnectionId: string | null = null;
+
+              for (const [connId, msgArray] of Object.entries(wsMessages)) {
+                const msgs = msgArray as Array<{
+                  timestamp: number;
+                  data: any;
+                }>;
+                const matchingMsg = msgs.find(
+                  (msg) =>
+                    msg.data?.requestId === requestId &&
+                    msg.data?.type === "sendPrompt"
+                );
+                if (matchingMsg) {
+                  targetConnectionId = connId;
+                  break;
+                }
+              }
+
+              if (targetConnectionId) {
+                await new Promise<void>((resolve, reject) => {
+                  browserAPI.storage.local.set(
+                    {
+                      wsOutgoingMessage: {
+                        connectionId: targetConnectionId,
+                        data: errorData,
+                        timestamp: Date.now(),
+                      },
+                    },
+                    () => {
+                      if (browserAPI.runtime.lastError) {
+                        reject(browserAPI.runtime.lastError);
+                        return;
+                      }
+                      resolve();
+                    }
+                  );
+                });
               }
             } catch (sendError) {
               console.error(
@@ -1127,7 +1259,7 @@ REMEMBER:
             return;
           }
 
-          // Gửi timeout error qua WSManager
+          // 🔥 FIX: Gửi timeout error qua wsOutgoingMessage
           const timeoutData = {
             type: "promptResponse",
             requestId: requestId,
@@ -1139,17 +1271,51 @@ REMEMBER:
           };
 
           try {
-            const sendMessagePromise = browserAPI.runtime.sendMessage({
-              action: "ws.sendResponse",
-              requestId: requestId,
-              data: timeoutData,
+            const messagesResult = await new Promise<any>((resolve, reject) => {
+              browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+                if (browserAPI.runtime.lastError) {
+                  reject(browserAPI.runtime.lastError);
+                  return;
+                }
+                resolve(data || {});
+              });
             });
 
-            if (
-              sendMessagePromise &&
-              typeof sendMessagePromise.catch === "function"
-            ) {
-              sendMessagePromise.catch(() => {});
+            const wsMessages = messagesResult?.wsMessages || {};
+            let targetConnectionId: string | null = null;
+
+            for (const [connId, msgArray] of Object.entries(wsMessages)) {
+              const msgs = msgArray as Array<{ timestamp: number; data: any }>;
+              const matchingMsg = msgs.find(
+                (msg) =>
+                  msg.data?.requestId === requestId &&
+                  msg.data?.type === "sendPrompt"
+              );
+              if (matchingMsg) {
+                targetConnectionId = connId;
+                break;
+              }
+            }
+
+            if (targetConnectionId) {
+              await new Promise<void>((resolve, reject) => {
+                browserAPI.storage.local.set(
+                  {
+                    wsOutgoingMessage: {
+                      connectionId: targetConnectionId,
+                      data: timeoutData,
+                      timestamp: Date.now(),
+                    },
+                  },
+                  () => {
+                    if (browserAPI.runtime.lastError) {
+                      reject(browserAPI.runtime.lastError);
+                      return;
+                    }
+                    resolve();
+                  }
+                );
+              });
             }
           } catch (sendError) {
             console.error(
@@ -1182,7 +1348,7 @@ REMEMBER:
           return;
         }
 
-        // Gửi exception error qua WSManager
+        // 🔥 FIX: Gửi exception error qua wsOutgoingMessage
         const errorMessage =
           error instanceof Error ? error.message : "Unknown polling error";
 
@@ -1196,17 +1362,51 @@ REMEMBER:
         };
 
         try {
-          const sendMessagePromise = browserAPI.runtime.sendMessage({
-            action: "ws.sendResponse",
-            requestId: requestId,
-            data: exceptionData,
+          const messagesResult = await new Promise<any>((resolve, reject) => {
+            browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+              if (browserAPI.runtime.lastError) {
+                reject(browserAPI.runtime.lastError);
+                return;
+              }
+              resolve(data || {});
+            });
           });
 
-          if (
-            sendMessagePromise &&
-            typeof sendMessagePromise.catch === "function"
-          ) {
-            sendMessagePromise.catch(() => {});
+          const wsMessages = messagesResult?.wsMessages || {};
+          let targetConnectionId: string | null = null;
+
+          for (const [connId, msgArray] of Object.entries(wsMessages)) {
+            const msgs = msgArray as Array<{ timestamp: number; data: any }>;
+            const matchingMsg = msgs.find(
+              (msg) =>
+                msg.data?.requestId === requestId &&
+                msg.data?.type === "sendPrompt"
+            );
+            if (matchingMsg) {
+              targetConnectionId = connId;
+              break;
+            }
+          }
+
+          if (targetConnectionId) {
+            await new Promise<void>((resolve, reject) => {
+              browserAPI.storage.local.set(
+                {
+                  wsOutgoingMessage: {
+                    connectionId: targetConnectionId,
+                    data: exceptionData,
+                    timestamp: Date.now(),
+                  },
+                },
+                () => {
+                  if (browserAPI.runtime.lastError) {
+                    reject(browserAPI.runtime.lastError);
+                    return;
+                  }
+                  resolve();
+                }
+              );
+            });
           }
         } catch (sendError) {
           console.error(
@@ -1587,9 +1787,9 @@ REMEMBER:
       };
 
       // 🆕 LOG 1: Raw HTML content nhận từ DeepSeek (full content)
-      // console.log(
-      //   `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
-      // );
+      console.log(
+        `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
+      );
 
       // Step 2: Decode HTML entities
       const decodedResult = this.decodeHtmlEntities(content);
@@ -1637,9 +1837,9 @@ REMEMBER:
       cleanedResult = this.cleanContentCodeFences(cleanedResult);
 
       // 🆕 LOG 2: Response sau xử lý (full cleaned content)
-      // console.log(
-      //   `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
-      // );
+      console.log(
+        `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
+      );
 
       // Step 3: Try to parse as JSON ONLY if ENTIRE response is JSON (không chứa XML tags)
       try {

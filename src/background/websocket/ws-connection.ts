@@ -36,6 +36,9 @@ export class WSConnection {
     };
 
     this.notifyStateChange();
+
+    // 🆕 CRITICAL: Setup storage listener để forward wsOutgoingMessage qua WebSocket
+    this.setupOutgoingMessageListener();
   }
 
   public disconnect(): void {
@@ -129,6 +132,12 @@ export class WSConnection {
         };
 
         this.ws.onmessage = (event) => {
+          console.log(`[WSConnection] 📩 Message received from backend:`, {
+            dataType: typeof event.data,
+            dataLength: event.data?.length || 0,
+            preview: event.data?.substring(0, 200),
+          });
+
           this.handleMessage(event.data);
         };
       } catch (error) {
@@ -159,6 +168,13 @@ export class WSConnection {
   private async handleMessage(data: string): Promise<void> {
     try {
       const message = JSON.parse(data);
+
+      // 🆕 LOG: Message đã parse
+      console.log(`[WSConnection] 🔍 Parsed message:`, {
+        type: message.type,
+        hasTimestamp: !!message.timestamp,
+        keys: Object.keys(message),
+      });
 
       if (!message.timestamp) {
         message.timestamp = Date.now();
@@ -339,8 +355,15 @@ export class WSConnection {
 
         chrome.storage.local.set(storagePayload, () => {
           if (chrome.runtime.lastError) {
+            console.error(
+              "[WSConnection] ❌ Failed to set getAvailableTabs:",
+              chrome.runtime.lastError
+            );
             return;
           }
+          console.log(
+            `[WSConnection] ✅ Forwarded getAvailableTabs request: ${requestId}`
+          );
         });
 
         return;
@@ -507,5 +530,55 @@ export class WSConnection {
 
   public getState(): WSConnectionState {
     return { ...this.state };
+  }
+
+  /**
+   * 🆕 Listen for wsOutgoingMessage from ServiceWorker và forward qua WebSocket
+   */
+  private setupOutgoingMessageListener(): void {
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local") return;
+
+      if (changes.wsOutgoingMessage) {
+        const outgoingMessage = changes.wsOutgoingMessage.newValue;
+
+        if (!outgoingMessage) return;
+
+        // Check nếu message thuộc connection này
+        if (outgoingMessage.connectionId !== this.state.id) {
+          return;
+        }
+
+        console.log(
+          `[WSConnection] 📤 Forwarding outgoing message to backend:`,
+          {
+            type: outgoingMessage.data?.type,
+            requestId: outgoingMessage.data?.requestId,
+            hasData: !!outgoingMessage.data,
+          }
+        );
+
+        // Forward qua WebSocket
+        if (this.ws && this.state.status === "connected") {
+          try {
+            this.ws.send(JSON.stringify(outgoingMessage.data));
+            console.log(
+              `[WSConnection] ✅ Message sent to backend successfully`
+            );
+          } catch (error) {
+            console.error(`[WSConnection] ❌ Failed to send message:`, error);
+          }
+        } else {
+          console.warn(
+            `[WSConnection] ⚠️ WebSocket not ready, cannot send message`
+          );
+        }
+
+        // Cleanup message sau khi gửi
+        setTimeout(() => {
+          chrome.storage.local.remove(["wsOutgoingMessage"]);
+        }, 100);
+      }
+    });
   }
 }
