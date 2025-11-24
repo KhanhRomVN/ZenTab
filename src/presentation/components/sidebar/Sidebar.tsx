@@ -59,12 +59,6 @@ const Sidebar: React.FC = () => {
           if (response && response.success && response.connectionId) {
             connectionInfo = response;
             break;
-          } else {
-            console.warn(
-              `[Sidebar] ⚠️ WSManager not ready yet (attempt ${
-                retryCount + 1
-              }/${maxRetries})`
-            );
           }
         } catch (error) {
           console.error("[Sidebar] ❌ Query exception:", error);
@@ -94,8 +88,6 @@ const Sidebar: React.FC = () => {
             provider.includes("railway.app"));
 
         if (isProductionUrl) {
-          console.warn(`[Sidebar] ⚠️ Production URL detected: ${provider}`);
-          console.warn(`[Sidebar] 🔄 Auto-reset to localhost:3030`);
           await chrome.storage.local.set({ apiProvider: "localhost:3030" });
           setApiProvider("localhost:3030");
         } else {
@@ -285,15 +277,6 @@ const Sidebar: React.FC = () => {
           if (attemptResponse && attemptResponse.success) {
             response = attemptResponse;
             break;
-          } else if (attemptResponse) {
-            console.warn(
-              `[Sidebar] ⚠️  Attempt ${attempts} returned non-success:`,
-              attemptResponse
-            );
-          } else {
-            console.warn(
-              `[Sidebar] ⚠️  Attempt ${attempts} returned null/undefined`
-            );
           }
         } catch (error) {
           console.error(`[Sidebar] ❌ Attempt ${attempts} threw error:`, error);
@@ -378,7 +361,6 @@ const Sidebar: React.FC = () => {
         const provider = storageResult?.apiProvider || "localhost:3030";
         setApiProvider(provider);
       } else {
-        console.warn("[Sidebar] ⚠️ No connection info available");
         setWsConnection(null);
       }
     } catch (error) {
@@ -435,12 +417,10 @@ const Sidebar: React.FC = () => {
 
   const handleToggleWebSocket = async () => {
     if (!wsConnection?.id) {
-      console.warn("[Sidebar] ⚠️ No connection ID available");
       return;
     }
 
     if (isTogglingWs) {
-      console.warn("[Sidebar] ⚠️ Toggle already in progress");
       return;
     }
 

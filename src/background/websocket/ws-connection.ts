@@ -107,9 +107,6 @@ export class WSConnection {
         };
 
         this.ws.onclose = () => {
-          console.warn(
-            `[WSConnection] 🔌 WebSocket closed for ${this.state.url}`
-          );
           this.state.status = "disconnected";
           this.ws = undefined;
           this.notifyStateChange();
@@ -182,10 +179,6 @@ export class WSConnection {
               timestamp: Date.now(),
             };
             this.ws.send(JSON.stringify(pongMessage));
-          } else {
-            console.warn(
-              `[WSConnection] ⚠️ Cannot send pong - WebSocket not ready`
-            );
           }
         } catch (pongError) {
           console.error(`[WSConnection] ❌ Failed to send pong:`, pongError);
@@ -225,9 +218,6 @@ export class WSConnection {
         const folderPath = message.folderPath;
 
         if (!folderPath) {
-          console.warn(
-            "[WSConnection] ⚠️ cleanupFolderLink missing folderPath"
-          );
           return;
         }
 
@@ -283,7 +273,6 @@ export class WSConnection {
         const folderPath = message.folderPath;
 
         if (!folderPath) {
-          console.warn("[WSConnection] ⚠️ getTabsByFolder missing folderPath");
           return;
         }
 
@@ -566,10 +555,6 @@ export class WSConnection {
           } catch (error) {
             console.error(`[WSConnection] ❌ Failed to send message:`, error);
           }
-        } else {
-          console.warn(
-            `[WSConnection] ⚠️ WebSocket not ready, cannot send message`
-          );
         }
 
         // Cleanup message sau khi gửi
@@ -592,13 +577,6 @@ export class WSConnection {
       const timeSinceLastPing = Date.now() - this.lastPingTime;
 
       if (timeSinceLastPing > this.PING_TIMEOUT) {
-        console.warn(
-          `[WSConnection] ⚠️ Connection timeout detected (${Math.floor(
-            timeSinceLastPing / 1000
-          )}s since last ping)`
-        );
-        console.warn(`[WSConnection] 🔄 Attempting to reconnect...`);
-
         // Force reconnect
         if (this.ws) {
           this.ws.close();

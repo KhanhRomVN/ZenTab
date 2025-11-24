@@ -157,7 +157,6 @@ export class TabStateManager {
       const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
         chrome.tabs.get(tabId, (result) => {
           if (chrome.runtime.lastError) {
-            console.warn(`[TabStateManager] ⚠️ Tab ${tabId} no longer exists`);
             resolve(null);
             return;
           }
@@ -182,9 +181,6 @@ export class TabStateManager {
           this.checkButtonState(tabId),
           new Promise<{ isBusy: false }>((resolve) =>
             setTimeout(() => {
-              console.warn(
-                `[TabStateManager] ⏱️ Button check timeout for tab ${tabId}, assuming free`
-              );
               resolve({ isBusy: false });
             }, 3000)
           ),
@@ -366,9 +362,6 @@ export class TabStateManager {
     }
 
     if (tabs.length === 0) {
-      console.warn(
-        "[TabStateManager] ⚠️  No DeepSeek tabs found to initialize"
-      );
       return;
     }
 
@@ -377,9 +370,6 @@ export class TabStateManager {
     for (let i = 0; i < tabs.length; i++) {
       const tab = tabs[i];
       if (!tab.id) {
-        console.warn(
-          `[TabStateManager] ⚠️  Tab at index ${i} has no ID, skipping...`
-        );
         continue;
       }
 
@@ -652,9 +642,6 @@ export class TabStateManager {
       }
     }
     if (tabs.length === 0) {
-      console.warn(
-        "[TabStateManager] ⚠️ No DeepSeek tabs found! Please open https://chat.deepseek.com first"
-      );
       return [];
     }
 
@@ -939,17 +926,10 @@ export class TabStateManager {
       const currentState = states[tabId];
 
       if (!currentState) {
-        console.warn(
-          `[TabStateManager] ⚠️ Tab ${tabId} state not found, cannot wake up`
-        );
         return false;
       }
 
-      // Chỉ wake up nếu tab đang sleep
       if (currentState.status !== "sleep") {
-        console.warn(
-          `[TabStateManager] ⚠️ Tab ${tabId} is not sleeping (status: ${currentState.status})`
-        );
         return false;
       }
 
@@ -1304,10 +1284,6 @@ export class TabStateManager {
           busyTabsFound++;
           const buttonState = await this.checkButtonState(tabId);
           if (!buttonState.isBusy) {
-            console.warn(
-              `[TabStateManager] 🔧 Auto-recovering stuck tab ${tabId} (button shows AI finished)`
-            );
-
             const freeSuccess = await this.markTabFreeInternal(tabId);
 
             if (freeSuccess) {
@@ -1332,7 +1308,6 @@ export class TabStateManager {
   }
 
   public async forceResetTab(tabId: number): Promise<boolean> {
-    console.warn(`[TabStateManager] 🔧 Force resetting tab ${tabId}`);
     this.invalidateCache(tabId);
     return await this.markTabFree(tabId);
   }
@@ -1387,17 +1362,7 @@ export class TabStateManager {
       if (promise && typeof promise.catch === "function") {
         promise
           .then(() => {})
-          .catch((error) => {
-            console.warn(
-              "[TabStateManager] ⚠️ Failed to send tabsUpdated message (no receivers?):",
-              error
-            );
-            console.warn(
-              `[TabStateManager] 🔍 Error type: ${typeof error}, message: ${
-                error?.message || String(error)
-              }`
-            );
-
+          .catch(() => {
             // Retry after short delay (UI might still be initializing)
             setTimeout(() => {
               try {
@@ -1408,18 +1373,7 @@ export class TabStateManager {
                 });
 
                 if (retryPromise && typeof retryPromise.catch === "function") {
-                  retryPromise
-                    .then(() => {})
-                    .catch((retryError) => {
-                      console.warn(
-                        "[TabStateManager] ⚠️ Retry also failed, UI might not be ready"
-                      );
-                      console.warn(
-                        `[TabStateManager] 🔍 Retry error: ${
-                          retryError?.message || String(retryError)
-                        }`
-                      );
-                    });
+                  retryPromise.then(() => {}).catch(() => {});
                 }
               } catch (retryError) {
                 console.error(
@@ -1429,11 +1383,6 @@ export class TabStateManager {
               }
             }, 500);
           });
-      } else {
-        console.warn(
-          `[TabStateManager] ⚠️ sendMessage returned non-Promise value:`,
-          promise
-        );
       }
     } catch (error) {
       console.error("[TabStateManager] ❌ Exception in notifyUIUpdate:", error);

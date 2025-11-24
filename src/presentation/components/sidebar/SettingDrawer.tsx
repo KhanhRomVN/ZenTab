@@ -42,15 +42,6 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
         providerValue.includes("herokuapp.com") ||
         providerValue.includes("railway.app"));
 
-    if (isProductionUrl) {
-      console.warn(
-        `[SettingDrawer] ⚠️ Production URL detected: ${providerValue}`
-      );
-      console.warn(
-        `[SettingDrawer] 💡 Tip: Use localhost:3030 for local development`
-      );
-    }
-
     setApiProvider(providerValue);
     onApiProviderChange(providerValue);
   };

@@ -40,7 +40,6 @@ export class WSManagerNew {
             state: state,
           });
         } else {
-          console.warn("[WSManager] ⚠️ No connections available");
           sendResponse({
             success: false,
             error: "No WebSocket connections available",
@@ -96,8 +95,6 @@ export class WSManagerNew {
       });
 
       if (isProductionUrl) {
-        console.warn(`[WSManager] ⚠️ Production URL detected: ${oldProvider}`);
-        console.warn(`[WSManager] 🔄 Auto-reset to localhost:3030`);
       }
     }
 

@@ -301,10 +301,6 @@ declare const browser: typeof chrome & any;
               console.log(
                 `[ServiceWorker] ✅ Successfully unlinked tabs from folder: ${folderPath}`
               );
-            } else {
-              console.warn(
-                `[ServiceWorker] ⚠️ No tabs were unlinked from folder: ${folderPath}`
-              );
             }
 
             chrome.storage.local.remove(["wsIncomingRequest"]);

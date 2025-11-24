@@ -348,9 +348,6 @@ REMEMBER:
       const tabState = await this.tabStateManager.getTabState(tabId);
 
       if (!tabState) {
-        console.warn(
-          `[PromptController] ⚠️ Tab ${tabId} state not found (may have been recovered by cache fallback)`
-        );
         return {
           isValid: false,
           error: `Tab ${tabId} state not found in TabStateManager after fallback attempts`,
@@ -554,11 +551,6 @@ REMEMBER:
 
           if (result && result.success) {
             break;
-          } else {
-            console.warn(
-              `[PromptController] ⚠️ Textarea fill returned non-success result:`,
-              result
-            );
           }
         } catch (injectError) {
           console.error(
@@ -835,9 +827,6 @@ REMEMBER:
         const isGenerating = await StateController.isGenerating(tabId);
         if (!isGenerating && pollCount >= 3) {
           if (responseSent) {
-            console.warn(
-              `[PromptController] 🚫 DUPLICATE RESPONSE PREVENTED: ${capturedRequestId}`
-            );
             return;
           }
 
@@ -921,12 +910,6 @@ REMEMBER:
                 ) {
                   responseToSend = JSON.stringify(parsedObject);
                 } else {
-                  // JSON nhưng thiếu structure → rebuild
-                  console.warn(
-                    `[PromptController] ⚠️ JSON missing required fields (has: ${Object.keys(
-                      parsedObject
-                    ).join(", ")}), rebuilding...`
-                  );
                   const builtResponse = this.buildOpenAIResponse(rawResponse);
                   responseToSend = JSON.stringify(builtResponse);
                 }
@@ -952,10 +935,6 @@ REMEMBER:
                 responseToSend = JSON.stringify(builtResponse);
               }
             } else {
-              // Unknown type → convert to string và build
-              console.warn(
-                `[PromptController] ⚠️ Unexpected response type: ${typeof rawResponse}`
-              );
               const builtResponse = this.buildOpenAIResponse(
                 String(rawResponse)
               );
