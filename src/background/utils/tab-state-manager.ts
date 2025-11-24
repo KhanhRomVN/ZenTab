@@ -698,10 +698,25 @@ export class TabStateManager {
     return true;
   }
 
+  /**
+   * 🔒 PUBLIC method with mutex lock
+   */
   public async markTabBusy(tabId: number, requestId: string): Promise<boolean> {
-    // 🔒 CRITICAL: Acquire mutex lock
     await this.storageMutex.acquire();
+    try {
+      return await this.markTabBusyInternal(tabId, requestId);
+    } finally {
+      this.storageMutex.release();
+    }
+  }
 
+  /**
+   * 🔓 INTERNAL method WITHOUT mutex
+   */
+  private async markTabBusyInternal(
+    tabId: number,
+    requestId: string
+  ): Promise<boolean> {
     try {
       // 🔥 CRITICAL: Wrap storage.get() để đảm bảo async completion
       const result = await new Promise<any>((resolve, reject) => {
@@ -746,18 +761,28 @@ export class TabStateManager {
     } catch (error) {
       console.error("[TabStateManager] ❌ Error marking tab busy:", error);
       return false;
+    }
+  }
+
+  /**
+   * 🔒 PUBLIC method with mutex lock
+   */
+  public async markTabFree(tabId: number): Promise<boolean> {
+    await this.storageMutex.acquire();
+    try {
+      return await this.markTabFreeInternal(tabId);
     } finally {
-      // 🔓 CRITICAL: Release mutex lock
       this.storageMutex.release();
     }
   }
 
-  public async markTabFree(tabId: number): Promise<boolean> {
-    console.log(`[TabStateManager] 📍 START markTabFree for tab ${tabId}`);
-
-    // 🔒 CRITICAL: Acquire mutex lock BEFORE accessing storage
-    await this.storageMutex.acquire();
-    console.log(`[TabStateManager] 🔒 Mutex ACQUIRED for tab ${tabId}`);
+  /**
+   * 🔓 INTERNAL method WITHOUT mutex (để gọi từ bên trong các methods đã có lock)
+   */
+  private async markTabFreeInternal(tabId: number): Promise<boolean> {
+    console.log(
+      `[TabStateManager] 📍 START markTabFreeInternal for tab ${tabId}`
+    );
 
     try {
       // 🆕 CRITICAL: ĐỌC state MỚI NHẤT từ storage (không dùng cache)
@@ -859,14 +884,10 @@ export class TabStateManager {
       }
     } catch (error) {
       console.error(
-        `[TabStateManager] ❌ EXCEPTION in markTabFree for tab ${tabId}:`,
+        `[TabStateManager] ❌ EXCEPTION in markTabFreeInternal for tab ${tabId}:`,
         error
       );
       return false;
-    } finally {
-      // 🔓 CRITICAL: Release mutex lock in finally block
-      this.storageMutex.release();
-      console.log(`[TabStateManager] 🔓 Mutex RELEASED for tab ${tabId}`);
     }
   }
 
@@ -1347,7 +1368,8 @@ export class TabStateManager {
               `[TabStateManager] 🔧 Auto-recovering stuck tab ${tabId} (button shows AI finished)`
             );
 
-            const freeSuccess = await this.markTabFree(tabId);
+            // ✅ CRITICAL: Gọi internal method (KHÔNG acquire mutex vì đã có rồi)
+            const freeSuccess = await this.markTabFreeInternal(tabId);
 
             if (freeSuccess) {
               console.log(

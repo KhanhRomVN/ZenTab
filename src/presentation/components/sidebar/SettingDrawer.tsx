@@ -6,54 +6,31 @@ import CustomCombobox from "../common/CustomCombobox";
 interface SettingDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  currentPort: number;
   currentApiProvider: string;
-  onPortChange: (port: number) => void;
   onApiProviderChange: (provider: string) => void;
 }
 
 const SettingDrawer: React.FC<SettingDrawerProps> = ({
   isOpen,
   onClose,
-  currentPort,
   currentApiProvider,
-  onPortChange,
   onApiProviderChange,
 }) => {
   const [apiProvider, setApiProvider] = useState<string>(currentApiProvider);
-  const [wsPort, setWsPort] = useState<string>(String(currentPort));
   const [language, setLanguage] = useState<string>("en");
-  const [portError, setPortError] = useState<string>("");
-
-  useEffect(() => {
-    setWsPort(String(currentPort));
-  }, [currentPort]);
 
   useEffect(() => {
     setApiProvider(currentApiProvider);
   }, [currentApiProvider]);
 
-  const apiProviderOptions = [{ value: "localhost", label: "localhost" }];
-
-  const wsPortOptions = [{ value: "1500", label: "1500" }];
+  const apiProviderOptions = [
+    { value: "localhost:3030", label: "localhost:3030" },
+  ];
 
   const languageOptions = [
     { value: "en", label: "English" },
     { value: "vi", label: "Tiếng Việt" },
   ];
-
-  const handleWsPortChange = (value: string | string[]) => {
-    const portValue = Array.isArray(value) ? value[0] : value;
-    if (/^\d{4}$/.test(portValue)) {
-      const portNumber = parseInt(portValue, 10);
-      setWsPort(portValue);
-      setPortError("");
-      onPortChange(portNumber);
-    } else {
-      setWsPort(portValue);
-      setPortError("Port must be exactly 4 digits");
-    }
-  };
 
   const handleApiProviderChange = (value: string | string[]) => {
     const providerValue = Array.isArray(value) ? value[0] : value;
@@ -88,29 +65,21 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          <CustomCombobox
-            label="API Provider"
-            value={apiProvider}
-            options={apiProviderOptions}
-            onChange={handleApiProviderChange}
-            placeholder="Enter or select API provider..."
-            creatable={true}
-            size="sm"
-          />
-
           <div>
             <CustomCombobox
-              label="WebSocket Port"
-              value={wsPort}
-              options={wsPortOptions}
-              onChange={handleWsPortChange}
-              placeholder="Enter 4-digit port number..."
+              label="API Provider"
+              value={apiProvider}
+              options={apiProviderOptions}
+              onChange={handleApiProviderChange}
+              placeholder="Enter API provider (e.g., localhost:xxxx or https://example.com)..."
               creatable={true}
               size="sm"
             />
-            {portError && (
-              <p className="text-xs text-red-500 mt-1 ml-1">{portError}</p>
-            )}
+            <p className="text-xs text-text-secondary mt-1 ml-1">
+              💡 Tip: Use <span className="font-mono">https://</span> prefix for
+              secure connections (wss://). Backend port is auto-detected (3030
+              for localhost, 443 for HTTPS).
+            </p>
           </div>
 
           <CustomCombobox

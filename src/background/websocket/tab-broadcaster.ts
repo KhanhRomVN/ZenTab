@@ -45,13 +45,14 @@ export class TabBroadcaster {
 
         let hasNewConnection = false;
         for (const [connId, newState] of Object.entries(newStates)) {
-          const typedNewState = newState as { status: string; port: number };
-          const oldState = oldStates[connId] as
-            | { status: string; port: number }
-            | undefined;
+          const typedNewState = newState as { status: string };
+          const oldState = oldStates[connId] as { status: string } | undefined;
+
+          const isDefaultConnection =
+            connId.startsWith("ws-") && connId.includes("-");
 
           if (
-            typedNewState.port === 1500 &&
+            isDefaultConnection &&
             typedNewState.status === "connected" &&
             oldState?.status !== "connected"
           ) {

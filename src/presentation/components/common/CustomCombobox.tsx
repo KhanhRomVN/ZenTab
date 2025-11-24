@@ -19,6 +19,7 @@ interface CustomComboboxProps {
   creatable?: boolean;
   size?: "sm" | "md" | "lg";
   required?: boolean;
+  disabled?: boolean;
 }
 
 const OPTION_INPUT_THRESHOLD = 10;
@@ -35,6 +36,7 @@ const CustomCombobox: FC<CustomComboboxProps> = ({
   creatable = false,
   size = "md",
   required = false,
+  disabled = false,
 }) => {
   // Auto determine if should be searchable
   const isInput = useMemo(() => {
@@ -56,6 +58,7 @@ const CustomCombobox: FC<CustomComboboxProps> = ({
       creatable={creatable}
       size={size}
       required={required}
+      disabled={disabled}
     />
   );
 };

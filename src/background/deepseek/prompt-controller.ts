@@ -443,45 +443,32 @@ REMEMBER:
 
         const browserAPI = getBrowserAPI();
         try {
-          const FIXED_CONNECTION_ID = "ws-default-1500";
+          // Gửi validation error qua WSManager
+          const validationErrorData = {
+            type: "promptResponse",
+            requestId: requestId,
+            tabId: tabId,
+            success: false,
+            error: validation.error || "Tab validation failed",
+            errorType: "VALIDATION_FAILED",
+            timestamp: Date.now(),
+          };
 
-          const statesResult = await new Promise<any>((resolve, reject) => {
-            browserAPI.storage.local.get(["wsStates"], (data: any) => {
-              if (browserAPI.runtime.lastError) {
-                reject(browserAPI.runtime.lastError);
-                return;
-              }
-              resolve(data || {});
-            });
+          const sendMessagePromise = browserAPI.runtime.sendMessage({
+            action: "ws.sendResponse",
+            requestId: requestId,
+            data: validationErrorData,
           });
 
-          const wsStates = statesResult?.wsStates || {};
-          const connectionState = wsStates[FIXED_CONNECTION_ID];
-
-          if (connectionState && connectionState.status === "connected") {
-            const errorPayload = {
-              wsOutgoingMessage: {
-                connectionId: FIXED_CONNECTION_ID,
-                data: {
-                  type: "promptResponse",
-                  requestId: requestId,
-                  tabId: tabId,
-                  success: false,
-                  error: validation.error || "Tab validation failed",
-                  errorType: "VALIDATION_FAILED",
-                  timestamp: Date.now(),
-                },
-                timestamp: Date.now(),
-              },
-            };
-
-            await browserAPI.storage.local.set(errorPayload);
-          } else {
-            console.error(
-              `[PromptController] ❌ WebSocket not connected (status: ${
-                connectionState?.status || "unknown"
-              })`
-            );
+          if (
+            sendMessagePromise &&
+            typeof sendMessagePromise.catch === "function"
+          ) {
+            sendMessagePromise.catch(() => {
+              console.error(
+                "[PromptController] ❌ Failed to send validation error"
+              );
+            });
           }
         } catch (notifyError) {
           console.error(
@@ -997,84 +984,48 @@ REMEMBER:
               return;
             }
 
-            let targetConnectionId: string | null = null;
-
-            try {
-              const messagesResult = await new Promise<any>(
-                (resolve, reject) => {
-                  browserAPI.storage.local.get(["wsMessages"], (data: any) => {
-                    if (browserAPI.runtime.lastError) {
-                      reject(browserAPI.runtime.lastError);
-                      return;
-                    }
-                    resolve(data || {});
-                  });
-                }
-              );
-
-              const wsMessages = messagesResult?.wsMessages || {};
-
-              for (const [connId, msgArray] of Object.entries(wsMessages)) {
-                const msgs = msgArray as Array<{
-                  timestamp: number;
-                  data: any;
-                }>;
-
-                const matchingMsg = msgs.find(
-                  (msg) => msg.data?.requestId === capturedRequestId
-                );
-
-                if (matchingMsg) {
-                  targetConnectionId = connId;
-                  break;
-                }
-              }
-            } catch (storageError) {
-              console.error(
-                "[PromptController] ❌ Failed to find target connection:",
-                storageError
-              );
-            }
-
-            if (!targetConnectionId) {
-              console.error(
-                "[PromptController] ❌ No target connection found for requestId:",
-                capturedRequestId
-              );
-              this.activePollingTasks.delete(tabId);
-              return;
-            }
-
-            const currentTimestamp = Date.now();
-
-            const messagePayload = {
-              wsOutgoingMessage: {
-                connectionId: targetConnectionId,
-                data: {
-                  type: "promptResponse",
-                  requestId: requestId,
-                  tabId: tabId,
-                  success: true,
-                  response: responseToSend,
-                  timestamp: currentTimestamp,
-                },
-                timestamp: currentTimestamp,
-              },
+            // Gửi response qua WSManager thay vì storage
+            const responseData = {
+              type: "promptResponse",
+              requestId: requestId,
+              tabId: tabId,
+              success: true,
+              response: responseToSend,
+              timestamp: Date.now(),
             };
 
-            // 🆕 LOG: Extract và log field "content" từ response JSON
+            // Broadcast response (WSManager sẽ tự tìm đúng connection)
+            try {
+              const sendMessagePromise = browserAPI.runtime.sendMessage({
+                action: "ws.sendResponse",
+                requestId: requestId,
+                data: responseData,
+              });
+
+              if (
+                sendMessagePromise &&
+                typeof sendMessagePromise.catch === "function"
+              ) {
+                sendMessagePromise.catch(() => {
+                  console.error(
+                    "[PromptController] ❌ Failed to send response via runtime.sendMessage"
+                  );
+                });
+              }
+            } catch (sendError) {
+              console.error(
+                "[PromptController] ❌ Exception sending response:",
+                sendError
+              );
+            }
+
+            // LOG: Extract và log field "content" từ response JSON
             try {
               const parsedResponse = JSON.parse(responseToSend);
               const contentField =
                 parsedResponse?.choices?.[0]?.delta?.content || "";
-              // console.log(
-              //   `[PromptController] 📄 Content field (first 2000 chars):\n${contentField.substring(
-              //     0,
-              //     2000
-              //   )}`
-              // );
 
-              // 🆕 Validation: Check nếu content rỗng hoặc quá ngắn
+              // Validation: Check nếu content rỗng hoặc quá ngắn
               if (contentField.length < 50) {
                 console.error(
                   `[PromptController] ⚠️ WARNING: Content field is suspiciously short (${contentField.length} chars)`
@@ -1099,7 +1050,6 @@ REMEMBER:
               );
             }
 
-            await browserAPI.storage.local.set(messagePayload);
             this.activePollingTasks.delete(tabId);
           } else {
             await this.tabStateManager.markTabFree(tabId);
@@ -1118,67 +1068,35 @@ REMEMBER:
               return;
             }
 
-            let targetConnectionId: string | null = null;
+            // Gửi error response qua WSManager
+            const errorData = {
+              type: "promptResponse",
+              requestId: requestId,
+              tabId: tabId,
+              success: false,
+              error: "Failed to fetch response from DeepSeek",
+              timestamp: Date.now(),
+            };
 
             try {
-              const messagesResult = await new Promise<any>(
-                (resolve, reject) => {
-                  browserAPI.storage.local.get(["wsMessages"], (data: any) => {
-                    if (browserAPI.runtime.lastError) {
-                      reject(browserAPI.runtime.lastError);
-                      return;
-                    }
-                    resolve(data || {});
-                  });
-                }
-              );
+              const sendMessagePromise = browserAPI.runtime.sendMessage({
+                action: "ws.sendResponse",
+                requestId: requestId,
+                data: errorData,
+              });
 
-              const wsMessages = messagesResult?.wsMessages || {};
-
-              for (const [connId, msgArray] of Object.entries(wsMessages)) {
-                const msgs = msgArray as Array<{
-                  timestamp: number;
-                  data: any;
-                }>;
-
-                const matchingMsg = msgs.find(
-                  (msg) => msg.data?.requestId === capturedRequestId
-                );
-
-                if (matchingMsg) {
-                  targetConnectionId = connId;
-                  break;
-                }
+              if (
+                sendMessagePromise &&
+                typeof sendMessagePromise.catch === "function"
+              ) {
+                sendMessagePromise.catch(() => {});
               }
-            } catch (storageError) {
+            } catch (sendError) {
               console.error(
-                "[PromptController] ❌ Failed to find target connection for error response:",
-                storageError
+                "[PromptController] ❌ Exception sending error response:",
+                sendError
               );
             }
-
-            if (!targetConnectionId) {
-              console.error(
-                "[PromptController] ❌ No target connection found for error response, requestId:",
-                capturedRequestId
-              );
-              this.activePollingTasks.delete(tabId);
-              return;
-            }
-
-            await browserAPI.storage.local.set({
-              wsOutgoingMessage: {
-                connectionId: targetConnectionId,
-                data: {
-                  type: "promptResponse",
-                  requestId: requestId,
-                  tabId: tabId,
-                  success: false,
-                  error: "Failed to fetch response from DeepSeek",
-                },
-                timestamp: Date.now(),
-              },
-            });
 
             this.activePollingTasks.delete(tabId);
           }
@@ -1209,65 +1127,36 @@ REMEMBER:
             return;
           }
 
-          let targetConnectionId: string | null = null;
+          // Gửi timeout error qua WSManager
+          const timeoutData = {
+            type: "promptResponse",
+            requestId: requestId,
+            tabId: tabId,
+            success: false,
+            error: "Response timeout - AI took too long to respond",
+            errorType: "TIMEOUT",
+            timestamp: Date.now(),
+          };
 
           try {
-            const messagesResult = await new Promise<any>((resolve, reject) => {
-              browserAPI.storage.local.get(["wsMessages"], (data: any) => {
-                if (browserAPI.runtime.lastError) {
-                  reject(browserAPI.runtime.lastError);
-                  return;
-                }
-                resolve(data || {});
-              });
+            const sendMessagePromise = browserAPI.runtime.sendMessage({
+              action: "ws.sendResponse",
+              requestId: requestId,
+              data: timeoutData,
             });
 
-            const wsMessages = messagesResult?.wsMessages || {};
-
-            for (const [connId, msgArray] of Object.entries(wsMessages)) {
-              const msgs = msgArray as Array<{
-                timestamp: number;
-                data: any;
-              }>;
-
-              const matchingMsg = msgs.find(
-                (msg) => msg.data?.requestId === capturedRequestId
-              );
-
-              if (matchingMsg) {
-                targetConnectionId = connId;
-                break;
-              }
+            if (
+              sendMessagePromise &&
+              typeof sendMessagePromise.catch === "function"
+            ) {
+              sendMessagePromise.catch(() => {});
             }
-          } catch (storageError) {
+          } catch (sendError) {
             console.error(
-              "[PromptController] ❌ Failed to find target connection for timeout response:",
-              storageError
+              "[PromptController] ❌ Exception sending timeout response:",
+              sendError
             );
           }
-
-          if (!targetConnectionId) {
-            console.error(
-              "[PromptController] ❌ No target connection found for timeout response, requestId:",
-              capturedRequestId
-            );
-            return;
-          }
-
-          await browserAPI.storage.local.set({
-            wsOutgoingMessage: {
-              connectionId: targetConnectionId,
-              data: {
-                type: "promptResponse",
-                requestId: requestId,
-                tabId: tabId,
-                success: false,
-                error: "Response timeout - AI took too long to respond",
-                errorType: "TIMEOUT",
-              },
-              timestamp: Date.now(),
-            },
-          });
         }
       } catch (error) {
         console.error(
@@ -1293,68 +1182,38 @@ REMEMBER:
           return;
         }
 
-        let targetConnectionId: string | null = null;
-
-        try {
-          const messagesResult = await new Promise<any>((resolve, reject) => {
-            browserAPI.storage.local.get(["wsMessages"], (data: any) => {
-              if (browserAPI.runtime.lastError) {
-                reject(browserAPI.runtime.lastError);
-                return;
-              }
-              resolve(data || {});
-            });
-          });
-
-          const wsMessages = messagesResult?.wsMessages || {};
-
-          for (const [connId, msgArray] of Object.entries(wsMessages)) {
-            const msgs = msgArray as Array<{
-              timestamp: number;
-              data: any;
-            }>;
-
-            const matchingMsg = msgs.find(
-              (msg) => msg.data?.requestId === capturedRequestId
-            );
-
-            if (matchingMsg) {
-              targetConnectionId = connId;
-              break;
-            }
-          }
-        } catch (storageError) {
-          console.error(
-            "[PromptController] ❌ Failed to find target connection for exception response:",
-            storageError
-          );
-        }
-
-        if (!targetConnectionId) {
-          console.error(
-            "[PromptController] ❌ No target connection found for exception response, requestId:",
-            capturedRequestId
-          );
-          return;
-        }
-
-        // 🔍 LOG: Exception error trước khi gửi
+        // Gửi exception error qua WSManager
         const errorMessage =
           error instanceof Error ? error.message : "Unknown polling error";
 
-        await browserAPI.storage.local.set({
-          wsOutgoingMessage: {
-            connectionId: targetConnectionId,
-            data: {
-              type: "promptResponse",
-              requestId: requestId,
-              tabId: tabId,
-              success: false,
-              error: errorMessage,
-            },
-            timestamp: Date.now(),
-          },
-        });
+        const exceptionData = {
+          type: "promptResponse",
+          requestId: requestId,
+          tabId: tabId,
+          success: false,
+          error: errorMessage,
+          timestamp: Date.now(),
+        };
+
+        try {
+          const sendMessagePromise = browserAPI.runtime.sendMessage({
+            action: "ws.sendResponse",
+            requestId: requestId,
+            data: exceptionData,
+          });
+
+          if (
+            sendMessagePromise &&
+            typeof sendMessagePromise.catch === "function"
+          ) {
+            sendMessagePromise.catch(() => {});
+          }
+        } catch (sendError) {
+          console.error(
+            "[PromptController] ❌ Exception sending exception response:",
+            sendError
+          );
+        }
       }
     };
     setTimeout(poll, this.config.initialDelay);

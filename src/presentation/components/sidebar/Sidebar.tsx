@@ -20,10 +20,9 @@ const Sidebar: React.FC = () => {
   const [wsConnection, setWsConnection] = useState<{
     id: string;
     status: "connecting" | "connected" | "disconnected" | "error";
-    port: number;
   } | null>(null);
   const [isTogglingWs, setIsTogglingWs] = useState(false);
-  const [apiProvider, setApiProvider] = useState<string>("localhost");
+  const [apiProvider, setApiProvider] = useState<string>("localhost:3030");
 
   useEffect(() => {
     const initializeSidebar = async () => {
@@ -33,9 +32,80 @@ const Sidebar: React.FC = () => {
         "wsIncomingRequest",
       ]);
 
+      // 🔧 FIX: Query WSManager trực tiếp thay vì đọc storage
+      let retryCount = 0;
+      const maxRetries = 10;
+      let connectionInfo: any = null;
+
+      while (retryCount < maxRetries && !connectionInfo) {
+        try {
+          console.log(
+            `[Sidebar] 🔍 Querying WSManager... (attempt ${
+              retryCount + 1
+            }/${maxRetries})`
+          );
+
+          const response = await new Promise<any>((resolve) => {
+            chrome.runtime.sendMessage(
+              { action: "getWSConnectionInfo" },
+              (response) => {
+                if (chrome.runtime.lastError) {
+                  console.error(
+                    "[Sidebar] ❌ Query error:",
+                    chrome.runtime.lastError
+                  );
+                  resolve(null);
+                  return;
+                }
+                resolve(response);
+              }
+            );
+          });
+
+          if (response && response.success && response.connectionId) {
+            connectionInfo = response;
+            console.log("[Sidebar] ✅ Got connection info:", connectionInfo);
+            break;
+          } else {
+            console.warn(
+              `[Sidebar] ⚠️ WSManager not ready yet (attempt ${
+                retryCount + 1
+              }/${maxRetries})`
+            );
+          }
+        } catch (error) {
+          console.error("[Sidebar] ❌ Query exception:", error);
+        }
+
+        if (!connectionInfo) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          retryCount++;
+        }
+      }
+
+      if (connectionInfo) {
+        console.log(`[Sidebar] ✅ WSManager ready after ${retryCount} retries`);
+
+        // 🔧 FIX: Set wsConnection ngay lập tức từ response
+        setWsConnection({
+          id: connectionInfo.connectionId,
+          status: connectionInfo.state?.status || "disconnected",
+        });
+
+        // 🔧 FIX: Load apiProvider từ storage
+        const storageResult = await chrome.storage.local.get(["apiProvider"]);
+        const provider = storageResult?.apiProvider || "localhost:3030";
+        setApiProvider(provider);
+        console.log("[Sidebar] ✅ Set apiProvider to:", provider);
+      } else {
+        console.error(
+          `[Sidebar] ❌ WSManager init timeout after ${maxRetries} retries`
+        );
+      }
+
+      // Load tabs
       await loadTabs();
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      await loadWebSocketStatus();
+
       const port = chrome.runtime.connect({ name: "zenTab-sidebar" });
 
       return () => {
@@ -85,7 +155,7 @@ const Sidebar: React.FC = () => {
     chrome.tabs.onRemoved.addListener(tabRemovedListener);
     chrome.tabs.onUpdated.addListener(tabUpdatedListener);
 
-    const storageListener = (
+    const storageListener = async (
       changes: { [key: string]: chrome.storage.StorageChange },
       areaName: string
     ) => {
@@ -98,24 +168,26 @@ const Sidebar: React.FC = () => {
       if (changes.wsStates) {
         const states = changes.wsStates.newValue || {};
 
-        const currentConnectionId = wsConnection?.id || "ws-default-1500";
+        const storageResult = await chrome.storage.local.get([
+          "wsDefaultConnectionId",
+        ]);
+        const defaultConnectionId = storageResult?.wsDefaultConnectionId;
+        const currentConnectionId = wsConnection?.id || defaultConnectionId;
         const state = states[currentConnectionId];
 
         if (state) {
           const typedState = state as {
             status: string;
-            port: number;
           };
           const newStatus = typedState.status as any;
 
           setWsConnection({
             id: currentConnectionId,
             status: newStatus,
-            port: typedState.port,
           });
 
           if (newStatus === "connected") {
-            loadTabs({ status: typedState.status, port: typedState.port });
+            loadTabs({ status: typedState.status });
           }
         }
       }
@@ -132,19 +204,21 @@ const Sidebar: React.FC = () => {
     };
   }, []);
 
-  const loadTabs = async (providedWsState?: {
-    status: string;
-    port: number;
-  }) => {
+  const loadTabs = async (providedWsState?: { status: string }) => {
     console.log(`[Sidebar] 📍 loadTabs() CALLED`);
     try {
       let wsState = providedWsState;
 
       if (!wsState) {
-        const storageResult = await chrome.storage.local.get(["wsStates"]);
+        const storageResult = await chrome.storage.local.get([
+          "wsStates",
+          "wsDefaultConnectionId",
+        ]);
         const states = storageResult?.wsStates || {};
-        const FIXED_CONNECTION_ID = "ws-default-1500";
-        wsState = states[FIXED_CONNECTION_ID];
+        const defaultConnectionId = storageResult?.wsDefaultConnectionId;
+        if (defaultConnectionId) {
+          wsState = states[defaultConnectionId];
+        }
       }
 
       let response: TabStateResponse | null = null;
@@ -249,83 +323,95 @@ const Sidebar: React.FC = () => {
   };
 
   const loadWebSocketStatus = async () => {
+    console.log("[Sidebar] 🔍 DEBUG: loadWebSocketStatus() START");
+
     try {
-      const result = await chrome.storage.local.get([
-        "wsStates",
-        "wsDefaultConnectionId",
-        "apiProvider",
-      ]);
-      const states = result?.wsStates || {};
-      const defaultConnectionId =
-        result?.wsDefaultConnectionId || "ws-default-1500";
-
-      const state = states[defaultConnectionId];
-
-      // Set API Provider
-      setApiProvider(result?.apiProvider || "localhost");
-
-      if (state) {
-        const typedState = state as {
-          status: string;
-          port: number;
-        };
-
-        setWsConnection({
-          id: defaultConnectionId,
-          status: typedState.status as any,
-          port: typedState.port,
-        });
-      } else {
-        const portFromId = parseInt(
-          defaultConnectionId.split("-").pop() || "1500",
-          10
+      // 🔧 FIX: Query WSManager trực tiếp thay vì đọc storage
+      const response = await new Promise<any>((resolve) => {
+        chrome.runtime.sendMessage(
+          { action: "getWSConnectionInfo" },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              console.error(
+                "[Sidebar] ❌ Query error:",
+                chrome.runtime.lastError
+              );
+              resolve(null);
+              return;
+            }
+            resolve(response);
+          }
         );
+      });
+
+      if (response && response.success && response.connectionId) {
+        console.log("[Sidebar] ✅ Got connection info:", response);
+
         setWsConnection({
-          id: defaultConnectionId,
-          status: "disconnected",
-          port: portFromId,
+          id: response.connectionId,
+          status: response.state?.status || "disconnected",
         });
+
+        // Load apiProvider từ storage
+        const storageResult = await chrome.storage.local.get(["apiProvider"]);
+        const provider = storageResult?.apiProvider || "localhost:3030";
+        setApiProvider(provider);
+      } else {
+        console.warn("[Sidebar] ⚠️ No connection info available");
+        setWsConnection(null);
       }
     } catch (error) {
       console.error("[Sidebar] ❌ Error loading WebSocket status:", error);
-      setWsConnection({
-        id: "ws-default-1500",
-        status: "disconnected",
-        port: 1500,
-      });
+      setWsConnection(null);
     }
+
+    console.log("[Sidebar] ✅ loadWebSocketStatus() COMPLETED");
   };
 
-  const handlePortChange = async (newPort: number) => {
-    const newConnectionId = `ws-default-${newPort}`;
+  const formatWebSocketUrl = (apiProvider: string): string => {
+    if (!apiProvider) return "No API Provider";
 
-    if (wsConnection?.status === "connected") {
-      try {
-        await WSHelper.disconnect(wsConnection.id);
-      } catch (error) {
-        console.error(
-          "[Sidebar] ❌ Error disconnecting before port change:",
-          error
-        );
+    try {
+      let url = apiProvider.trim();
+
+      if (!url.startsWith("http://") && !url.startsWith("https://")) {
+        url = `http://${url}`;
       }
+
+      const urlObj = new URL(url);
+      const isHttps = urlObj.protocol === "https:";
+      const protocol = isHttps ? "wss" : "ws";
+      const host = urlObj.hostname;
+
+      if (urlObj.port) {
+        return `${protocol}://${host}:${urlObj.port}/ws`;
+      } else if (isHttps) {
+        return `${protocol}://${host}/ws`;
+      } else {
+        return `${protocol}://${host}:3030/ws`;
+      }
+    } catch (error) {
+      return "Invalid API Provider";
     }
-
-    await chrome.storage.local.set({
-      wsDefaultConnectionId: newConnectionId,
-    });
-
-    setWsConnection({
-      id: newConnectionId,
-      status: "disconnected",
-      port: newPort,
-    });
   };
 
   const handleApiProviderChange = async (newProvider: string) => {
+    // Save new provider
     await chrome.storage.local.set({
       apiProvider: newProvider,
     });
     setApiProvider(newProvider);
+
+    // Reconnect WebSocket với protocol mới (ws/wss)
+    if (wsConnection?.status === "connected") {
+      await WSHelper.disconnect(wsConnection.id);
+
+      // Wait for disconnect to complete
+      await new Promise((resolve) => setTimeout(resolve, 500));
+
+      // Reconnect will automatically use new protocol from storage
+      await WSHelper.connect(wsConnection.id);
+    }
   };
 
   const handleToggleWebSocket = async () => {
@@ -369,7 +455,7 @@ const Sidebar: React.FC = () => {
               }`}
             />
             <span className="text-xs text-text-secondary">
-              {apiProvider}:{wsConnection?.port || 1500}
+              {wsConnection ? formatWebSocketUrl(apiProvider) : "Not connected"}
             </span>
           </div>
           <CustomButton
@@ -438,9 +524,7 @@ const Sidebar: React.FC = () => {
       <SettingDrawer
         isOpen={showSettingDrawer}
         onClose={() => setShowSettingDrawer(false)}
-        currentPort={wsConnection?.port || 1500}
         currentApiProvider={apiProvider}
-        onPortChange={handlePortChange}
         onApiProviderChange={handleApiProviderChange}
       />
     </div>

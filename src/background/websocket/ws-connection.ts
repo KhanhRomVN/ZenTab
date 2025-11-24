@@ -35,8 +35,6 @@ export class WSConnection {
       reconnectAttempts: 0,
     };
 
-    this.setupOutgoingListener();
-    this.setupBackendOutgoingListener();
     this.notifyStateChange();
   }
 
@@ -247,10 +245,6 @@ export class WSConnection {
       }
 
       if (message.type === "getTabsByFolder") {
-        if (this.state.port !== 1500) {
-          return;
-        }
-
         const requestId = message.requestId;
         const folderPath = message.folderPath;
 
@@ -308,10 +302,6 @@ export class WSConnection {
       }
 
       if (message.type === "getAvailableTabs") {
-        if (this.state.port !== 1500) {
-          return;
-        }
-
         const requestId = message.requestId;
         const dedupeKey = `tabs_req_${requestId}`;
 
@@ -352,10 +342,6 @@ export class WSConnection {
       }
 
       if (message.type === "promptResponse") {
-        if (this.state.port !== 1500) {
-          return;
-        }
-
         const requestId = message.requestId;
 
         if (this.forwardedRequests.has(requestId)) {
@@ -392,33 +378,20 @@ export class WSConnection {
           this.forwardedRequests.delete(message.requestId);
         }, 60000);
 
-        const currentTimestamp = Date.now();
-        const forwardPayload = {
-          wsOutgoingMessage: {
-            connectionId: this.state.id,
-            data: message,
-            timestamp: currentTimestamp,
+        // Gửi trực tiếp qua WebSocket thay vì lưu storage
+        this.send(message);
+
+        const storageKey = `forwarded_${message.requestId}`;
+        chrome.storage.local.set(
+          {
+            [storageKey]: Date.now(),
           },
-        };
-
-        chrome.storage.local.set(forwardPayload, () => {
-          if (chrome.runtime.lastError) {
-            this.forwardedRequests.delete(message.requestId);
-            return;
+          () => {
+            setTimeout(() => {
+              chrome.storage.local.remove([storageKey]);
+            }, 60000);
           }
-
-          const storageKey = `forwarded_${message.requestId}`;
-          chrome.storage.local.set(
-            {
-              [storageKey]: currentTimestamp,
-            },
-            () => {
-              setTimeout(() => {
-                chrome.storage.local.remove([storageKey]);
-              }, 60000);
-            }
-          );
-        });
+        );
 
         return;
       }
@@ -476,58 +449,10 @@ export class WSConnection {
     } catch (error) {}
   }
 
-  private setupOutgoingListener(): void {
-    chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName !== "local") return;
-
-      if (changes.wsOutgoingMessage) {
-        const msg = changes.wsOutgoingMessage.newValue;
-
-        if (msg && msg.connectionId === this.state.id) {
-          this.send(msg.data);
-        }
-      }
-    });
-  }
-
-  private setupBackendOutgoingListener(): void {
-    const processedMessages = new Set<string>();
-
-    chrome.storage.onChanged.addListener((changes, areaName) => {
-      if (areaName !== "local") return;
-
-      if (changes.wsOutgoingMessage) {
-        const outgoingMsg = changes.wsOutgoingMessage.newValue;
-
-        if (!outgoingMsg) {
-          return;
-        }
-
-        if (outgoingMsg.connectionId !== this.state.id) {
-          return;
-        }
-
-        const messageKey = `${outgoingMsg.timestamp}_${
-          outgoingMsg.data?.requestId || "unknown"
-        }`;
-
-        if (processedMessages.has(messageKey)) {
-          return;
-        }
-
-        processedMessages.add(messageKey);
-
-        this.send(outgoingMsg.data);
-
-        setTimeout(() => {
-          processedMessages.delete(messageKey);
-        }, 300000);
-      }
-    });
-  }
-
   private notifyStateChange(): void {
-    if (this.state.id !== "ws-default-1500") {
+    const isDefaultConnection =
+      this.state.id.startsWith("ws-") && this.state.id.includes("-");
+    if (!isDefaultConnection) {
       return;
     }
 
@@ -544,7 +469,6 @@ export class WSConnection {
         const states = result.wsStates || {};
         const newState = {
           status: this.state.status,
-          port: this.state.port,
           lastConnected: this.state.lastConnected,
           reconnectAttempts: this.state.reconnectAttempts,
         };

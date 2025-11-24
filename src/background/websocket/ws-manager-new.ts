@@ -3,6 +3,7 @@ import { WSConnection, WSConnectionState } from "./ws-connection";
 
 export class WSManagerNew {
   private connections: Map<string, WSConnection> = new Map();
+  private requestToConnection: Map<string, WSConnection> = new Map();
 
   constructor() {
     this.cleanupOldConnections();
@@ -24,6 +25,40 @@ export class WSManagerNew {
         sendResponse({ states });
         return true;
       }
+
+      // 🆕 NEW: Handler để Sidebar query connection info
+      if (message.action === "getWSConnectionInfo") {
+        console.log("[WSManager] 📥 Received getWSConnectionInfo request");
+
+        // Get default connection ID and state
+        const connectionIds = Array.from(this.connections.keys());
+        const defaultConnectionId =
+          connectionIds.length > 0 ? connectionIds[0] : null;
+
+        if (defaultConnectionId) {
+          const conn = this.connections.get(defaultConnectionId);
+          const state = conn ? conn.getState() : null;
+
+          console.log("[WSManager] 📤 Sending connection info:", {
+            connectionId: defaultConnectionId,
+            state: state,
+          });
+
+          sendResponse({
+            success: true,
+            connectionId: defaultConnectionId,
+            state: state,
+          });
+        } else {
+          console.warn("[WSManager] ⚠️ No connections available");
+          sendResponse({
+            success: false,
+            error: "No WebSocket connections available",
+          });
+        }
+
+        return true;
+      }
     });
   }
 
@@ -36,33 +71,203 @@ export class WSManagerNew {
       "wsIncomingRequest",
       "wsCommand",
       "wsCommandResult",
+      "wsDefaultConnectionId",
     ]);
   }
 
-  private createDefaultConnection(): void {
-    const FIXED_CONNECTION_ID = "ws-default-1500";
+  private async createDefaultConnection(): Promise<void> {
+    console.log("[WSManager] 🔍 DEBUG: createDefaultConnection() START");
+
+    const storageResult = await new Promise<any>((resolve) => {
+      chrome.storage.local.get(["apiProvider"], (data: any) => {
+        console.log("[WSManager] 🔍 DEBUG: Raw storage result:", data);
+        resolve(data || {});
+      });
+    });
+
+    let apiProvider = storageResult?.apiProvider;
+    console.log("[WSManager] 🔍 DEBUG: apiProvider from storage:", apiProvider);
+    console.log("[WSManager] 🔍 DEBUG: apiProvider type:", typeof apiProvider);
+    console.log(
+      "[WSManager] 🔍 DEBUG: apiProvider length:",
+      apiProvider?.length
+    );
+
+    // ✅ FIX: Kiểm tra và sửa apiProvider nếu thiếu port hoặc null/undefined
+    if (!apiProvider || !this.isValidApiProvider(apiProvider)) {
+      console.log(
+        "[WSManager] 🔧 Fixing invalid apiProvider, setting default: localhost:3030"
+      );
+      apiProvider = "localhost:3030";
+      await new Promise<void>((resolve) => {
+        chrome.storage.local.set({ apiProvider: apiProvider }, () => {
+          console.log(
+            "[WSManager] ✅ Saved corrected API Provider to storage:",
+            apiProvider
+          );
+          resolve();
+        });
+      });
+    }
+
+    console.log("[WSManager] 🔍 DEBUG: Final apiProvider to use:", apiProvider);
+
+    const { port, wsUrl } = this.parseApiProvider(apiProvider);
+    console.log("[WSManager] 🔍 DEBUG: Parsed port:", port);
+    console.log("[WSManager] 🔍 DEBUG: Parsed wsUrl:", wsUrl);
+
+    const connectionId = `ws-${Date.now()}-${port}`;
+    console.log("[WSManager] 🔍 DEBUG: Generated connectionId:", connectionId);
 
     const defaultConn = new WSConnection({
-      id: FIXED_CONNECTION_ID,
-      port: 1500,
-      url: "ws://localhost:1500",
+      id: connectionId,
+      port: port,
+      url: wsUrl,
     });
-    this.connections.set(FIXED_CONNECTION_ID, defaultConn);
+    this.connections.set(connectionId, defaultConn);
 
-    // Lưu connection ID vào storage để UI có thể truy cập
-    chrome.storage.local.set({
-      wsDefaultConnectionId: FIXED_CONNECTION_ID,
-    });
-
-    chrome.storage.local.set({
-      wsStates: {
-        [FIXED_CONNECTION_ID]: {
-          status: "disconnected",
-          port: 1500,
-          reconnectAttempts: 0,
+    // 🔥 CRITICAL: Đợi storage.set() hoàn thành TRƯỚC KHI return
+    await new Promise<void>((resolve, reject) => {
+      chrome.storage.local.set(
+        {
+          wsDefaultConnectionId: connectionId,
         },
-      },
+        () => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "[WSManager] ❌ Failed to set wsDefaultConnectionId:",
+              chrome.runtime.lastError
+            );
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          console.log(
+            "[WSManager] ✅ Saved wsDefaultConnectionId to storage:",
+            connectionId
+          );
+          resolve();
+        }
+      );
     });
+
+    // 🔥 CRITICAL: Đợi storage.set() hoàn thành cho wsStates
+    await new Promise<void>((resolve, reject) => {
+      chrome.storage.local.set(
+        {
+          wsStates: {
+            [connectionId]: {
+              status: "disconnected",
+              reconnectAttempts: 0,
+            },
+          },
+        },
+        () => {
+          if (chrome.runtime.lastError) {
+            console.error(
+              "[WSManager] ❌ Failed to set wsStates:",
+              chrome.runtime.lastError
+            );
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          console.log("[WSManager] ✅ Saved wsStates to storage");
+          resolve();
+        }
+      );
+    });
+
+    console.log("[WSManager] ✅ createDefaultConnection() COMPLETED");
+  }
+
+  private isValidApiProvider(apiProvider: string): boolean {
+    console.log("[WSManager] 🔍 DEBUG: isValidApiProvider() called");
+    console.log(
+      "[WSManager] 🔍 DEBUG: Input apiProvider:",
+      JSON.stringify(apiProvider)
+    );
+    console.log("[WSManager] 🔍 DEBUG: Input type:", typeof apiProvider);
+
+    if (!apiProvider || apiProvider.trim() === "") {
+      console.log(
+        "[WSManager] ❌ Validation FAILED: apiProvider is null/empty"
+      );
+      return false;
+    }
+
+    const trimmed = apiProvider.trim();
+    console.log(
+      "[WSManager] 🔍 DEBUG: Trimmed value:",
+      JSON.stringify(trimmed)
+    );
+
+    if (trimmed === "localhost" || trimmed === "0.0.0.0") {
+      console.log(
+        "[WSManager] ❌ Validation FAILED: apiProvider is bare 'localhost' or '0.0.0.0' without port"
+      );
+      return false;
+    }
+
+    console.log("[WSManager] ✅ Validation PASSED");
+    return true;
+  }
+
+  private parseApiProvider(apiProvider: string): {
+    protocol: string;
+    host: string;
+    port: number;
+    wsUrl: string;
+  } {
+    console.log("[WSManager] 🔍 DEBUG: parseApiProvider() called");
+    console.log(
+      "[WSManager] 🔍 DEBUG: Input apiProvider:",
+      JSON.stringify(apiProvider)
+    );
+
+    let url = apiProvider.trim();
+    console.log("[WSManager] 🔍 DEBUG: After trim:", JSON.stringify(url));
+
+    if (!url.startsWith("http://") && !url.startsWith("https://")) {
+      url = `http://${url}`;
+      console.log("[WSManager] 🔍 DEBUG: Added http:// prefix:", url);
+    }
+
+    const urlObj = new URL(url);
+    console.log(
+      "[WSManager] 🔍 DEBUG: URL parsed - protocol:",
+      urlObj.protocol
+    );
+    console.log(
+      "[WSManager] 🔍 DEBUG: URL parsed - hostname:",
+      urlObj.hostname
+    );
+    console.log("[WSManager] 🔍 DEBUG: URL parsed - port:", urlObj.port);
+
+    const isHttps = urlObj.protocol === "https:";
+    const protocol = isHttps ? "wss" : "ws";
+    console.log("[WSManager] 🔍 DEBUG: Detected protocol:", protocol);
+
+    let host = urlObj.hostname;
+    let port = 3030;
+
+    if (urlObj.port) {
+      port = parseInt(urlObj.port, 10);
+      console.log("[WSManager] 🔍 DEBUG: Port from URL:", port);
+    } else if (isHttps) {
+      port = 443;
+      console.log("[WSManager] 🔍 DEBUG: Using HTTPS default port:", port);
+    } else {
+      console.log("[WSManager] 🔍 DEBUG: Using default port:", port);
+    }
+
+    const wsUrl =
+      isHttps && !urlObj.port
+        ? `${protocol}://${host}/ws`
+        : `${protocol}://${host}:${port}/ws`;
+
+    console.log("[WSManager] 🔍 DEBUG: Final wsUrl:", wsUrl);
+    console.log("[WSManager] ✅ parseApiProvider() COMPLETED");
+
+    return { protocol, host, port, wsUrl };
   }
 
   /**
@@ -112,6 +317,27 @@ export class WSManagerNew {
         const command = changes.wsCommand.newValue;
         if (command) {
           this.handleCommand(command);
+        }
+      }
+
+      // ✅ Listen for apiProvider changes to create/recreate connection
+      if (changes.apiProvider) {
+        const newApiProvider = changes.apiProvider.newValue;
+        if (newApiProvider && this.isValidApiProvider(newApiProvider)) {
+          console.log(
+            "[WSManager] API Provider changed, recreating connection..."
+          );
+          // Disconnect old connection if exists
+          const oldConnectionIds = Array.from(this.connections.keys());
+          for (const id of oldConnectionIds) {
+            const conn = this.connections.get(id);
+            if (conn) {
+              conn.disconnect();
+            }
+            this.connections.delete(id);
+          }
+          // Create new connection
+          this.createDefaultConnection();
         }
       }
     });
@@ -173,14 +399,6 @@ export class WSManagerNew {
   }
 
   private async addConnection(port: number): Promise<any> {
-    // CRITICAL: Chặn mọi connection không phải port 1500
-    if (port !== 1500) {
-      console.error(
-        `[WSManager] Rejected connection attempt to invalid port: ${port}`
-      );
-      return { success: false, error: "Only port 1500 is supported" };
-    }
-
     const connectionsArray: WSConnection[] = [];
     this.connections.forEach((conn) => connectionsArray.push(conn));
     for (const conn of connectionsArray) {
@@ -189,10 +407,26 @@ export class WSManagerNew {
       }
     }
 
-    const id = `ws-${Date.now()}-default`;
-    const url = `ws://localhost:${port}`;
+    const storageResult = await new Promise<any>((resolve) => {
+      chrome.storage.local.get(["apiProvider"], (data: any) => {
+        resolve(data || {});
+      });
+    });
 
-    const wsConn = new WSConnection({ id, port, url });
+    const apiProvider = storageResult?.apiProvider;
+
+    if (!apiProvider || !this.isValidApiProvider(apiProvider)) {
+      return { success: false, error: "Invalid API Provider" };
+    }
+
+    const { port: parsedPort, wsUrl } = this.parseApiProvider(apiProvider);
+
+    if (parsedPort !== port) {
+      return { success: false, error: "Port mismatch with API Provider" };
+    }
+
+    const id = `ws-${Date.now()}-${port}`;
+    const wsConn = new WSConnection({ id, port, url: wsUrl });
     this.connections.set(id, wsConn);
 
     return { success: true, connectionId: id };
@@ -248,5 +482,28 @@ export class WSManagerNew {
       states.push(conn.getState());
     }
     return { success: true, connections: states };
+  }
+
+  /**
+   * Lưu mapping requestId → connection để gửi response sau
+   */
+  public registerRequest(requestId: string, connectionId: string): void {
+    const connection = this.connections.get(connectionId);
+    if (connection) {
+      this.requestToConnection.set(requestId, connection);
+    }
+  }
+
+  /**
+   * Gửi response trực tiếp qua connection đã đăng ký
+   */
+  public sendResponse(requestId: string, data: any): boolean {
+    const connection = this.requestToConnection.get(requestId);
+    if (connection && connection.state.status === "connected") {
+      connection.send(data);
+      this.requestToConnection.delete(requestId);
+      return true;
+    }
+    return false;
   }
 }

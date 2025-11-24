@@ -24,12 +24,20 @@ declare const browser: typeof chrome & any;
     "wsIncomingRequest",
     "wsCommand",
     "wsCommandResult",
+    "wsDefaultConnectionId",
   ]);
 
   const wsManager = new WSManagerNew();
   new TabBroadcaster(wsManager);
 
   const tabStateManager = TabStateManager.getInstance();
+
+  const registerIncomingRequest = (
+    requestId: string,
+    connectionId: string
+  ): void => {
+    wsManager.registerRequest(requestId, connectionId);
+  };
 
   const containerManager = new ContainerManager(browserAPI);
   const messageHandler = new MessageHandler(containerManager);
@@ -80,6 +88,9 @@ declare const browser: typeof chrome & any;
             isNewTask,
             folderPath,
           } = latestMsg.data;
+
+          // Đăng ký request vào WSManager
+          registerIncomingRequest(requestId, connectionId);
 
           if (!tabId || !userPrompt || !requestId) {
             console.error(
@@ -406,6 +417,12 @@ declare const browser: typeof chrome & any;
           success: true,
           note: "WebSocket actions use storage-based communication",
         });
+        return true;
+      }
+
+      if (message.action === "ws.sendResponse") {
+        const success = wsManager.sendResponse(message.requestId, message.data);
+        sendResponse({ success });
         return true;
       }
 
