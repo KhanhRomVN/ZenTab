@@ -49,18 +49,6 @@ export class WSManagerNew {
       return false;
     }
 
-    // 🔥 FIX: Reject production URLs (leftover from old extension versions)
-    const isProductionUrl =
-      trimmed.includes("render.com") ||
-      trimmed.includes("herokuapp.com") ||
-      trimmed.includes("railway.app") ||
-      trimmed.includes("vercel.app") ||
-      trimmed.includes("netlify.app");
-
-    if (isProductionUrl) {
-      return false;
-    }
-
     return true;
   }
 
@@ -95,6 +83,8 @@ export class WSManagerNew {
       port = parseInt(urlObj.port, 10);
     } else if (isHttps) {
       port = 443;
+    } else {
+      port = 3030;
     }
 
     const wsUrl =
@@ -169,25 +159,7 @@ export class WSManagerNew {
 
       let apiProvider = storageResult?.apiProvider;
 
-      const isProductionUrl =
-        apiProvider &&
-        (apiProvider.includes("render.com") ||
-          apiProvider.includes("herokuapp.com") ||
-          apiProvider.includes("railway.app") ||
-          apiProvider.includes("vercel.app") ||
-          apiProvider.includes("netlify.app"));
-
-      if (isProductionUrl) {
-        console.warn(
-          `[WSManager] ⚠️ Detected old production URL: "${apiProvider}"`
-        );
-        apiProvider = "localhost:3030";
-        await new Promise<void>((resolve) => {
-          chrome.storage.local.set({ apiProvider: apiProvider }, () => {
-            resolve();
-          });
-        });
-      } else if (!apiProvider || !this.isValidApiProvider(apiProvider)) {
+      if (!apiProvider || !this.isValidApiProvider(apiProvider)) {
         apiProvider = "localhost:3030";
         await new Promise<void>((resolve) => {
           chrome.storage.local.set({ apiProvider: apiProvider }, () => {
