@@ -13,11 +13,6 @@ export class MessageHandler {
       let result: any;
 
       switch (message.action) {
-        case "containersUpdated":
-          // Broadcast to all connected ports (sidebar)
-          result = { success: true, broadcast: true };
-          break;
-
         case "removeContainerFromZenTab":
           if (this.containerManager) {
             await this.containerManager.removeContainerFromZenTab(

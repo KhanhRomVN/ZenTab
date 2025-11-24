@@ -35,12 +35,29 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
   const handleApiProviderChange = (value: string | string[]) => {
     const providerValue = Array.isArray(value) ? value[0] : value;
 
-    // VALIDATION: Warn nếu user nhập production URL
+    // 🔥 FIX: Block production URLs (render.com, herokuapp.com, etc.)
     const isProductionUrl =
       providerValue &&
       (providerValue.includes("render.com") ||
         providerValue.includes("herokuapp.com") ||
-        providerValue.includes("railway.app"));
+        providerValue.includes("railway.app") ||
+        providerValue.includes("vercel.app") ||
+        providerValue.includes("netlify.app"));
+
+    if (isProductionUrl) {
+      console.warn(
+        `[SettingDrawer] ⚠️ Production URL detected: "${providerValue}"`
+      );
+      console.warn(`[SettingDrawer] 🔄 Forcing reset to localhost:3030...`);
+      alert(
+        "⚠️ Production URLs are not allowed. Using localhost:3030 instead."
+      );
+
+      const defaultProvider = "localhost:3030";
+      setApiProvider(defaultProvider);
+      onApiProviderChange(defaultProvider);
+      return;
+    }
 
     setApiProvider(providerValue);
     onApiProviderChange(providerValue);

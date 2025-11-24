@@ -18,26 +18,15 @@ declare const browser: typeof chrome & any;
 
   browserAPI.storage.local.remove([
     "wsStates",
-    "wsConnections",
     "wsMessages",
     "wsOutgoingMessage",
     "wsIncomingRequest",
-    "wsCommand",
-    "wsCommandResult",
-    "wsDefaultConnectionId",
   ]);
 
   const wsManager = new WSManagerNew();
   new TabBroadcaster(wsManager);
 
   const tabStateManager = TabStateManager.getInstance();
-
-  const registerIncomingRequest = (
-    requestId: string,
-    connectionId: string
-  ): void => {
-    wsManager.registerRequest(requestId, connectionId);
-  };
 
   const containerManager = new ContainerManager(browserAPI);
   const messageHandler = new MessageHandler(containerManager);
@@ -88,9 +77,6 @@ declare const browser: typeof chrome & any;
             isNewTask,
             folderPath,
           } = latestMsg.data;
-
-          // Đăng ký request vào WSManager
-          registerIncomingRequest(requestId, connectionId);
 
           if (!tabId || !userPrompt || !requestId) {
             console.error(
@@ -400,24 +386,46 @@ declare const browser: typeof chrome & any;
   // Unified Message Listener - handles all actions
   browserAPI.runtime.onMessage.addListener(
     (message: any, _sender: any, sendResponse: any) => {
-      // WebSocket actions - ignore, handled via storage
-      if (
-        (message.action &&
-          message.action.startsWith("addWebSocketConnection")) ||
-        message.action === "removeWebSocketConnection" ||
-        message.action === "connectWebSocket" ||
-        message.action === "disconnectWebSocket"
-      ) {
-        // Return empty response to prevent UI from hanging
-        sendResponse({
-          success: true,
-          note: "WebSocket actions use storage-based communication",
-        });
+      // Handle WebSocket connect/disconnect directly
+      if (message.action === "connectWebSocket") {
+        // ✅ CRITICAL FIX: Wrap trong async IIFE để đảm bảo response được gửi đúng
+        (async () => {
+          try {
+            const result = await wsManager.connect();
+            console.log(`[ServiceWorker] ✅ Connect result:`, result);
+
+            // Validate result structure
+            if (!result || typeof result.success !== "boolean") {
+              console.error(
+                `[ServiceWorker] ❌ Invalid result structure:`,
+                result
+              );
+              sendResponse({ success: false, error: "Invalid connect result" });
+              return;
+            }
+
+            // Send response immediately
+            sendResponse(result);
+          } catch (error) {
+            console.error(`[ServiceWorker] ❌ Connect exception:`, error);
+            sendResponse({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        })();
+
+        return true; // CRITICAL: Keep channel open for async response
+      }
+
+      if (message.action === "disconnectWebSocket") {
+        const result = wsManager.disconnect();
+        sendResponse(result);
         return true;
       }
 
       if (message.action === "ws.sendResponse") {
-        const success = wsManager.sendResponse(message.requestId, message.data);
+        const success = wsManager.sendResponse(message.data);
         sendResponse({ success });
         return true;
       }
@@ -431,6 +439,70 @@ declare const browser: typeof chrome & any;
           sendResponse({ success });
         });
         return true;
+      }
+
+      if (message.action === "ws.incomingPrompt") {
+        DeepSeekController.sendPrompt(
+          message.tabId,
+          message.prompt,
+          message.requestId
+        ).then((success: boolean) => {
+          sendResponse({ success });
+        });
+        return true;
+      }
+
+      if (message.action === "getWSConnectionInfo") {
+        // 🔥 CRITICAL FIX: Sử dụng Promise-based async handler
+        (async () => {
+          try {
+            const result = await new Promise<any>((resolve, reject) => {
+              browserAPI.storage.local.get(["wsStates"], (data: any) => {
+                if (browserAPI.runtime.lastError) {
+                  reject(browserAPI.runtime.lastError);
+                  return;
+                }
+                resolve(data || {});
+              });
+            });
+
+            const states = result?.wsStates || {};
+            const connectionIds = Object.keys(states);
+
+            if (connectionIds.length > 0) {
+              const connectionId = connectionIds[0];
+              const state = states[connectionId];
+
+              // 🔥 CRITICAL: Return FULL state object từ storage
+              sendResponse({
+                success: true,
+                state: {
+                  id: state.id,
+                  port: state.port,
+                  url: state.url,
+                  status: state.status,
+                  lastConnected: state.lastConnected,
+                },
+              });
+            } else {
+              sendResponse({
+                success: false,
+                error: "No WebSocket connection found",
+              });
+            }
+          } catch (error) {
+            console.error(
+              "[ServiceWorker] ❌ Error in getWSConnectionInfo:",
+              error
+            );
+            sendResponse({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        })();
+
+        return true; // CRITICAL: Keep channel open for async response
       }
 
       // DeepSeek controller handlers

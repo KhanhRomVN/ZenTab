@@ -11,20 +11,13 @@ export interface WSConnectionState {
   url: string;
   status: "connecting" | "connected" | "disconnected" | "error";
   lastConnected?: number;
-  reconnectAttempts: number;
 }
 
 export class WSConnection {
   private ws?: WebSocket;
-  private reconnectTimer?: number;
-  private maxReconnectAttempts = 3;
-  private reconnectDelay = 2000;
-  private retryStartTime?: number;
-  private readonly MAX_RETRY_DURATION = 10000;
-  private manualDisconnect = false;
   private forwardedRequests: Set<string> = new Set();
   private lastPingTime: number = 0;
-  private readonly PING_TIMEOUT = 90000; // 45 seconds (30s backend ping + 15s buffer)
+  private readonly PING_TIMEOUT = 90000; // 90 seconds (45s backend ping + 45s buffer)
 
   public state: WSConnectionState;
 
@@ -34,7 +27,6 @@ export class WSConnection {
       port: config.port,
       url: config.url,
       status: "disconnected",
-      reconnectAttempts: 0,
     };
 
     this.notifyStateChange();
@@ -44,22 +36,12 @@ export class WSConnection {
   }
 
   public disconnect(): void {
-    this.manualDisconnect = true;
-
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = undefined;
-    }
-
     if (this.ws) {
       this.ws.close();
       this.ws = undefined;
     }
 
     this.state.status = "disconnected";
-    this.retryStartTime = undefined;
-
-    this.state.reconnectAttempts = 0;
 
     this.notifyStateChange();
   }
@@ -72,11 +54,6 @@ export class WSConnection {
       return;
     }
 
-    this.manualDisconnect = false;
-
-    if (!this.retryStartTime) {
-      this.retryStartTime = Date.now();
-    }
     this.state.status = "connecting";
     this.notifyStateChange();
 
@@ -86,8 +63,6 @@ export class WSConnection {
         this.ws.onopen = () => {
           this.state.status = "connected";
           this.state.lastConnected = Date.now();
-          this.state.reconnectAttempts = 0;
-          this.retryStartTime = undefined;
           this.lastPingTime = Date.now(); // Initialize ping time
           this.notifyStateChange();
 
@@ -99,49 +74,48 @@ export class WSConnection {
 
         this.ws.onerror = (error) => {
           console.error(
-            `[WSConnection] ❌ WebSocket error on ${this.state.url}:`,
-            error
+            `[WSConnection] ❌ WebSocket error on ${this.state.url}`
           );
+          console.error(`[WSConnection] 🔍 Error details:`, {
+            type: error.type,
+            target: error.target,
+            readyState: this.ws?.readyState,
+            connectionId: this.state.id,
+          });
+          console.error(`[WSConnection] 💡 Possible causes:`);
+          console.error(`  - Backend server not running on ${this.state.url}`);
+          console.error(`  - Firewall blocking WebSocket connections`);
+          console.error(`  - Incorrect protocol (ws vs wss)`);
+          console.error(`  - Port mismatch or wrong URL format`);
+
           this.state.status = "error";
           this.notifyStateChange();
         };
 
         this.ws.onclose = () => {
-          this.state.status = "disconnected";
-          this.ws = undefined;
-          this.notifyStateChange();
-
-          if (!this.manualDisconnect) {
-            const elapsedTime = this.retryStartTime
-              ? Date.now() - this.retryStartTime
-              : 0;
-
-            if (
-              elapsedTime < this.MAX_RETRY_DURATION &&
-              this.state.reconnectAttempts < this.maxReconnectAttempts
-            ) {
-              this.scheduleReconnect();
-            } else {
-              console.error(
-                `[WSConnection] ❌ Max retries (${this.maxReconnectAttempts}) reached or timeout exceeded`
-              );
-              this.state.status = "error";
-              this.retryStartTime = undefined;
-              this.notifyStateChange();
-            }
+          if (this.state.status === "connected") {
+            this.state.status = "disconnected";
+            this.notifyStateChange();
           }
-
-          resolve();
         };
 
         this.ws.onmessage = (event) => {
           this.handleMessage(event.data);
         };
       } catch (error) {
-        console.error(
-          `[WSConnection] ❌ Exception during WebSocket creation:`,
-          error
-        );
+        console.error(`[WSConnection] ❌ Exception during WebSocket creation`);
+        console.error(`[WSConnection] 🔍 Exception details:`, {
+          error: error,
+          message: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          connectionId: this.state.id,
+          url: this.state.url,
+        });
+        console.error(`[WSConnection] 💡 This usually means:`);
+        console.error(`  - Invalid WebSocket URL format`);
+        console.error(`  - Browser blocking WebSocket protocol`);
+        console.error(`  - Extension permission issues`);
+
         this.state.status = "error";
         this.notifyStateChange();
         resolve();
@@ -153,13 +127,6 @@ export class WSConnection {
     if (this.ws && this.state.status === "connected") {
       this.ws.send(JSON.stringify(data));
     }
-  }
-
-  private scheduleReconnect(): void {
-    this.state.reconnectAttempts++;
-    this.reconnectTimer = setTimeout(() => {
-      this.connect();
-    }, this.reconnectDelay) as any;
   }
 
   private async handleMessage(data: string): Promise<void> {
@@ -174,6 +141,9 @@ export class WSConnection {
       if (message.type === "ping") {
         try {
           if (this.ws && this.state.status === "connected") {
+            // 🆕 CRITICAL FIX: Update lastPingTime khi nhận ping
+            this.lastPingTime = Date.now();
+
             const pongMessage = {
               type: "pong",
               timestamp: Date.now(),
@@ -477,36 +447,48 @@ export class WSConnection {
   }
 
   private notifyStateChange(): void {
-    const isDefaultConnection =
-      this.state.id.startsWith("ws-") && this.state.id.includes("-");
-    if (!isDefaultConnection) {
-      return;
-    }
-
-    const updateStorage = () => {
-      chrome.storage.local.get(["wsStates"], (result) => {
-        if (chrome.runtime.lastError) {
-          console.error(
-            "[WSConnection] Error reading wsStates:",
-            chrome.runtime.lastError
-          );
-          return;
-        }
+    const updateStorage = async () => {
+      try {
+        const result = await new Promise<any>((resolve, reject) => {
+          chrome.storage.local.get(["wsStates"], (data: any) => {
+            if (chrome.runtime.lastError) {
+              reject(chrome.runtime.lastError);
+              return;
+            }
+            resolve(data || {});
+          });
+        });
 
         const states = result.wsStates || {};
+
+        // 🔥 CRITICAL FIX: Lưu FULL state object thay vì chỉ 2 fields
         const newState = {
+          id: this.state.id,
+          port: this.state.port,
+          url: this.state.url,
           status: this.state.status,
           lastConnected: this.state.lastConnected,
-          reconnectAttempts: this.state.reconnectAttempts,
         };
 
         states[this.state.id] = newState;
-        chrome.storage.local.set({ wsStates: states }, () => {
-          if (chrome.runtime.lastError) {
-            return;
-          }
+
+        await new Promise<void>((resolve, reject) => {
+          chrome.storage.local.set({ wsStates: states }, () => {
+            if (chrome.runtime.lastError) {
+              console.error(
+                "[WSConnection] ❌ Error saving wsStates:",
+                chrome.runtime.lastError
+              );
+              reject(chrome.runtime.lastError);
+              return;
+            }
+
+            resolve();
+          });
         });
-      });
+      } catch (error) {
+        console.error("[WSConnection] ❌ Error in notifyStateChange:", error);
+      }
     };
 
     updateStorage();

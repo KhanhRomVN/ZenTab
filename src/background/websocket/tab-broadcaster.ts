@@ -48,11 +48,8 @@ export class TabBroadcaster {
           const typedNewState = newState as { status: string };
           const oldState = oldStates[connId] as { status: string } | undefined;
 
-          const isDefaultConnection =
-            connId.startsWith("ws-") && connId.includes("-");
-
+          // Không cần kiểm tra "default connection" vì chỉ có 1 connection duy nhất
           if (
-            isDefaultConnection &&
             typedNewState.status === "connected" &&
             oldState?.status !== "connected"
           ) {

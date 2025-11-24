@@ -1,51 +1,30 @@
 // src/background/ws-manager-new.ts
-import { WSConnection, WSConnectionState } from "./ws-connection";
+import { WSConnection } from "./ws-connection";
 
 export class WSManagerNew {
-  private connections: Map<string, WSConnection> = new Map();
-  private requestToConnection: Map<string, WSConnection> = new Map();
+  private connection: WSConnection | null = null;
 
   constructor() {
     this.cleanupOldConnections();
-    this.createDefaultConnection();
     this.setupStorageListener();
     this.setupStateQueryHandler();
   }
 
   private setupStateQueryHandler(): void {
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message.type === "getWSStates") {
-        const states: Record<string, any> = {};
-        for (const [id, conn] of this.connections.entries()) {
-          states[id] = conn.getState();
-        }
-        sendResponse({ states });
-        return true;
-      }
-
-      // NEW: Handler để Sidebar query connection info
       if (message.action === "getWSConnectionInfo") {
-        // Get default connection ID and state
-        const connectionIds = Array.from(this.connections.keys());
-        const defaultConnectionId =
-          connectionIds.length > 0 ? connectionIds[0] : null;
-
-        if (defaultConnectionId) {
-          const conn = this.connections.get(defaultConnectionId);
-          const state = conn ? conn.getState() : null;
-
+        if (this.connection) {
+          const state = this.connection.getState();
           sendResponse({
             success: true,
-            connectionId: defaultConnectionId,
             state: state,
           });
         } else {
           sendResponse({
             success: false,
-            error: "No WebSocket connections available",
+            error: "No WebSocket connection available",
           });
         }
-
         return true;
       }
     });
@@ -53,103 +32,10 @@ export class WSManagerNew {
 
   private cleanupOldConnections(): void {
     chrome.storage.local.remove([
-      "wsStates",
-      "wsConnections",
       "wsMessages",
       "wsOutgoingMessage",
       "wsIncomingRequest",
-      "wsCommand",
-      "wsCommandResult",
-      "wsDefaultConnectionId",
     ]);
-  }
-
-  private async createDefaultConnection(): Promise<void> {
-    const storageResult = await new Promise<any>((resolve) => {
-      chrome.storage.local.get(["apiProvider"], (data: any) => {
-        resolve(data || {});
-      });
-    });
-
-    let apiProvider = storageResult?.apiProvider;
-
-    // CRITICAL: Reset production URL về localhost
-    const isProductionUrl =
-      apiProvider &&
-      (apiProvider.includes("render.com") ||
-        apiProvider.includes("herokuapp.com") ||
-        apiProvider.includes("railway.app"));
-
-    if (
-      !apiProvider ||
-      !this.isValidApiProvider(apiProvider) ||
-      isProductionUrl
-    ) {
-      const oldProvider = apiProvider;
-      apiProvider = "localhost:3030";
-
-      await new Promise<void>((resolve) => {
-        chrome.storage.local.set({ apiProvider: apiProvider }, () => {
-          resolve();
-        });
-      });
-
-      if (isProductionUrl) {
-      }
-    }
-
-    const { port, wsUrl } = this.parseApiProvider(apiProvider);
-    const connectionId = `ws-${Date.now()}-${port}`;
-    const defaultConn = new WSConnection({
-      id: connectionId,
-      port: port,
-      url: wsUrl,
-    });
-    this.connections.set(connectionId, defaultConn);
-
-    await new Promise<void>((resolve, reject) => {
-      chrome.storage.local.set(
-        {
-          wsDefaultConnectionId: connectionId,
-        },
-        () => {
-          if (chrome.runtime.lastError) {
-            console.error(
-              "[WSManager] ❌ Failed to set wsDefaultConnectionId:",
-              chrome.runtime.lastError
-            );
-            reject(chrome.runtime.lastError);
-            return;
-          }
-          resolve();
-        }
-      );
-    });
-
-    // Đợi storage.set() hoàn thành cho wsStates
-    await new Promise<void>((resolve, reject) => {
-      chrome.storage.local.set(
-        {
-          wsStates: {
-            [connectionId]: {
-              status: "disconnected",
-              reconnectAttempts: 0,
-            },
-          },
-        },
-        () => {
-          if (chrome.runtime.lastError) {
-            console.error(
-              "[WSManager] ❌ Failed to set wsStates:",
-              chrome.runtime.lastError
-            );
-            reject(chrome.runtime.lastError);
-            return;
-          }
-          resolve();
-        }
-      );
-    });
   }
 
   private isValidApiProvider(apiProvider: string): boolean {
@@ -160,6 +46,18 @@ export class WSManagerNew {
     const trimmed = apiProvider.trim();
 
     if (trimmed === "localhost" || trimmed === "0.0.0.0") {
+      return false;
+    }
+
+    // 🔥 FIX: Reject production URLs (leftover from old extension versions)
+    const isProductionUrl =
+      trimmed.includes("render.com") ||
+      trimmed.includes("herokuapp.com") ||
+      trimmed.includes("railway.app") ||
+      trimmed.includes("vercel.app") ||
+      trimmed.includes("netlify.app");
+
+    if (isProductionUrl) {
       return false;
     }
 
@@ -178,7 +76,15 @@ export class WSManagerNew {
       url = `http://${url}`;
     }
 
-    const urlObj = new URL(url);
+    let urlObj: URL;
+    try {
+      urlObj = new URL(url);
+    } catch (error) {
+      console.error(`[WSManager] ❌ Failed to parse URL: ${url}`);
+      console.error(`[WSManager] 🔍 Error:`, error);
+      throw new Error(`Invalid API Provider URL: ${apiProvider}`);
+    }
+
     const isHttps = urlObj.protocol === "https:";
     const protocol = isHttps ? "wss" : "ws";
 
@@ -203,20 +109,11 @@ export class WSManagerNew {
    * Broadcast message to single connected WebSocket client (port 1500)
    */
   public broadcastToAll(message: any): void {
-    const connectionsArray: WSConnection[] = [];
-    this.connections.forEach((conn) => connectionsArray.push(conn));
-
-    let sentCount = 0;
-    const connectionsToProcess = connectionsArray;
-    for (let i = 0; i < connectionsToProcess.length; i++) {
-      const conn = connectionsToProcess[i];
-      if (conn.state.status === "connected") {
-        try {
-          conn.send(message);
-          sentCount++;
-        } catch (error) {
-          // Ignore send errors
-        }
+    if (this.connection && this.connection.state.status === "connected") {
+      try {
+        this.connection.send(message);
+      } catch (error) {
+        console.error("[WSManager] ❌ Failed to broadcast message:", error);
       }
     }
   }
@@ -225,152 +122,97 @@ export class WSManagerNew {
    * Kiểm tra WebSocket connection (port 1500) có đang connected không
    */
   public async hasActiveConnections(): Promise<boolean> {
-    const connectionsArray: WSConnection[] = [];
-    this.connections.forEach((conn) => connectionsArray.push(conn));
-    for (let i = 0; i < connectionsArray.length; i++) {
-      const conn = connectionsArray[i];
-      if (conn.state.status === "connected") {
-        return true;
-      }
-    }
-
-    return false;
+    return (
+      this.connection !== null && this.connection.state.status === "connected"
+    );
   }
 
   private setupStorageListener(): void {
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== "local") return;
 
-      // Listen for command from UI
-      if (changes.wsCommand) {
-        const command = changes.wsCommand.newValue;
-        if (command) {
-          this.handleCommand(command);
-        }
-      }
-
-      // ✅ Listen for apiProvider changes to create/recreate connection
       if (changes.apiProvider) {
         const newApiProvider = changes.apiProvider.newValue;
-        if (newApiProvider && this.isValidApiProvider(newApiProvider)) {
-          const oldConnectionIds = Array.from(this.connections.keys());
-          for (const id of oldConnectionIds) {
-            const conn = this.connections.get(id);
-            if (conn) {
-              conn.disconnect();
-            }
-            this.connections.delete(id);
-          }
+        const oldApiProvider = changes.apiProvider.oldValue;
 
-          this.createDefaultConnection();
+        if (
+          newApiProvider &&
+          newApiProvider !== oldApiProvider &&
+          this.isValidApiProvider(newApiProvider)
+        ) {
+          if (this.connection) {
+            this.connection.disconnect();
+            this.connection = null;
+          }
         }
       }
     });
   }
 
-  private async handleCommand(command: any): Promise<void> {
-    try {
-      let result: any;
-
-      switch (command.action) {
-        case "add":
-          result = await this.addConnection(command.port);
-          break;
-        case "remove":
-          result = await this.removeConnection(command.connectionId);
-          break;
-        case "connect":
-          result = await this.connect(command.connectionId);
-          break;
-        case "disconnect":
-          result = this.disconnect(command.connectionId);
-          break;
-        case "send":
-          result = this.sendMessage(command.connectionId, command.data);
-          break;
-        case "getAll":
-          result = this.getAllConnections();
-          break;
-        default:
-          result = { success: false, error: "Unknown command" };
-      }
-
-      // Write result back to storage
-      await chrome.storage.local.set({
-        wsCommandResult: {
-          commandId: command.commandId,
-          result: result,
-          timestamp: Date.now(),
-        },
-      });
-
-      // Clear command SAU KHI đã ghi result
-      await chrome.storage.local.remove(["wsCommand"]);
-    } catch (error) {
-      await chrome.storage.local.set({
-        wsCommandResult: {
-          commandId: command.commandId,
-          result: {
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-          },
-          timestamp: Date.now(),
-        },
-      });
-
-      // Clear command ngay cả khi lỗi
-      await chrome.storage.local.remove(["wsCommand"]);
-    }
-  }
-
-  private async addConnection(port: number): Promise<any> {
-    const connectionsArray: WSConnection[] = [];
-    this.connections.forEach((conn) => connectionsArray.push(conn));
-    for (const conn of connectionsArray) {
-      if (conn.state.port === port) {
-        return { success: false, error: "Connection already exists" };
-      }
+  public async connect(): Promise<{ success: boolean; error?: string }> {
+    if (this.connection && this.connection.state.status === "connected") {
+      console.log(`[WSManager] ✅ Already connected - returning success`);
+      return { success: true };
     }
 
-    const storageResult = await new Promise<any>((resolve) => {
-      chrome.storage.local.get(["apiProvider"], (data: any) => {
-        resolve(data || {});
-      });
-    });
-
-    const apiProvider = storageResult?.apiProvider;
-
-    if (!apiProvider || !this.isValidApiProvider(apiProvider)) {
-      return { success: false, error: "Invalid API Provider" };
-    }
-
-    const { port: parsedPort, wsUrl } = this.parseApiProvider(apiProvider);
-
-    if (parsedPort !== port) {
-      return { success: false, error: "Port mismatch with API Provider" };
-    }
-
-    const id = `ws-${Date.now()}-${port}`;
-    const wsConn = new WSConnection({ id, port, url: wsUrl });
-    this.connections.set(id, wsConn);
-
-    return { success: true, connectionId: id };
-  }
-
-  private async removeConnection(_id: string): Promise<any> {
-    return { success: false, error: "Cannot remove default connection" };
-  }
-
-  private async connect(id: string): Promise<any> {
-    const conn = this.connections.get(id);
-    if (!conn) {
-      return { success: false, error: "Connection not found" };
+    if (this.connection && this.connection.state.status === "connecting") {
+      console.warn(`[WSManager] ⚠️ Connection already in progress`);
+      return { success: false, error: "Already connecting" };
     }
 
     try {
-      await conn.connect();
+      const storageResult = await new Promise<any>((resolve) => {
+        chrome.storage.local.get(["apiProvider"], (data: any) => {
+          resolve(data || {});
+        });
+      });
+
+      let apiProvider = storageResult?.apiProvider;
+
+      const isProductionUrl =
+        apiProvider &&
+        (apiProvider.includes("render.com") ||
+          apiProvider.includes("herokuapp.com") ||
+          apiProvider.includes("railway.app") ||
+          apiProvider.includes("vercel.app") ||
+          apiProvider.includes("netlify.app"));
+
+      if (isProductionUrl) {
+        console.warn(
+          `[WSManager] ⚠️ Detected old production URL: "${apiProvider}"`
+        );
+        apiProvider = "localhost:3030";
+        await new Promise<void>((resolve) => {
+          chrome.storage.local.set({ apiProvider: apiProvider }, () => {
+            resolve();
+          });
+        });
+      } else if (!apiProvider || !this.isValidApiProvider(apiProvider)) {
+        apiProvider = "localhost:3030";
+        await new Promise<void>((resolve) => {
+          chrome.storage.local.set({ apiProvider: apiProvider }, () => {
+            resolve();
+          });
+        });
+      }
+
+      const { port, wsUrl } = this.parseApiProvider(apiProvider);
+
+      const connectionId = `ws-${Date.now()}-${port}`;
+
+      this.connection = new WSConnection({
+        id: connectionId,
+        port: port,
+        url: wsUrl,
+      });
+
+      await this.connection.connect();
+
+      console.log(`[WSManager] ✅ Connection established successfully`);
       return { success: true };
     } catch (error) {
+      console.error(`[WSManager] ❌ Connection failed:`, error);
+      this.connection = null;
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
@@ -378,55 +220,24 @@ export class WSManagerNew {
     }
   }
 
-  private disconnect(id: string): any {
-    const conn = this.connections.get(id);
-    if (!conn) {
-      return { success: false, error: "Connection not found" };
+  public disconnect(): { success: boolean } {
+    if (!this.connection) {
+      return { success: true };
     }
 
-    conn.disconnect();
-    return { success: true };
-  }
-
-  private sendMessage(id: string, data: any): any {
-    const conn = this.connections.get(id);
-    if (!conn) {
-      return { success: false, error: "Connection not found" };
-    }
-
-    conn.send(data);
-    return { success: true };
-  }
-
-  private getAllConnections(): any {
-    const states: WSConnectionState[] = [];
-    const connectionsArray: WSConnection[] = [];
-    this.connections.forEach((conn) => connectionsArray.push(conn));
-    for (let i = 0; i < connectionsArray.length; i++) {
-      const conn = connectionsArray[i];
-      states.push(conn.getState());
-    }
-    return { success: true, connections: states };
-  }
-
-  /**
-   * Lưu mapping requestId → connection để gửi response sau
-   */
-  public registerRequest(requestId: string, connectionId: string): void {
-    const connection = this.connections.get(connectionId);
-    if (connection) {
-      this.requestToConnection.set(requestId, connection);
+    try {
+      this.connection.disconnect();
+      this.connection = null;
+      return { success: true };
+    } catch (error) {
+      console.error(`[WSManager] ❌ Disconnect failed:`, error);
+      return { success: false };
     }
   }
 
-  /**
-   * Gửi response trực tiếp qua connection đã đăng ký
-   */
-  public sendResponse(requestId: string, data: any): boolean {
-    const connection = this.requestToConnection.get(requestId);
-    if (connection && connection.state.status === "connected") {
-      connection.send(data);
-      this.requestToConnection.delete(requestId);
+  public sendResponse(data: any): boolean {
+    if (this.connection && this.connection.state.status === "connected") {
+      this.connection.send(data);
       return true;
     }
     return false;

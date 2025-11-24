@@ -6,130 +6,190 @@ export interface WSConnectionState {
   url: string;
   status: "connecting" | "connected" | "disconnected" | "error";
   lastConnected?: number;
-  reconnectAttempts: number;
 }
 
 export class WSHelper {
   /**
-   * Gửi command tới background và đợi response
+   * Kết nối WebSocket (single connection)
    */
-  private static async sendCommand(command: any): Promise<any> {
-    const commandId = `cmd-${Date.now()}-${Math.random()
-      .toString(36)
-      .substr(2, 9)}`;
-
-    // Setup listener TRƯỚC KHI ghi command
-    return new Promise(async (resolve, reject) => {
-      const timeout = setTimeout(() => {
-        chrome.storage.onChanged.removeListener(listener);
-        console.error("[WSHelper] Command timeout:", commandId);
-        reject(new Error("Command timeout"));
-      }, 10000); // 10s timeout
-
-      const listener = (changes: any, areaName: string) => {
-        if (areaName !== "local") return;
-
-        if (changes.wsCommandResult) {
-          const result = changes.wsCommandResult.newValue;
-          if (result && result.commandId === commandId) {
-            clearTimeout(timeout);
-            chrome.storage.onChanged.removeListener(listener);
-            resolve(result.result);
-          }
-        }
-      };
-
-      // Đăng ký listener TRƯỚC
-      chrome.storage.onChanged.addListener(listener);
-
-      // Ghi command SAU khi listener đã sẵn sàng
-      await chrome.storage.local.set({
-        wsCommand: {
-          ...command,
-          commandId,
-          timestamp: Date.now(),
-        },
+  static async connect(): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: "connectWebSocket",
       });
-    });
+
+      // ✅ FIX: Validate response structure trước khi return
+      if (!response || typeof response !== "object") {
+        return { success: false, error: "Invalid response from background" };
+      }
+
+      if (typeof response.success !== "boolean") {
+        return { success: false, error: "Response missing success field" };
+      }
+
+      return response;
+    } catch (error) {
+      console.error("[WSHelper] Connect error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   /**
-   * Thêm connection mới
+   * Ngắt kết nối WebSocket
    */
-  static async addConnection(
-    port: number
-  ): Promise<{ success: boolean; connectionId?: string; error?: string }> {
-    return this.sendCommand({ action: "add", port });
+  static async disconnect(): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: "disconnectWebSocket",
+      });
+      return response || { success: false, error: "No response" };
+    } catch (error) {
+      console.error("[WSHelper] Disconnect error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   /**
-   * Xóa connection
+   * Lấy trạng thái connection hiện tại
    */
-  static async removeConnection(
-    connectionId: string
-  ): Promise<{ success: boolean; error?: string }> {
-    return this.sendCommand({ action: "remove", connectionId });
+  static async getConnectionState(): Promise<WSConnectionState | null> {
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: "getWSConnectionInfo",
+      });
+
+      if (response && response.success && response.state) {
+        return response.state;
+      }
+
+      // Fallback: Đọc trực tiếp từ storage với Promise wrapper
+      const storageResult = await new Promise<any>((resolve, reject) => {
+        chrome.storage.local.get(["wsStates"], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const states = storageResult?.wsStates || {};
+      const connectionIds = Object.keys(states);
+      if (connectionIds.length > 0) {
+        const connectionId = connectionIds[0];
+        const stateData = states[connectionId];
+
+        // 🔥 CRITICAL FIX: Validate stateData structure trước khi return
+        if (!stateData || typeof stateData !== "object") {
+          console.error(
+            `[WSHelper] ❌ Invalid stateData structure:`,
+            stateData
+          );
+          return null;
+        }
+
+        // Return với fallback values nếu fields bị thiếu
+        return {
+          id: stateData.id || connectionId,
+          port: stateData.port || 3030,
+          url: stateData.url || "ws://localhost:3030/ws",
+          status: stateData.status || "disconnected",
+          lastConnected: stateData.lastConnected,
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error("[WSHelper] ❌ Get state error:", error);
+
+      // Fallback: Try reading from storage even on error với Promise wrapper
+      try {
+        const storageResult = await new Promise<any>((resolve, reject) => {
+          chrome.storage.local.get(["wsStates"], (data: any) => {
+            if (chrome.runtime.lastError) {
+              reject(chrome.runtime.lastError);
+              return;
+            }
+            resolve(data || {});
+          });
+        });
+
+        const states = storageResult?.wsStates || {};
+        const connectionIds = Object.keys(states);
+
+        if (connectionIds.length > 0) {
+          const connectionId = connectionIds[0];
+          const stateData = states[connectionId];
+
+          // 🔥 CRITICAL FIX: Validate và return với fallback values
+          if (!stateData || typeof stateData !== "object") {
+            console.error(
+              `[WSHelper] ❌ Invalid fallback stateData:`,
+              stateData
+            );
+            return null;
+          }
+
+          return {
+            id: stateData.id || connectionId,
+            port: stateData.port || 3030,
+            url: stateData.url || "ws://localhost:3030/ws",
+            status: stateData.status || "disconnected",
+            lastConnected: stateData.lastConnected,
+          };
+        }
+      } catch (fallbackError) {
+        console.error(
+          "[WSHelper] ❌ Fallback storage read also failed:",
+          fallbackError
+        );
+      }
+
+      return null;
+    }
   }
 
   /**
-   * Kết nối
+   * Subscribe to connection state changes (single connection)
    */
-  static async connect(
-    connectionId: string
-  ): Promise<{ success: boolean; error?: string }> {
-    return this.sendCommand({ action: "connect", connectionId });
-  }
-
-  /**
-   * Ngắt kết nối
-   */
-  static async disconnect(
-    connectionId: string
-  ): Promise<{ success: boolean; error?: string }> {
-    return this.sendCommand({ action: "disconnect", connectionId });
-  }
-
-  /**
-   * Gửi message
-   */
-  static async sendMessage(
-    connectionId: string,
-    data: any
-  ): Promise<{ success: boolean; error?: string }> {
-    return this.sendCommand({ action: "send", connectionId, data });
-  }
-
-  /**
-   * Lấy tất cả connections
-   */
-  static async getAllConnections(): Promise<WSConnectionState[]> {
-    const result = await this.sendCommand({ action: "getAll" });
-    return result.connections || [];
-  }
-
-  /**
-   * Subscribe to connection state changes
-   */
-  static subscribeToStates(
-    callback: (states: Record<string, WSConnectionState>) => void
+  static subscribeToState(
+    callback: (state: WSConnectionState | null) => void
   ): () => void {
     const listener = (changes: any, areaName: string) => {
       if (areaName !== "local") return;
 
       if (changes.wsStates) {
         const states = changes.wsStates.newValue || {};
-        callback(states);
+        const connectionIds = Object.keys(states);
+
+        if (connectionIds.length > 0) {
+          callback(states[connectionIds[0]]);
+        } else {
+          callback(null);
+        }
       }
     };
 
     chrome.storage.onChanged.addListener(listener);
 
-    // Load initial states
+    // Load initial state
     chrome.storage.local.get(["wsStates"], (result) => {
-      callback(result.wsStates || {});
+      const states = result.wsStates || {};
+      const connectionIds = Object.keys(states);
+
+      if (connectionIds.length > 0) {
+        callback(states[connectionIds[0]]);
+      } else {
+        callback(null);
+      }
     });
 
-    // Return unsubscribe function
     return () => {
       chrome.storage.onChanged.removeListener(listener);
     };
