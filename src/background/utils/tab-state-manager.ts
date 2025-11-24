@@ -776,14 +776,7 @@ export class TabStateManager {
     }
   }
 
-  /**
-   * 🔓 INTERNAL method WITHOUT mutex (để gọi từ bên trong các methods đã có lock)
-   */
   private async markTabFreeInternal(tabId: number): Promise<boolean> {
-    console.log(
-      `[TabStateManager] 📍 START markTabFreeInternal for tab ${tabId}`
-    );
-
     try {
       // 🆕 CRITICAL: ĐỌC state MỚI NHẤT từ storage (không dùng cache)
       const result = await new Promise<any>((resolve, reject) => {
@@ -802,25 +795,13 @@ export class TabStateManager {
         folderPath: null,
       };
 
-      console.log(
-        `[TabStateManager] 📖 Current state for tab ${tabId}:`,
-        JSON.stringify(currentState, null, 2)
-      );
-
-      // 🔥 QUAN TRỌNG: GIỮ NGUYÊN folderPath từ storage (KHÔNG PHẢI từ cache)
       states[tabId] = {
         status: "free",
         requestId: null,
         requestCount: currentState.requestCount || 0,
-        folderPath: currentState.folderPath || null, // ✅ Từ storage, KHÔNG phải cache
+        folderPath: currentState.folderPath || null,
       };
 
-      console.log(
-        `[TabStateManager] 💾 New state to save for tab ${tabId}:`,
-        JSON.stringify(states[tabId], null, 2)
-      );
-
-      // 🔥 CRITICAL: Wrap storage.set in Promise để đảm bảo async/await
       await new Promise<void>((resolve, reject) => {
         chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
           if (chrome.runtime.lastError) {
@@ -831,18 +812,12 @@ export class TabStateManager {
             reject(chrome.runtime.lastError);
             return;
           }
-          console.log(
-            `[TabStateManager] ✅ storage.set SUCCESS for tab ${tabId}`
-          );
           resolve();
         });
       });
 
-      // 🆕 CRITICAL: Invalidate cache SAU KHI đã save (để force đọc lại storage lần sau)
       this.invalidateCache(tabId);
-      console.log(`[TabStateManager] 🗑️ Cache invalidated for tab ${tabId}`);
 
-      // 🆕 VERIFY: Đọc lại state để đảm bảo đã save đúng
       const verifyResult = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
           if (chrome.runtime.lastError) {
@@ -857,20 +832,7 @@ export class TabStateManager {
         (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
       const verifyState = verifyStates[tabId];
 
-      console.log(
-        `[TabStateManager] 🔍 VERIFY state for tab ${tabId}:`,
-        JSON.stringify(verifyState, null, 2)
-      );
-
       if (verifyState && verifyState.status === "free") {
-        console.log(
-          `[TabStateManager] ✅ Verification PASSED for tab ${tabId}`
-        );
-
-        // 🆕 CRITICAL: Notify UI AFTER verification
-        console.log(
-          `[TabStateManager] 📢 Calling notifyUIUpdate() for tab ${tabId}`
-        );
         this.notifyUIUpdate();
 
         return true;
@@ -1323,23 +1285,13 @@ export class TabStateManager {
       return;
     }
 
-    console.log(`[TabStateManager] 🔄 AUTO-RECOVERY CYCLE START`);
-
     this.invalidateCache();
 
-    // 🔒 CRITICAL: Acquire mutex lock BEFORE reading storage
     await this.storageMutex.acquire();
-    console.log(`[TabStateManager] 🔒 Mutex ACQUIRED for auto-recovery`);
 
     try {
       const result = await chrome.storage.session.get([this.STORAGE_KEY]);
       const states = (result && result[this.STORAGE_KEY]) || {};
-
-      console.log(
-        `[TabStateManager] 📊 Total tabs in storage: ${
-          Object.keys(states).length
-        }`
-      );
 
       let recoveredCount = 0;
       let busyTabsFound = 0;
@@ -1348,65 +1300,34 @@ export class TabStateManager {
         const tabState = state as TabStateData;
         const tabId = parseInt(tabIdStr);
 
-        // ✅ NEW: Chỉ recover các tab "busy" bằng cách check button state thực tế
         if (tabState.status === "busy") {
           busyTabsFound++;
-          console.log(
-            `[TabStateManager] 🔍 Found busy tab ${tabId}, checking button state...`
-          );
-
-          // ✅ CRITICAL: Kiểm tra button state để xác định AI có còn đang trả lời không
           const buttonState = await this.checkButtonState(tabId);
-
-          console.log(
-            `[TabStateManager] 🎯 Tab ${tabId} button state: isBusy=${buttonState.isBusy}`
-          );
-
-          // ✅ Nếu button KHÔNG còn busy (send icon hoặc disabled stop icon) → recover
           if (!buttonState.isBusy) {
             console.warn(
               `[TabStateManager] 🔧 Auto-recovering stuck tab ${tabId} (button shows AI finished)`
             );
 
-            // ✅ CRITICAL: Gọi internal method (KHÔNG acquire mutex vì đã có rồi)
             const freeSuccess = await this.markTabFreeInternal(tabId);
 
             if (freeSuccess) {
-              console.log(
-                `[TabStateManager] ✅ Tab ${tabId} marked FREE successfully`
-              );
               recoveredCount++;
             } else {
               console.error(
                 `[TabStateManager] ❌ Failed to mark tab ${tabId} FREE`
               );
             }
-          } else {
-            console.log(
-              `[TabStateManager] ⏳ Tab ${tabId} still busy (AI responding), skipping recovery`
-            );
           }
         }
       }
 
-      console.log(
-        `[TabStateManager] 📈 Recovery stats: ${busyTabsFound} busy tab(s) found, ${recoveredCount} recovered`
-      );
-
       if (recoveredCount > 0) {
-        console.log(
-          `[TabStateManager] ✅ Auto-recovered ${recoveredCount} stuck tab(s), notifying UI...`
-        );
         this.notifyUIUpdate();
-      } else {
-        console.log(`[TabStateManager] 💤 No tabs needed recovery`);
       }
     } catch (error) {
       console.error("[TabStateManager] ❌ Error in auto-recovery:", error);
     } finally {
-      // 🔓 CRITICAL: Release mutex lock in finally block
       this.storageMutex.release();
-      console.log(`[TabStateManager] 🔓 Mutex RELEASED for auto-recovery`);
     }
   }
 
@@ -1454,29 +1375,18 @@ export class TabStateManager {
   }
 
   private notifyUIUpdate(): void {
-    console.log(`[TabStateManager] 📢 notifyUIUpdate() CALLED`);
     try {
       const messagePayload = {
         action: "tabsUpdated",
         timestamp: Date.now(),
       };
 
-      console.log(
-        `[TabStateManager] 📤 Sending message to UI:`,
-        JSON.stringify(messagePayload, null, 2)
-      );
-
       // Send message to UI to refresh tab list
       const promise = chrome.runtime.sendMessage(messagePayload);
 
       if (promise && typeof promise.catch === "function") {
         promise
-          .then((response) => {
-            console.log(
-              `[TabStateManager] ✅ Message sent successfully, response:`,
-              response
-            );
-          })
+          .then(() => {})
           .catch((error) => {
             console.warn(
               "[TabStateManager] ⚠️ Failed to send tabsUpdated message (no receivers?):",
@@ -1490,9 +1400,6 @@ export class TabStateManager {
 
             // Retry after short delay (UI might still be initializing)
             setTimeout(() => {
-              console.log(
-                `[TabStateManager] 🔄 RETRYING message send after 500ms...`
-              );
               try {
                 const retryPromise = chrome.runtime.sendMessage({
                   action: "tabsUpdated",
@@ -1502,12 +1409,7 @@ export class TabStateManager {
 
                 if (retryPromise && typeof retryPromise.catch === "function") {
                   retryPromise
-                    .then((retryResponse) => {
-                      console.log(
-                        `[TabStateManager] ✅ RETRY successful, response:`,
-                        retryResponse
-                      );
-                    })
+                    .then(() => {})
                     .catch((retryError) => {
                       console.warn(
                         "[TabStateManager] ⚠️ Retry also failed, UI might not be ready"

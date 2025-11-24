@@ -39,12 +39,6 @@ const Sidebar: React.FC = () => {
 
       while (retryCount < maxRetries && !connectionInfo) {
         try {
-          console.log(
-            `[Sidebar] 🔍 Querying WSManager... (attempt ${
-              retryCount + 1
-            }/${maxRetries})`
-          );
-
           const response = await new Promise<any>((resolve) => {
             chrome.runtime.sendMessage(
               { action: "getWSConnectionInfo" },
@@ -64,7 +58,6 @@ const Sidebar: React.FC = () => {
 
           if (response && response.success && response.connectionId) {
             connectionInfo = response;
-            console.log("[Sidebar] ✅ Got connection info:", connectionInfo);
             break;
           } else {
             console.warn(
@@ -84,9 +77,6 @@ const Sidebar: React.FC = () => {
       }
 
       if (connectionInfo) {
-        console.log(`[Sidebar] ✅ WSManager ready after ${retryCount} retries`);
-
-        // 🔧 FIX: Set wsConnection ngay lập tức từ response
         setWsConnection({
           id: connectionInfo.connectionId,
           status: connectionInfo.state?.status || "disconnected",
@@ -96,7 +86,6 @@ const Sidebar: React.FC = () => {
         const storageResult = await chrome.storage.local.get(["apiProvider"]);
         const provider = storageResult?.apiProvider || "localhost:3030";
         setApiProvider(provider);
-        console.log("[Sidebar] ✅ Set apiProvider to:", provider);
       } else {
         console.error(
           `[Sidebar] ❌ WSManager init timeout after ${maxRetries} retries`
@@ -117,12 +106,7 @@ const Sidebar: React.FC = () => {
 
     const messageListener = (message: any) => {
       if (message.action === "tabsUpdated") {
-        console.log(
-          `[Sidebar] 🔄 tabsUpdated message received, calling loadTabs()...`
-        );
         loadTabs();
-      } else {
-        console.log(`[Sidebar] ⚠️ Unknown message action: ${message.action}`);
       }
     };
 
@@ -205,7 +189,6 @@ const Sidebar: React.FC = () => {
   }, []);
 
   const loadTabs = async (providedWsState?: { status: string }) => {
-    console.log(`[Sidebar] 📍 loadTabs() CALLED`);
     try {
       let wsState = providedWsState;
 
@@ -303,13 +286,7 @@ const Sidebar: React.FC = () => {
       }
 
       const tabStates = response.tabStates || [];
-
-      console.log(
-        `[Sidebar] 📊 Received ${tabStates.length} tab states from background`
-      );
-
       setTabs(tabStates);
-
       const activeTabIds: Set<string> = new Set(
         tabStates.map((t: any) => String(t.tabId))
       );
@@ -323,10 +300,7 @@ const Sidebar: React.FC = () => {
   };
 
   const loadWebSocketStatus = async () => {
-    console.log("[Sidebar] 🔍 DEBUG: loadWebSocketStatus() START");
-
     try {
-      // 🔧 FIX: Query WSManager trực tiếp thay vì đọc storage
       const response = await new Promise<any>((resolve) => {
         chrome.runtime.sendMessage(
           { action: "getWSConnectionInfo" },
@@ -345,8 +319,6 @@ const Sidebar: React.FC = () => {
       });
 
       if (response && response.success && response.connectionId) {
-        console.log("[Sidebar] ✅ Got connection info:", response);
-
         setWsConnection({
           id: response.connectionId,
           status: response.state?.status || "disconnected",
@@ -364,8 +336,6 @@ const Sidebar: React.FC = () => {
       console.error("[Sidebar] ❌ Error loading WebSocket status:", error);
       setWsConnection(null);
     }
-
-    console.log("[Sidebar] ✅ loadWebSocketStatus() COMPLETED");
   };
 
   const formatWebSocketUrl = (apiProvider: string): string => {
