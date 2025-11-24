@@ -179,14 +179,54 @@ const Sidebar: React.FC = () => {
 
     chrome.storage.onChanged.addListener(storageListener);
 
+    // 🆕 POLLING: Check connection status mỗi 2 giây để update UI
+    const connectionPollingInterval = setInterval(async () => {
+      try {
+        const storageResult = await chrome.storage.local.get([
+          "wsStates",
+          "wsDefaultConnectionId",
+        ]);
+        const states = storageResult?.wsStates || {};
+        const defaultConnectionId = storageResult?.wsDefaultConnectionId;
+
+        if (defaultConnectionId && states[defaultConnectionId]) {
+          const state = states[defaultConnectionId];
+          const currentStatus = wsConnection?.status;
+          const newStatus = state.status;
+
+          // Chỉ update nếu status thực sự thay đổi
+          if (currentStatus !== newStatus) {
+            console.log(
+              `[Sidebar] 🔄 Status changed: ${currentStatus} → ${newStatus}`
+            );
+            setWsConnection({
+              id: defaultConnectionId,
+              status: newStatus,
+            });
+
+            // Nếu vừa connected, reload tabs
+            if (newStatus === "connected" && currentStatus !== "connected") {
+              console.log(
+                "[Sidebar] ✅ Connection established, reloading tabs..."
+              );
+              await loadTabs();
+            }
+          }
+        }
+      } catch (error) {
+        console.error("[Sidebar] ❌ Polling error:", error);
+      }
+    }, 2000);
+
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
       chrome.tabs.onCreated.removeListener(tabCreatedListener);
       chrome.tabs.onRemoved.removeListener(tabRemovedListener);
       chrome.tabs.onUpdated.removeListener(tabUpdatedListener);
       chrome.storage.onChanged.removeListener(storageListener);
+      clearInterval(connectionPollingInterval); // 🆕 Cleanup polling
     };
-  }, []);
+  }, [wsConnection?.status]); // 🔥 FIX: Thêm dependency để re-run khi status thay đổi
 
   const loadTabs = async (providedWsState?: { status: string }) => {
     try {
@@ -386,10 +426,12 @@ const Sidebar: React.FC = () => {
 
   const handleToggleWebSocket = async () => {
     if (!wsConnection?.id) {
+      console.warn("[Sidebar] ⚠️ No connection ID available");
       return;
     }
 
     if (isTogglingWs) {
+      console.warn("[Sidebar] ⚠️ Toggle already in progress");
       return;
     }
 
@@ -397,11 +439,44 @@ const Sidebar: React.FC = () => {
 
     try {
       if (wsConnection.status === "connected") {
+        console.log("[Sidebar] 🔌 Disconnecting WebSocket...");
         await WSHelper.disconnect(wsConnection.id);
+        console.log("[Sidebar] ✅ Disconnected successfully");
       } else {
+        console.log(
+          "[Sidebar] 🔄 Connecting WebSocket (will create NEW connection)..."
+        );
         await WSHelper.connect(wsConnection.id);
+        console.log("[Sidebar] ✅ Connected successfully");
+
+        // 🆕 FIX: Đợi 1s rồi force check lại status từ storage
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        const storageResult = await chrome.storage.local.get([
+          "wsStates",
+          "wsDefaultConnectionId",
+        ]);
+        const states = storageResult?.wsStates || {};
+        const defaultConnectionId = storageResult?.wsDefaultConnectionId;
+
+        if (defaultConnectionId && states[defaultConnectionId]) {
+          const state = states[defaultConnectionId];
+          console.log(`[Sidebar] 🔍 Forced status check: ${state.status}`);
+
+          setWsConnection({
+            id: defaultConnectionId,
+            status: state.status,
+          });
+
+          // Nếu connected, reload tabs
+          if (state.status === "connected") {
+            console.log("[Sidebar] ✅ Reloading tabs after connect...");
+            await loadTabs();
+          }
+        }
       }
     } catch (error) {
+      console.error("[Sidebar] ❌ Toggle WebSocket failed:", error);
     } finally {
       setIsTogglingWs(false);
     }

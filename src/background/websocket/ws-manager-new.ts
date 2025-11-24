@@ -6,10 +6,12 @@ export class WSManagerNew {
   private requestToConnection: Map<string, WSConnection> = new Map();
 
   constructor() {
+    console.log("[WSManager] 🚀 Initializing WebSocket Manager...");
     this.cleanupOldConnections();
     this.createDefaultConnection();
     this.setupStorageListener();
     this.setupStateQueryHandler();
+    console.log("[WSManager] ✅ WebSocket Manager initialized");
   }
 
   /**
@@ -69,6 +71,8 @@ export class WSManagerNew {
   }
 
   private async createDefaultConnection(): Promise<void> {
+    console.log("[WSManager] 📡 Creating default WebSocket connection...");
+
     const storageResult = await new Promise<any>((resolve) => {
       chrome.storage.local.get(["apiProvider"], (data: any) => {
         resolve(data || {});
@@ -87,7 +91,13 @@ export class WSManagerNew {
     }
 
     const { port, wsUrl } = this.parseApiProvider(apiProvider);
+
+    // 🆕 STRATEGY: Tạo connection MỚI với ID unique mỗi lần
     const connectionId = `ws-${Date.now()}-${port}`;
+    console.log(
+      `[WSManager] 🆕 Creating NEW connection with ID: ${connectionId}`
+    );
+    console.log(`[WSManager] 🔗 Target URL: ${wsUrl}`);
 
     const defaultConn = new WSConnection({
       id: connectionId,
@@ -96,7 +106,7 @@ export class WSManagerNew {
     });
     this.connections.set(connectionId, defaultConn);
 
-    // 🔥 CRITICAL: Đợi storage.set() hoàn thành TRƯỚC KHI return
+    // Đợi storage.set() hoàn thành TRƯỚC KHI return
     await new Promise<void>((resolve, reject) => {
       chrome.storage.local.set(
         {
@@ -111,12 +121,15 @@ export class WSManagerNew {
             reject(chrome.runtime.lastError);
             return;
           }
+          console.log(
+            `[WSManager] ✅ Saved wsDefaultConnectionId: ${connectionId}`
+          );
           resolve();
         }
       );
     });
 
-    // 🔥 CRITICAL: Đợi storage.set() hoàn thành cho wsStates
+    // Đợi storage.set() hoàn thành cho wsStates
     await new Promise<void>((resolve, reject) => {
       chrome.storage.local.set(
         {
@@ -136,6 +149,9 @@ export class WSManagerNew {
             reject(chrome.runtime.lastError);
             return;
           }
+          console.log(
+            `[WSManager] ✅ Initialized state for connection ${connectionId}`
+          );
           resolve();
         }
       );
@@ -243,16 +259,27 @@ export class WSManagerNew {
       if (changes.apiProvider) {
         const newApiProvider = changes.apiProvider.newValue;
         if (newApiProvider && this.isValidApiProvider(newApiProvider)) {
-          // Disconnect old connection if exists
+          console.log(
+            `[WSManager] 🔄 API Provider changed to: ${newApiProvider}`
+          );
+          console.log(`[WSManager] 🧹 Cleaning up old connections...`);
+
+          // 🆕 STRATEGY: Disconnect và XÓA toàn bộ connections cũ
           const oldConnectionIds = Array.from(this.connections.keys());
           for (const id of oldConnectionIds) {
             const conn = this.connections.get(id);
             if (conn) {
+              console.log(`[WSManager] 🔌 Disconnecting old connection: ${id}`);
               conn.disconnect();
             }
             this.connections.delete(id);
           }
-          // Create new connection
+
+          console.log(
+            `[WSManager] ✅ Cleaned up ${oldConnectionIds.length} old connection(s)`
+          );
+
+          // 🆕 Tạo connection MỚI (không reuse connection cũ)
           this.createDefaultConnection();
         }
       }
