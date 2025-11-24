@@ -85,7 +85,22 @@ const Sidebar: React.FC = () => {
         // 🔧 FIX: Load apiProvider từ storage
         const storageResult = await chrome.storage.local.get(["apiProvider"]);
         const provider = storageResult?.apiProvider || "localhost:3030";
-        setApiProvider(provider);
+
+        // 🆕 CRITICAL: Validate và reset production URL
+        const isProductionUrl =
+          provider &&
+          (provider.includes("render.com") ||
+            provider.includes("herokuapp.com") ||
+            provider.includes("railway.app"));
+
+        if (isProductionUrl) {
+          console.warn(`[Sidebar] ⚠️ Production URL detected: ${provider}`);
+          console.warn(`[Sidebar] 🔄 Auto-reset to localhost:3030`);
+          await chrome.storage.local.set({ apiProvider: "localhost:3030" });
+          setApiProvider("localhost:3030");
+        } else {
+          setApiProvider(provider);
+        }
       } else {
         console.error(
           `[Sidebar] ❌ WSManager init timeout after ${maxRetries} retries`
@@ -179,7 +194,7 @@ const Sidebar: React.FC = () => {
 
     chrome.storage.onChanged.addListener(storageListener);
 
-    // 🆕 POLLING: Check connection status mỗi 2 giây để update UI
+    // 🆕 POLLING: Check connection status mỗi 5 giây để update UI
     const connectionPollingInterval = setInterval(async () => {
       try {
         const storageResult = await chrome.storage.local.get([
@@ -210,7 +225,7 @@ const Sidebar: React.FC = () => {
       } catch (error) {
         console.error("[Sidebar] ❌ Polling error:", error);
       }
-    }, 2000);
+    }, 5000);
 
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
@@ -470,21 +485,30 @@ const Sidebar: React.FC = () => {
       {/* WebSocket Status Header */}
       <div className="flex-shrink-0 p-3 border-b border-border-default bg-background">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div
-              className={`w-2 h-2 rounded-full ${
-                wsConnection?.status === "connected"
-                  ? "bg-green-500"
-                  : wsConnection?.status === "connecting"
-                  ? "bg-yellow-500 animate-pulse"
-                  : wsConnection?.status === "error"
-                  ? "bg-red-500"
-                  : "bg-gray-400"
-              }`}
-            />
-            <span className="text-xs text-text-secondary">
-              {wsConnection ? formatWebSocketUrl(apiProvider) : "Not connected"}
-            </span>
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  wsConnection?.status === "connected"
+                    ? "bg-green-500"
+                    : wsConnection?.status === "connecting"
+                    ? "bg-yellow-500 animate-pulse"
+                    : wsConnection?.status === "error"
+                    ? "bg-red-500"
+                    : "bg-gray-400"
+                }`}
+              />
+              <span className="text-xs text-text-secondary">
+                {wsConnection
+                  ? formatWebSocketUrl(apiProvider)
+                  : "Not connected"}
+              </span>
+            </div>
+            {wsConnection && (
+              <span className="text-[10px] text-text-secondary/70 ml-4">
+                Status: {wsConnection.status}
+              </span>
+            )}
           </div>
           <CustomButton
             variant={

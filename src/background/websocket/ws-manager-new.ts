@@ -74,13 +74,31 @@ export class WSManagerNew {
 
     let apiProvider = storageResult?.apiProvider;
 
-    if (!apiProvider || !this.isValidApiProvider(apiProvider)) {
+    // 🆕 CRITICAL: Reset production URL về localhost
+    const isProductionUrl =
+      apiProvider &&
+      (apiProvider.includes("render.com") ||
+        apiProvider.includes("herokuapp.com") ||
+        apiProvider.includes("railway.app"));
+
+    if (
+      !apiProvider ||
+      !this.isValidApiProvider(apiProvider) ||
+      isProductionUrl
+    ) {
+      const oldProvider = apiProvider;
       apiProvider = "localhost:3030";
+
       await new Promise<void>((resolve) => {
         chrome.storage.local.set({ apiProvider: apiProvider }, () => {
           resolve();
         });
       });
+
+      if (isProductionUrl) {
+        console.warn(`[WSManager] ⚠️ Production URL detected: ${oldProvider}`);
+        console.warn(`[WSManager] 🔄 Auto-reset to localhost:3030`);
+      }
     }
 
     const { port, wsUrl } = this.parseApiProvider(apiProvider);

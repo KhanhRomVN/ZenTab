@@ -23,6 +23,8 @@ export class WSConnection {
   private readonly MAX_RETRY_DURATION = 10000;
   private manualDisconnect = false;
   private forwardedRequests: Set<string> = new Set();
+  private lastPingTime: number = 0;
+  private readonly PING_TIMEOUT = 45000; // 45 seconds (30s backend ping + 15s buffer)
 
   public state: WSConnectionState;
 
@@ -86,7 +88,11 @@ export class WSConnection {
           this.state.lastConnected = Date.now();
           this.state.reconnectAttempts = 0;
           this.retryStartTime = undefined;
+          this.lastPingTime = Date.now(); // 🆕 Initialize ping time
           this.notifyStateChange();
+
+          // 🆕 Start health monitoring
+          this.startHealthMonitor();
 
           resolve();
         };
@@ -178,6 +184,28 @@ export class WSConnection {
 
       if (!message.timestamp) {
         message.timestamp = Date.now();
+      }
+
+      // 🆕 CRITICAL: Handle ping messages - reply with pong
+      if (message.type === "ping") {
+        console.log(`[WSConnection] 🏓 Received ping, sending pong...`);
+        try {
+          if (this.ws && this.state.status === "connected") {
+            const pongMessage = {
+              type: "pong",
+              timestamp: Date.now(),
+            };
+            this.ws.send(JSON.stringify(pongMessage));
+            console.log(`[WSConnection] ✅ Pong sent successfully`);
+          } else {
+            console.warn(
+              `[WSConnection] ⚠️ Cannot send pong - WebSocket not ready`
+            );
+          }
+        } catch (pongError) {
+          console.error(`[WSConnection] ❌ Failed to send pong:`, pongError);
+        }
+        return; // Don't process ping further
       }
 
       if (message.type === "cleanupMessages") {
@@ -579,6 +607,38 @@ export class WSConnection {
           chrome.storage.local.remove(["wsOutgoingMessage"]);
         }, 100);
       }
+    });
+  }
+
+  /**
+   * 🆕 Monitor connection health based on ping/pong
+   */
+  private startHealthMonitor(): void {
+    const checkInterval = setInterval(() => {
+      if (this.state.status !== "connected") {
+        return;
+      }
+
+      const timeSinceLastPing = Date.now() - this.lastPingTime;
+
+      if (timeSinceLastPing > this.PING_TIMEOUT) {
+        console.warn(
+          `[WSConnection] ⚠️ Connection timeout detected (${Math.floor(
+            timeSinceLastPing / 1000
+          )}s since last ping)`
+        );
+        console.warn(`[WSConnection] 🔄 Attempting to reconnect...`);
+
+        // Force reconnect
+        if (this.ws) {
+          this.ws.close();
+        }
+      }
+    }, 10000); // Check every 10 seconds
+
+    // Cleanup on disconnect
+    this.ws?.addEventListener("close", () => {
+      clearInterval(checkInterval);
     });
   }
 }
