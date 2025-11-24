@@ -196,9 +196,6 @@ const Sidebar: React.FC = () => {
 
           // Chỉ update nếu status thực sự thay đổi
           if (currentStatus !== newStatus) {
-            console.log(
-              `[Sidebar] 🔄 Status changed: ${currentStatus} → ${newStatus}`
-            );
             setWsConnection({
               id: defaultConnectionId,
               status: newStatus,
@@ -206,9 +203,6 @@ const Sidebar: React.FC = () => {
 
             // Nếu vừa connected, reload tabs
             if (newStatus === "connected" && currentStatus !== "connected") {
-              console.log(
-                "[Sidebar] ✅ Connection established, reloading tabs..."
-              );
               await loadTabs();
             }
           }
@@ -439,19 +433,10 @@ const Sidebar: React.FC = () => {
 
     try {
       if (wsConnection.status === "connected") {
-        console.log("[Sidebar] 🔌 Disconnecting WebSocket...");
         await WSHelper.disconnect(wsConnection.id);
-        console.log("[Sidebar] ✅ Disconnected successfully");
       } else {
-        console.log(
-          "[Sidebar] 🔄 Connecting WebSocket (will create NEW connection)..."
-        );
         await WSHelper.connect(wsConnection.id);
-        console.log("[Sidebar] ✅ Connected successfully");
-
-        // 🆕 FIX: Đợi 1s rồi force check lại status từ storage
         await new Promise((resolve) => setTimeout(resolve, 1000));
-
         const storageResult = await chrome.storage.local.get([
           "wsStates",
           "wsDefaultConnectionId",
@@ -461,7 +446,6 @@ const Sidebar: React.FC = () => {
 
         if (defaultConnectionId && states[defaultConnectionId]) {
           const state = states[defaultConnectionId];
-          console.log(`[Sidebar] 🔍 Forced status check: ${state.status}`);
 
           setWsConnection({
             id: defaultConnectionId,
@@ -470,7 +454,6 @@ const Sidebar: React.FC = () => {
 
           // Nếu connected, reload tabs
           if (state.status === "connected") {
-            console.log("[Sidebar] ✅ Reloading tabs after connect...");
             await loadTabs();
           }
         }

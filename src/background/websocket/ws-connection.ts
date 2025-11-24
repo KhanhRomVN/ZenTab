@@ -77,13 +77,8 @@ export class WSConnection {
 
     return new Promise<void>((resolve) => {
       try {
-        // 🆕 Tạo WebSocket connection MỚI (không dùng lại connection cũ)
         this.ws = new WebSocket(this.state.url);
-
         this.ws.onopen = () => {
-          console.log(
-            `[WSConnection] ✅ Connected to ${this.state.url} (Connection ID: ${this.state.id})`
-          );
           this.state.status = "connected";
           this.state.lastConnected = Date.now();
           this.state.reconnectAttempts = 0;
@@ -115,16 +110,10 @@ export class WSConnection {
               ? Date.now() - this.retryStartTime
               : 0;
 
-            // 🆕 Check: Chỉ retry nếu chưa vượt quá 3 lần VÀ chưa timeout
             if (
               elapsedTime < this.MAX_RETRY_DURATION &&
               this.state.reconnectAttempts < this.maxReconnectAttempts
             ) {
-              console.log(
-                `[WSConnection] 🔄 Scheduling reconnect (attempt ${
-                  this.state.reconnectAttempts + 1
-                }/${this.maxReconnectAttempts})...`
-              );
               this.scheduleReconnect();
             } else {
               console.error(
@@ -162,15 +151,7 @@ export class WSConnection {
 
   private scheduleReconnect(): void {
     this.state.reconnectAttempts++;
-    console.log(
-      `[WSConnection] ⏳ Reconnect scheduled in ${this.reconnectDelay}ms (attempt ${this.state.reconnectAttempts}/${this.maxReconnectAttempts})`
-    );
-
     this.reconnectTimer = setTimeout(() => {
-      console.log(
-        `[WSConnection] 🔄 Executing reconnect attempt ${this.state.reconnectAttempts}...`
-      );
-      // 🆕 Tạo connection MỚI (không reuse)
       this.connect();
     }, this.reconnectDelay) as any;
   }
