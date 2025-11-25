@@ -31,10 +31,10 @@ const Sidebar: React.FC = () => {
     // 🔥 FIX: Polling nhanh hơn (300ms) để UI responsive với busy state changes
     const intervalId = setInterval(() => {
       loadWebSocketStatus();
-    }, 300); // Faster polling để catch state changes nhanh hơn
+    }, 300);
 
     return () => clearInterval(intervalId);
-  }, []); // Empty deps array - chạy 1 lần và maintain interval
+  }, []);
 
   useEffect(() => {
     const initializeSidebar = async () => {
@@ -59,18 +59,7 @@ const Sidebar: React.FC = () => {
     initializeSidebar();
 
     const messageListener = (message: any) => {
-      console.log(`[Sidebar] 📨 Received message:`, {
-        action: message?.action,
-        timestamp: message?.timestamp,
-        retry: message?.retry,
-        fullMessage: message,
-        receivedAt: Date.now(),
-      });
-
       if (message.action === "tabsUpdated") {
-        console.log(
-          `[Sidebar] ✅ tabsUpdated message detected, calling loadTabs()...`
-        );
         // 🔥 NEW: Invalidate cache trước khi load để force fresh data
         loadTabs();
 
@@ -78,18 +67,10 @@ const Sidebar: React.FC = () => {
         setTimeout(() => {
           loadTabs();
         }, 200);
-
-        console.log(`[Sidebar] ✅ loadTabs() called (with follow-up check)`);
-      } else {
-        console.log(
-          `[Sidebar] ⚠️ Unrecognized message action: ${message?.action}`
-        );
       }
     };
 
-    console.log(`[Sidebar] 🎧 Adding message listener...`);
     chrome.runtime.onMessage.addListener(messageListener);
-    console.log(`[Sidebar] ✅ Message listener added`);
 
     const tabCreatedListener = () => {
       loadTabs();
@@ -154,11 +135,6 @@ const Sidebar: React.FC = () => {
   }, []);
 
   const loadTabs = async (providedWsState?: { status: string }) => {
-    console.log(`[Sidebar.loadTabs] 🔄 Starting tab load...`, {
-      providedWsState,
-      timestamp: Date.now(),
-    });
-
     try {
       let wsState = providedWsState;
 
@@ -205,13 +181,7 @@ const Sidebar: React.FC = () => {
             break;
           }
         } catch (error) {
-          console.error(`[Sidebar] ❌ Attempt ${attempts} threw error:`, error);
-          console.error(`[Sidebar] 🔍 Error type: ${typeof error}`);
-          console.error(
-            `[Sidebar] 🔍 Error message: ${
-              error instanceof Error ? error.message : String(error)
-            }`
-          );
+          // Silent error handling
         }
 
         // Wait before retry (except on last attempt)
@@ -222,52 +192,26 @@ const Sidebar: React.FC = () => {
       }
 
       if (!response) {
-        console.error(
-          `[Sidebar] ❌ All ${maxAttempts} attempts failed - no valid response`
-        );
-        console.error(
-          `[Sidebar] 💡 Possible causes: ServiceWorker not responding, TabStateManager disabled, or timeout too short`
-        );
         setTabs([]);
         setActiveTabs(new Set());
         return;
       }
 
       if (!response.success) {
-        console.error(
-          "[Sidebar] ❌ Failed to get tab states:",
-          response?.error || "Unknown error"
-        );
         setTabs([]);
         setActiveTabs(new Set());
         return;
       }
 
-      console.log(`[Sidebar.loadTabs] 📊 Received tab states:`, {
-        count: response.tabStates?.length || 0,
-        tabStates: response.tabStates,
-        timestamp: Date.now(),
-      });
-
       const tabStates = response.tabStates || [];
-
-      console.log(`[Sidebar.loadTabs] 🔧 Setting tabs state...`, {
-        newTabsCount: tabStates.length,
-        timestamp: Date.now(),
-      });
-
       setTabs(tabStates);
 
-      console.log(`[Sidebar.loadTabs] ✅ Tabs state updated in React`, {
-        timestamp: Date.now(),
-      });
       const activeTabIds: Set<string> = new Set(
         tabStates.map((t: any) => String(t.tabId))
       );
 
       setActiveTabs(activeTabIds);
     } catch (error) {
-      console.error("[Sidebar] ❌ Error in loadTabs:", error);
       setTabs([]);
       setActiveTabs(new Set());
     }
@@ -290,7 +234,6 @@ const Sidebar: React.FC = () => {
         setWsStatus("disconnected");
       }
     } catch (error) {
-      console.error("[Sidebar] ❌ Error loading WebSocket status:", error);
       setWsConnection(null);
       setWsStatus("disconnected");
     }
@@ -360,18 +303,11 @@ const Sidebar: React.FC = () => {
         if (result.success) {
           setWsStatus("disconnected");
           setWsConnection(null);
-        } else {
-          console.error("[Sidebar] ❌ Disconnect failed:", result.error);
         }
       } else {
-        // 🔥 CRITICAL: WSHelper.connect() đã clean state cũ rồi, chỉ cần gọi và đợi
         const result = await WSHelper.connect();
 
         if (!result || typeof result.success !== "boolean") {
-          console.warn(
-            "[Sidebar] ⚠️ Invalid response, verifying via storage..."
-          );
-
           // Đợi 300ms để backend ghi state
           await new Promise((resolve) => setTimeout(resolve, 300));
           const state = await WSHelper.getConnectionState();
@@ -383,19 +319,16 @@ const Sidebar: React.FC = () => {
               status: state.status,
             });
           } else {
-            console.error("[Sidebar] ❌ Connect failed (no valid state)");
             setWsStatus("error");
           }
         } else if (result.success) {
           setWsStatus("connected");
           await loadWebSocketStatus();
         } else {
-          console.error("[Sidebar] ❌ Connect failed:", result.error);
           setWsStatus("error");
         }
       }
     } catch (error) {
-      console.error("[Sidebar] ❌ Toggle WebSocket exception:", error);
       setWsStatus("error");
       setWsConnection(null);
     } finally {

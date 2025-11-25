@@ -563,15 +563,10 @@ export class TabStateManager {
     tabId: number,
     signal?: AbortSignal
   ): Promise<{ isBusy: boolean; uncertain?: boolean }> {
-    const logPrefix = `[TabStateManager.checkButtonState(${tabId})]`;
-
     try {
       if (signal?.aborted) {
-        console.log(`${logPrefix} ⏹️ Aborted before execution`);
         return { isBusy: false, uncertain: true };
       }
-
-      console.log(`${logPrefix} 🔍 Starting button state check...`);
 
       const browserAPI =
         typeof (globalThis as any).browser !== "undefined"
@@ -640,25 +635,16 @@ export class TabStateManager {
         uncertain: true,
       };
 
-      console.log(`${logPrefix} ✅ Button state checked:`, {
-        isBusy: buttonState.isBusy,
-        reason: buttonState.reason,
-        uncertain: buttonState.uncertain,
-        timestamp: Date.now(),
-      });
-
       return {
         isBusy: buttonState.isBusy,
         uncertain: buttonState.uncertain || false,
       };
     } catch (error) {
       if (error instanceof Error && error.message === "Aborted") {
-        console.log(`${logPrefix} ⏹️ Check aborted`);
         return { isBusy: false, uncertain: true };
       }
 
-      console.error(`${logPrefix} ❌ Error checking button state:`, error);
-      // 🆕 CRITICAL: Return uncertain state instead of assuming "free"
+      // Return uncertain state instead of assuming "free"
       return { isBusy: false, uncertain: true };
     }
   }
@@ -816,12 +802,6 @@ export class TabStateManager {
     tabId: number,
     requestId: string
   ): Promise<boolean> {
-    const logPrefix = `[TabStateManager.markTabBusy(${tabId})]`;
-    console.log(`${logPrefix} 🔄 Attempting to mark tab as BUSY...`, {
-      requestId,
-      timestamp: Date.now(),
-    });
-
     try {
       // 🔥 CRITICAL: Wrap storage.get() để đảm bảo async completion
       const result = await new Promise<any>((resolve, reject) => {
@@ -840,13 +820,6 @@ export class TabStateManager {
         folderPath: null,
       };
 
-      console.log(`${logPrefix} 📊 Current state before update:`, {
-        status: currentState.status,
-        requestId: currentState.requestId,
-        requestCount: currentState.requestCount,
-        folderPath: currentState.folderPath,
-      });
-
       // 🔥 CRITICAL: Preserve folderPath - use currentState.folderPath directly
       // KHÔNG dùng || null vì có thể gây mất dữ liệu
       states[tabId] = {
@@ -855,8 +828,6 @@ export class TabStateManager {
         requestCount: (currentState.requestCount || 0) + 1,
         folderPath: currentState.folderPath ?? null, // ✅ Dùng ?? thay vì ||
       };
-
-      console.log(`${logPrefix} 📝 New state to save:`, states[tabId]);
 
       // 🔥 CRITICAL: Wrap storage.set() để đảm bảo async completion
       await new Promise<void>((resolve, reject) => {
@@ -890,14 +861,11 @@ export class TabStateManager {
         // 🔥 NEW: Notify UI immediately after marking BUSY
         this.notifyUIUpdate();
 
-        console.log(`${logPrefix} ✅ Successfully marked tab as BUSY`);
         return true;
       } else {
-        console.error(`${logPrefix} ❌ Verification failed - state mismatch!`);
         return false;
       }
     } catch (error) {
-      console.error(`${logPrefix} ❌ Failed to mark tab as BUSY:`, error);
       return false;
     }
   }
@@ -915,30 +883,13 @@ export class TabStateManager {
   }
 
   private async markTabFreeInternal(tabId: number): Promise<boolean> {
-    const logPrefix = `[TabStateManager.markTabFree(${tabId})]`;
-    console.log(`${logPrefix} 🔄 Attempting to mark tab as FREE...`, {
-      timestamp: Date.now(),
-    });
-
     try {
-      // CRITICAL: ĐỌC state MỚI NHẤT từ storage (không dùng cache)
-      console.log(
-        `${logPrefix} 🔍 STEP 1: Reading current state from storage...`
-      );
       const result = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
           if (chrome.runtime.lastError) {
-            console.error(
-              `${logPrefix} ❌ Storage.get failed:`,
-              chrome.runtime.lastError
-            );
             reject(chrome.runtime.lastError);
             return;
           }
-          console.log(
-            `${logPrefix} ✅ Storage.get success, data keys:`,
-            Object.keys(data || {})
-          );
           resolve(data || {});
         });
       });
@@ -949,16 +900,6 @@ export class TabStateManager {
         folderPath: null,
       };
 
-      console.log(`${logPrefix} 📊 Current state before update:`, {
-        status: currentState.status,
-        requestId: currentState.requestId,
-        requestCount: currentState.requestCount,
-        folderPath: currentState.folderPath,
-        allTabIds: Object.keys(states),
-        timestamp: Date.now(),
-      });
-
-      console.log(`${logPrefix} 🔧 STEP 2: Preparing new state...`);
       states[tabId] = {
         status: "free",
         requestId: null,
@@ -966,45 +907,24 @@ export class TabStateManager {
         folderPath: currentState.folderPath || null,
       };
 
-      console.log(`${logPrefix} 📝 New state to save:`, {
-        newState: states[tabId],
-        timestamp: Date.now(),
-      });
-
-      console.log(`${logPrefix} 💾 STEP 3: Writing to storage...`);
       await new Promise<void>((resolve, reject) => {
         chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
           if (chrome.runtime.lastError) {
-            console.error(
-              `${logPrefix} ❌ Storage.set failed:`,
-              chrome.runtime.lastError
-            );
             reject(chrome.runtime.lastError);
             return;
           }
-          console.log(`${logPrefix} ✅ Storage.set success`);
           resolve();
         });
       });
 
-      console.log(
-        `${logPrefix} 💾 State saved to storage, invalidating cache...`
-      );
       this.invalidateCache(tabId);
-      console.log(`${logPrefix} ✅ Cache invalidated`);
 
-      console.log(`${logPrefix} 🔍 STEP 4: Verifying saved state...`);
       const verifyResult = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
           if (chrome.runtime.lastError) {
-            console.error(
-              `${logPrefix} ❌ Verification storage.get failed:`,
-              chrome.runtime.lastError
-            );
             reject(chrome.runtime.lastError);
             return;
           }
-          console.log(`${logPrefix} ✅ Verification storage.get success`);
           resolve(data || {});
         });
       });
@@ -1013,40 +933,13 @@ export class TabStateManager {
         (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
       const verifyState = verifyStates[tabId];
 
-      console.log(`${logPrefix} 📊 Verified state from storage:`, {
-        verifyState,
-        expectedStatus: "free",
-        actualStatus: verifyState?.status,
-        statusMatch: verifyState?.status === "free",
-        timestamp: Date.now(),
-      });
-
       if (verifyState && verifyState.status === "free") {
-        console.log(`${logPrefix} ✅ Verification SUCCESS - notifying UI...`);
-        console.log(`${logPrefix} 📢 STEP 5: Calling notifyUIUpdate()...`);
         this.notifyUIUpdate();
-        console.log(`${logPrefix} ✅ notifyUIUpdate() called`);
-
         return true;
       } else {
-        console.error(`${logPrefix} ❌ Verification FAILED - state mismatch!`, {
-          expected: "free",
-          actual: verifyState?.status,
-          verifyStateExists: !!verifyState,
-          verifyStateKeys: verifyState ? Object.keys(verifyState) : [],
-          timestamp: Date.now(),
-        });
         return false;
       }
     } catch (error) {
-      console.error(`${logPrefix} ❌ Exception in markTabFree:`, error);
-      console.error(`${logPrefix} 🔍 Exception details:`, {
-        errorType:
-          error instanceof Error ? error.constructor.name : typeof error,
-        errorMessage: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        timestamp: Date.now(),
-      });
       return false;
     }
   }
@@ -1188,32 +1081,15 @@ export class TabStateManager {
     tabId: number,
     folderPath: string | null
   ): Promise<boolean> {
-    const logPrefix = `[TabStateManager.markTabFreeWithFolder(${tabId})]`;
-    console.log(
-      `${logPrefix} 🔄 Attempting to mark tab as FREE with folder...`,
-      {
-        folderPath,
-        timestamp: Date.now(),
-      }
-    );
-
     // 🔥 CRITICAL: Use mutex lock to prevent race conditions
     await this.storageMutex.acquire();
     try {
-      console.log(
-        `${logPrefix} 🔍 STEP 1: Reading current state from storage...`
-      );
       const result = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
           if (chrome.runtime.lastError) {
-            console.error(
-              `${logPrefix} ❌ Storage.get failed:`,
-              chrome.runtime.lastError
-            );
             reject(chrome.runtime.lastError);
             return;
           }
-          console.log(`${logPrefix} ✅ Storage.get success`);
           resolve(data || {});
         });
       });
@@ -1224,16 +1100,6 @@ export class TabStateManager {
         folderPath: null,
       };
 
-      console.log(`${logPrefix} 📊 Current state before update:`, {
-        status: currentState.status,
-        requestId: currentState.requestId,
-        requestCount: currentState.requestCount,
-        currentFolderPath: currentState.folderPath,
-        newFolderPath: folderPath,
-        timestamp: Date.now(),
-      });
-
-      console.log(`${logPrefix} 🔧 STEP 2: Preparing new state...`);
       states[tabId] = {
         status: "free",
         requestId: null,
@@ -1241,39 +1107,24 @@ export class TabStateManager {
         folderPath: folderPath,
       };
 
-      console.log(`${logPrefix} 📝 New state to save:`, {
-        newState: states[tabId],
-        timestamp: Date.now(),
-      });
-
-      console.log(`${logPrefix} 💾 STEP 3: Writing to storage...`);
       await new Promise<void>((resolve, reject) => {
         chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
           if (chrome.runtime.lastError) {
-            console.error(
-              `${logPrefix} ❌ Storage.set failed:`,
-              chrome.runtime.lastError
-            );
             reject(chrome.runtime.lastError);
             return;
           }
-          console.log(`${logPrefix} ✅ Storage.set success`);
           resolve();
         });
       });
 
-      console.log(`${logPrefix} 🔍 STEP 4: Verifying saved state...`);
+      this.invalidateCache(tabId);
+
       const verifyResult = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
           if (chrome.runtime.lastError) {
-            console.error(
-              `${logPrefix} ❌ Verification storage.get failed:`,
-              chrome.runtime.lastError
-            );
             reject(chrome.runtime.lastError);
             return;
           }
-          console.log(`${logPrefix} ✅ Verification storage.get success`);
           resolve(data || {});
         });
       });
@@ -1282,58 +1133,22 @@ export class TabStateManager {
         (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
       const verifyState = verifyStates[tabId];
 
-      console.log(`${logPrefix} 📊 Verified state from storage:`, {
-        verifyState,
-        expectedStatus: "free",
-        expectedFolderPath: folderPath,
-        actualStatus: verifyState?.status,
-        actualFolderPath: verifyState?.folderPath,
-        statusMatch: verifyState?.status === "free",
-        folderPathMatch: verifyState?.folderPath === folderPath,
-        timestamp: Date.now(),
-      });
-
       if (
         verifyState &&
         verifyState.status === "free" &&
         verifyState.folderPath === folderPath
       ) {
-        console.log(
-          `${logPrefix} ✅ Verification SUCCESS - invalidating cache...`
-        );
         this.invalidateCache(tabId);
-        console.log(`${logPrefix} ✅ Cache invalidated`);
-
-        console.log(`${logPrefix} 📢 STEP 5: Calling notifyUIUpdate()...`);
         this.notifyUIUpdate();
-        console.log(`${logPrefix} ✅ notifyUIUpdate() called`);
-
         return true;
       } else {
-        console.error(`${logPrefix} ❌ Verification FAILED - state mismatch!`, {
-          expectedStatus: "free",
-          expectedFolderPath: folderPath,
-          actualStatus: verifyState?.status,
-          actualFolderPath: verifyState?.folderPath,
-          verifyStateExists: !!verifyState,
-          timestamp: Date.now(),
-        });
         return false;
       }
     } catch (error) {
-      console.error(`${logPrefix} ❌ Exception in markTabFreeWithFolder:`, {
-        error,
-        errorType:
-          error instanceof Error ? error.constructor.name : typeof error,
-        errorMessage: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        timestamp: Date.now(),
-      });
       return false;
     } finally {
       // 🔓 CRITICAL: Release mutex lock
       this.storageMutex.release();
-      console.log(`${logPrefix} 🔓 Mutex lock released`);
     }
   }
 
@@ -1600,35 +1415,20 @@ export class TabStateManager {
   }
 
   private notifyUIUpdate(): void {
-    const logPrefix = `[TabStateManager.notifyUIUpdate]`;
-    console.log(`${logPrefix} 📢 Sending UI update notification...`, {
-      timestamp: Date.now(),
-    });
-
     try {
       const messagePayload = {
         action: "tabsUpdated",
         timestamp: Date.now(),
       };
 
-      console.log(`${logPrefix} 📦 Message payload prepared:`, messagePayload);
-
-      // 🆕 FIX: Handle both Promise and callback-based sendMessage
-      console.log(`${logPrefix} 🚀 Calling chrome.runtime.sendMessage()...`);
-
       // Strategy: Use callback + Promise wrapper for reliability
       const sendWithCallback = () => {
         return new Promise<boolean>((resolve) => {
           chrome.runtime.sendMessage(messagePayload, (response) => {
             if (chrome.runtime.lastError) {
-              console.warn(
-                `${logPrefix} ⚠️ Callback received error:`,
-                chrome.runtime.lastError
-              );
               resolve(false);
               return;
             }
-            console.log(`${logPrefix} ✅ Callback received success`);
             resolve(true);
           });
         });
@@ -1645,74 +1445,18 @@ export class TabStateManager {
 
       sendPromise
         .then((success) => {
-          if (success) {
-            console.log(`${logPrefix} ✅ UI notification sent successfully`, {
-              timestamp: Date.now(),
-            });
-          } else {
-            console.warn(
-              `${logPrefix} ⚠️ First attempt failed or timed out, retrying...`,
-              {
-                timestamp: Date.now(),
-              }
-            );
-
+          if (!success) {
             // Retry after short delay
             setTimeout(() => {
-              console.log(`${logPrefix} 🔄 Executing retry attempt...`);
-              const retryPromise = sendWithCallback();
-
-              retryPromise
-                .then((retrySuccess) => {
-                  if (retrySuccess) {
-                    console.log(
-                      `${logPrefix} ✅ Retry notification sent successfully`,
-                      {
-                        timestamp: Date.now(),
-                      }
-                    );
-                  } else {
-                    console.error(`${logPrefix} ❌ Retry also failed`, {
-                      timestamp: Date.now(),
-                    });
-                  }
-                })
-                .catch((retryError) => {
-                  console.error(`${logPrefix} ❌ Retry exception:`, {
-                    retryError,
-                    errorType:
-                      retryError instanceof Error
-                        ? retryError.constructor.name
-                        : typeof retryError,
-                    errorMessage:
-                      retryError instanceof Error
-                        ? retryError.message
-                        : String(retryError),
-                    timestamp: Date.now(),
-                  });
-                });
+              sendWithCallback();
             }, 500);
           }
         })
         .catch((error) => {
-          console.error(`${logPrefix} ❌ Send promise rejected:`, {
-            error,
-            errorType:
-              error instanceof Error ? error.constructor.name : typeof error,
-            errorMessage:
-              error instanceof Error ? error.message : String(error),
-            timestamp: Date.now(),
-          });
+          // Silent error handling
         });
     } catch (error) {
-      console.error(`${logPrefix} ❌ Exception in notifyUIUpdate:`, {
-        error,
-        errorType:
-          error instanceof Error ? error.constructor.name : typeof error,
-        errorMessage: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        timestamp: Date.now(),
-      });
+      // Silent error handling
     }
   }
 }
