@@ -17,6 +17,127 @@ CRITICAL LANGUAGE RULE:
 - All explanations, descriptions, and responses must be in Vietnamese
 - Code comments should also be in Vietnamese when possible`;
 
+  // Clarification rules - quy tắc yêu cầu làm rõ thông tin khi task mơ hồ
+  private static readonly CLARIFICATION_RULE = `
+CRITICAL CLARIFICATION RULES (STRICTLY ENFORCED):
+
+═══════════════════════════════════════════════════════════════════
+RULE 1: WHEN TO ASK FOR CLARIFICATION (MANDATORY)
+═══════════════════════════════════════════════════════════════════
+You MUST use <ask_followup_question> tool when:
+
+1. FILE LOCATION AMBIGUOUS:
+   ❌ "thêm hàm tính tổng" → WHERE? Which file?
+   ❌ "tạo function trừ 2 số" → WHERE? New file or existing?
+   ❌ "viết hàm validate email" → WHERE? utils? helpers? models?
+   ✅ Use <ask_followup_question> to ask: "Bạn muốn thêm hàm này vào file nào?"
+
+2. MISSING CRITICAL DETAILS:
+   ❌ "thêm validation" → Validate WHAT? Which fields?
+   ❌ "sửa bug" → Bug Ở ĐÂU? What's the symptom?
+   ❌ "refactor code" → WHICH part? What's the goal?
+   ✅ Ask specific questions about missing details
+
+3. MULTIPLE POSSIBLE APPROACHES:
+   ❌ "tối ưu performance" → Which part? What metric?
+   ❌ "cải thiện UI" → Which component? What improvement?
+   ✅ Present options and ask user to choose
+
+4. UNSAFE ASSUMPTIONS:
+   ❌ DON'T guess file location based on function name
+   ❌ DON'T assume user wants new file vs existing file
+   ❌ DON'T assume implementation details without confirmation
+   ✅ ALWAYS ask when uncertain
+
+═══════════════════════════════════════════════════════════════════
+RULE 2: HOW TO ASK (FORMAT)
+═══════════════════════════════════════════════════════════════════
+Use this format:
+
+<ask_followup_question>
+<question>
+Tôi cần thêm thông tin để thực hiện task này:
+
+1. [Câu hỏi cụ thể về vấn đề 1]
+2. [Câu hỏi cụ thể về vấn đề 2]
+3. [Nếu có nhiều lựa chọn, liệt kê options]
+
+Ví dụ:
+- Option A: [Mô tả approach 1]
+- Option B: [Mô tả approach 2]
+
+Bạn muốn tôi làm theo cách nào?
+</question>
+</ask_followup_question>
+
+═══════════════════════════════════════════════════════════════════
+RULE 3: EXAMPLES - CORRECT BEHAVIOR
+═══════════════════════════════════════════════════════════════════
+
+❌ WRONG - Tự ý đoán:
+User: "thêm hàm trừ 2 số nguyên, ko cần test"
+AI: *Tự ý tạo src/utils/math.ts và thêm hàm vào đó*
+
+✅ CORRECT - Hỏi trước:
+User: "thêm hàm trừ 2 số nguyên, ko cần test"
+AI: 
+<ask_followup_question>
+<question>
+Tôi cần làm rõ một số điểm:
+
+1. Bạn muốn thêm hàm này vào file nào?
+   - File đã có sẵn (nếu có, cho tôi biết tên file)
+   - Tạo file mới (tôi sẽ tạo file mới với tên phù hợp)
+
+2. Tên hàm bạn muốn đặt là gì?
+   - Ví dụ: subtract(), minus(), tru()
+
+3. Hàm này có cần xử lý edge cases không?
+   - Kiểm tra input có phải số nguyên
+   - Xử lý overflow
+   - Hoặc chỉ trừ đơn giản
+
+Vui lòng cho tôi biết để tôi thực hiện chính xác.
+</question>
+</ask_followup_question>
+
+❌ WRONG - Thiếu context:
+User: "sửa bug trong function login"
+AI: *Đọc file và đoán bug là gì, rồi sửa*
+
+✅ CORRECT - Hỏi rõ:
+AI:
+<ask_followup_question>
+<question>
+Để sửa bug hiệu quả, tôi cần biết:
+
+1. Bug xảy ra khi nào? (Mô tả tình huống cụ thể)
+2. Error message là gì? (Nếu có)
+3. Expected behavior vs Actual behavior?
+4. File nào chứa function login?
+
+Thông tin này giúp tôi định vị và sửa bug chính xác.
+</question>
+</ask_followup_question>
+
+═══════════════════════════════════════════════════════════════════
+RULE 4: WHEN NOT TO ASK
+═══════════════════════════════════════════════════════════════════
+DON'T ask when:
+✅ Task is crystal clear: "sửa typo 'helo' thành 'hello' trong src/index.ts"
+✅ File path is explicit: "thêm function sum() vào src/utils/math.ts"
+✅ Context is complete: "refactor function X trong file Y để dùng async/await"
+
+═══════════════════════════════════════════════════════════════════
+FINAL REMINDER
+═══════════════════════════════════════════════════════════════════
+GOLDEN RULE: When in doubt, ASK. Don't guess.
+- Better to ask 1 clarifying question than make 10 wrong assumptions
+- User prefers being asked than having to fix incorrect implementations
+- <ask_followup_question> is your friend - use it liberally for ambiguous tasks
+═══════════════════════════════════════════════════════════════════
+`;
+
   // Text wrapping rules - quy tắc format XML tags và code blocks
   private static readonly TEXT_WRAP_RULE = `
 CRITICAL TEXT BLOCK WRAPPING RULES (20 RULES - STRICTLY ENFORCED):
@@ -307,15 +428,19 @@ REMEMBER:
 
   /**
    * Combine system prompt, user prompt với language và text wrap rules
+   * 🆕 OPTIMIZATION: Chỉ thêm rules cho request ĐẦU TIÊN (khi có systemPrompt)
    */
   private static buildFinalPrompt(
     systemPrompt: string | null | undefined,
     userPrompt: string
   ): string {
-    const finalPrompt = systemPrompt
-      ? `${systemPrompt}\n\n${this.LANGUAGE_RULE}\n\n${this.TEXT_WRAP_RULE}\n\nUSER REQUEST:\n${userPrompt}`
-      : `${this.LANGUAGE_RULE}\n\n${this.TEXT_WRAP_RULE}\n\nUSER REQUEST:\n${userPrompt}`;
-    return finalPrompt;
+    // 🆕 Request ĐẦU TIÊN: systemPrompt + rules + userPrompt
+    if (systemPrompt) {
+      return `${systemPrompt}\n\n${this.LANGUAGE_RULE}\n\n${this.CLARIFICATION_RULE}\n\n${this.TEXT_WRAP_RULE}\n\nUSER REQUEST:\n${userPrompt}`;
+    }
+
+    // 🆕 Request THỨ 2 TRỞ ĐI: chỉ userPrompt (đã chứa environment_details, open tabs, etc.)
+    return userPrompt;
   }
 
   private static async validateTab(
@@ -837,6 +962,8 @@ REMEMBER:
             responseSent = true;
             this.activePollingTasks.delete(tabId);
 
+            // 🆕 STEP 1: Extract original prompt từ wsMessages để tính prompt_tokens
+            let originalPrompt = "";
             let folderPathToLink: string | null = null;
             try {
               const messagesResult = await new Promise<any>(
@@ -863,14 +990,25 @@ REMEMBER:
                   (msg) => msg.data?.requestId === capturedRequestId
                 );
 
-                if (matchingMsg && matchingMsg.data?.folderPath) {
-                  folderPathToLink = matchingMsg.data.folderPath;
+                if (matchingMsg) {
+                  // 🆕 Extract folderPath
+                  if (matchingMsg.data?.folderPath) {
+                    folderPathToLink = matchingMsg.data.folderPath;
+                  }
+
+                  // 🆕 Extract original prompt để tính tokens
+                  const systemPrompt = matchingMsg.data?.systemPrompt || "";
+                  const userPrompt = matchingMsg.data?.userPrompt || "";
+                  originalPrompt = systemPrompt
+                    ? `${systemPrompt}\n\n${userPrompt}`
+                    : userPrompt;
+
                   break;
                 }
               }
             } catch (error) {
               console.error(
-                "[PromptController] ❌ Failed to get folderPath from wsMessages:",
+                "[PromptController] ❌ Failed to get data from wsMessages:",
                 error
               );
             }
@@ -930,13 +1068,15 @@ REMEMBER:
               } else {
                 // Object thiếu structure → rebuild
                 const builtResponse = this.buildOpenAIResponse(
-                  JSON.stringify(responseObj)
+                  JSON.stringify(responseObj),
+                  originalPrompt
                 );
                 responseToSend = JSON.stringify(builtResponse);
               }
             } else {
               const builtResponse = this.buildOpenAIResponse(
-                String(rawResponse)
+                String(rawResponse),
+                originalPrompt
               );
               responseToSend = JSON.stringify(builtResponse);
             }
@@ -2109,7 +2249,15 @@ REMEMBER:
     });
   }
 
-  private static buildOpenAIResponse(content: string): any {
+  /**
+   * Build OpenAI response với ACCURATE token calculation
+   * @param content - Response content từ DeepSeek
+   * @param originalPrompt - Original prompt để tính prompt_tokens
+   */
+  private static buildOpenAIResponse(
+    content: string,
+    originalPrompt: string = ""
+  ): any {
     // Generate unique IDs
     const generateHex = (length: number): string => {
       return Array.from({ length }, () =>
@@ -2121,9 +2269,34 @@ REMEMBER:
     const systemFingerprint = `fp_${generateHex(8)}`;
     const timestamp = Math.floor(Date.now() / 1000);
 
-    // Estimate tokens (rough approximation)
-    const contentLength = content.length;
-    const estimatedTokens = Math.ceil(contentLength / 4);
+    // 🆕 ACCURATE TOKEN CALCULATION
+    // Method: GPT-style tokenization estimate (1 token ≈ 4 chars for English, 2-3 chars for Vietnamese/Chinese)
+    const calculateTokens = (text: string): number => {
+      if (!text) return 0;
+
+      // Count different character types
+      let asciiChars = 0;
+      let nonAsciiChars = 0;
+
+      for (let i = 0; i < text.length; i++) {
+        const code = text.charCodeAt(i);
+        if (code < 128) {
+          asciiChars++;
+        } else {
+          nonAsciiChars++;
+        }
+      }
+
+      // ASCII: ~4 chars per token, Non-ASCII (Vietnamese/Chinese): ~2.5 chars per token
+      const asciiTokens = Math.ceil(asciiChars / 4);
+      const nonAsciiTokens = Math.ceil(nonAsciiChars / 2.5);
+
+      return asciiTokens + nonAsciiTokens;
+    };
+
+    const prompt_tokens = calculateTokens(originalPrompt);
+    const completion_tokens = calculateTokens(content);
+    const total_tokens = prompt_tokens + completion_tokens;
 
     const responseObject = {
       id: responseId,
@@ -2142,9 +2315,9 @@ REMEMBER:
         },
       ],
       usage: {
-        prompt_tokens: 0,
-        completion_tokens: estimatedTokens,
-        total_tokens: estimatedTokens,
+        prompt_tokens: prompt_tokens,
+        completion_tokens: completion_tokens,
+        total_tokens: total_tokens,
       },
       system_fingerprint: systemFingerprint,
     };
