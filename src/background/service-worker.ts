@@ -23,6 +23,69 @@ declare const browser: typeof chrome & any;
     "wsIncomingRequest",
   ]);
 
+  // 🔥 CRITICAL: Cleanup legacy storage data from old versions
+  (async () => {
+    try {
+      const allData = await new Promise<any>((resolve) => {
+        browserAPI.storage.local.get(null, (data: any) => {
+          resolve(data || {});
+        });
+      });
+
+      const keysToRemove: string[] = [];
+
+      // Check for legacy API Provider URLs (containing old domains)
+      if (allData.apiProvider) {
+        const legacyDomains = [
+          "zenend-e2z6.onrender.com",
+          "localhost:3030",
+          "127.0.0.1:3030",
+        ];
+
+        const currentProvider = String(allData.apiProvider || "").toLowerCase();
+        const isLegacy = legacyDomains.some((domain) =>
+          currentProvider.includes(domain.toLowerCase())
+        );
+
+        if (isLegacy) {
+          console.log(
+            `[ServiceWorker] 🧹 Removing legacy API Provider: ${allData.apiProvider}`
+          );
+          keysToRemove.push("apiProvider");
+        }
+      }
+
+      // Remove legacy connection states
+      const legacyKeys = [
+        "wsConnection",
+        "wsConnectionId",
+        "wsPort",
+        "wsUrl",
+        "lastConnected",
+      ];
+
+      for (const key of legacyKeys) {
+        if (allData[key] !== undefined) {
+          keysToRemove.push(key);
+        }
+      }
+
+      if (keysToRemove.length > 0) {
+        console.log(
+          `[ServiceWorker] 🧹 Cleaning up ${keysToRemove.length} legacy keys`
+        );
+        await new Promise<void>((resolve) => {
+          browserAPI.storage.local.remove(keysToRemove, () => {
+            resolve();
+          });
+        });
+        console.log(`[ServiceWorker] ✅ Legacy cleanup completed`);
+      }
+    } catch (error) {
+      console.error(`[ServiceWorker] ❌ Legacy cleanup failed:`, error);
+    }
+  })();
+
   const wsManager = new WSManagerNew();
   new TabBroadcaster(wsManager);
 

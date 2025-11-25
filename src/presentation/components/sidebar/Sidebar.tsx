@@ -21,7 +21,7 @@ const Sidebar: React.FC = () => {
     "connecting" | "connected" | "disconnected" | "error"
   >("disconnected");
   const [isTogglingWs, setIsTogglingWs] = useState(false);
-  const [apiProvider, setApiProvider] = useState<string>("localhost:3030");
+  const [apiProvider, setApiProvider] = useState<string>("");
   const [wsConnection, setWsConnection] = useState<{
     id: string;
     status: string;
@@ -38,9 +38,17 @@ const Sidebar: React.FC = () => {
 
   useEffect(() => {
     const initializeSidebar = async () => {
+      // 🔥 CRITICAL: Đọc API Provider từ storage TRƯỚC (single source of truth)
       const storageResult = await chrome.storage.local.get(["apiProvider"]);
-      const provider = storageResult?.apiProvider || "localhost:3030";
-      setApiProvider(provider);
+      const storedProvider = storageResult?.apiProvider || "";
+
+      // 🔥 FIX: Sync UI state với storage value ngay lập tức (có thể là empty string)
+      setApiProvider(storedProvider);
+      console.log(
+        `[Sidebar] 📊 Synced API Provider from storage: "${
+          storedProvider || "(empty)"
+        }"`
+      );
 
       // Load WebSocket status (chỉ load, không auto-connect)
       await loadWebSocketStatus();
@@ -104,8 +112,17 @@ const Sidebar: React.FC = () => {
 
       if (changes.apiProvider) {
         const newProvider = changes.apiProvider.newValue;
-        if (newProvider) {
+        const oldProvider = changes.apiProvider.oldValue;
+
+        // 🔥 FIX: Sync UI state khi storage thay đổi (từ Settings hoặc backend)
+        if (newProvider && newProvider !== oldProvider) {
+          console.log(
+            `[Sidebar] 🔄 API Provider changed: ${oldProvider} → ${newProvider}`
+          );
           setApiProvider(newProvider);
+
+          // 🔥 NEW: Reload WebSocket status để update UI với connection mới
+          loadWebSocketStatus();
         }
       }
     };
@@ -244,7 +261,10 @@ const Sidebar: React.FC = () => {
   };
 
   const formatWebSocketUrl = (apiProvider: string): string => {
-    if (!apiProvider) return "No API Provider";
+    // 🔥 FIX: Hiển thị message rõ ràng nếu chưa config
+    if (!apiProvider || apiProvider.trim() === "") {
+      return "Not configured - Click Settings to configure";
+    }
 
     try {
       let url = apiProvider.trim();
@@ -266,19 +286,25 @@ const Sidebar: React.FC = () => {
         return `${protocol}://${host}:3030/ws`;
       }
     } catch (error) {
-      return "Invalid API Provider";
+      return "Invalid API Provider - Check Settings";
     }
   };
 
   const handleApiProviderChange = async (newProvider: string) => {
-    // Save new provider
+    console.log(`[Sidebar] 💾 Saving new API Provider: ${newProvider}`);
+
+    // 🔥 CRITICAL: Save to storage FIRST (single source of truth)
     await chrome.storage.local.set({
       apiProvider: newProvider,
     });
+
+    // 🔥 FIX: Sync UI state AFTER storage write completes
     setApiProvider(newProvider);
+    console.log(`[Sidebar] ✅ API Provider saved and UI synced`);
 
     // Reconnect WebSocket với protocol mới (ws/wss)
     if (wsConnection?.status === "connected") {
+      console.log(`[Sidebar] 🔄 Reconnecting WebSocket with new provider...`);
       await WSHelper.disconnect();
 
       // Wait for disconnect to complete
@@ -289,6 +315,7 @@ const Sidebar: React.FC = () => {
 
       // Reload WebSocket status
       await loadWebSocketStatus();
+      console.log(`[Sidebar] ✅ WebSocket reconnected and status reloaded`);
     }
   };
 
@@ -312,12 +339,29 @@ const Sidebar: React.FC = () => {
       } else {
         const result = await WSHelper.connect();
 
-        // ✅ FIX: Validate result structure trước khi xử lý
+        // ✅ FIX: Validate result structure với fallback verification
         if (!result || typeof result.success !== "boolean") {
-          console.error(
-            "[Sidebar] ❌ Connect failed: Invalid response structure"
+          console.warn(
+            "[Sidebar] ⚠️ Invalid response, verifying via storage..."
           );
-          setWsStatus("error");
+
+          // Fallback: Verify bằng cách đọc trực tiếp từ storage
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          const state = await WSHelper.getConnectionState();
+
+          if (state && state.status === "connected") {
+            console.log("[Sidebar] ✅ Connection verified via storage");
+            setWsStatus("connected");
+            setWsConnection({
+              id: state.id,
+              status: state.status,
+            });
+          } else {
+            console.error(
+              "[Sidebar] ❌ Connect failed: Invalid response from background"
+            );
+            setWsStatus("error");
+          }
         } else if (result.success) {
           setWsStatus("connected");
           await loadWebSocketStatus();
@@ -368,7 +412,7 @@ const Sidebar: React.FC = () => {
               handleToggleWebSocket();
             }}
             loading={isTogglingWs}
-            disabled={isTogglingWs}
+            disabled={isTogglingWs || !apiProvider || apiProvider.trim() === ""}
             aria-label={
               wsConnection?.status === "connected"
                 ? "Disconnect WebSocket"

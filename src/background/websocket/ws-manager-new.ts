@@ -39,13 +39,8 @@ export class WSManagerNew {
   }
 
   private isValidApiProvider(apiProvider: string): boolean {
+    // 🔥 FIX: Chấp nhận empty string (user chưa config) - không cần validate
     if (!apiProvider || apiProvider.trim() === "") {
-      return false;
-    }
-
-    const trimmed = apiProvider.trim();
-
-    if (trimmed === "localhost" || trimmed === "0.0.0.0") {
       return false;
     }
 
@@ -60,8 +55,11 @@ export class WSManagerNew {
   } {
     let url = apiProvider.trim();
 
+    console.log(`[WSManager] 🔍 Parsing API Provider: "${apiProvider}"`);
+
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
       url = `http://${url}`;
+      console.log(`[WSManager] 🔧 Added http:// prefix: ${url}`);
     }
 
     let urlObj: URL;
@@ -77,14 +75,14 @@ export class WSManagerNew {
     const protocol = isHttps ? "wss" : "ws";
 
     let host = urlObj.hostname;
-    let port = 3030;
+    let port = 80;
 
     if (urlObj.port) {
       port = parseInt(urlObj.port, 10);
     } else if (isHttps) {
       port = 443;
     } else {
-      port = 3030;
+      port = 80;
     }
 
     const wsUrl =
@@ -125,12 +123,16 @@ export class WSManagerNew {
         const newApiProvider = changes.apiProvider.newValue;
         const oldApiProvider = changes.apiProvider.oldValue;
 
-        if (
-          newApiProvider &&
-          newApiProvider !== oldApiProvider &&
-          this.isValidApiProvider(newApiProvider)
-        ) {
+        // 🔥 FIX: Disconnect khi API Provider thay đổi (bất kể giá trị mới là gì)
+        if (newApiProvider !== oldApiProvider) {
+          console.log(
+            `[WSManager] 🔄 API Provider changed: "${
+              oldApiProvider || "(empty)"
+            }" → "${newApiProvider || "(empty)"}"`
+          );
+
           if (this.connection) {
+            console.log(`[WSManager] 🔌 Disconnecting old connection...`);
             this.connection.disconnect();
             this.connection = null;
           }
@@ -151,24 +153,38 @@ export class WSManagerNew {
     }
 
     try {
+      // 🔥 CRITICAL: Đọc API Provider từ storage (single source of truth)
       const storageResult = await new Promise<any>((resolve) => {
         chrome.storage.local.get(["apiProvider"], (data: any) => {
           resolve(data || {});
         });
       });
 
-      let apiProvider = storageResult?.apiProvider;
+      const apiProvider = storageResult?.apiProvider;
+      console.log(
+        `[WSManager] 📊 Read API Provider from storage: "${
+          apiProvider || "(empty)"
+        }"`
+      );
 
+      // 🔥 FIX: Nếu chưa có API Provider, KHÔNG connect và throw error
       if (!apiProvider || !this.isValidApiProvider(apiProvider)) {
-        apiProvider = "localhost:3030";
-        await new Promise<void>((resolve) => {
-          chrome.storage.local.set({ apiProvider: apiProvider }, () => {
-            resolve();
-          });
-        });
+        const errorMsg =
+          "API Provider not configured. Please set it in Settings.";
+        console.error(`[WSManager] ❌ ${errorMsg}`);
+
+        return {
+          success: false,
+          error: errorMsg,
+        };
       }
 
       const { port, wsUrl } = this.parseApiProvider(apiProvider);
+
+      console.log(`[WSManager] 🔌 Parsed connection details:`);
+      console.log(`[WSManager]   • API Provider: ${apiProvider}`);
+      console.log(`[WSManager]   • WebSocket URL: ${wsUrl}`);
+      console.log(`[WSManager]   • Port: ${port}`);
 
       const connectionId = `ws-${Date.now()}-${port}`;
 

@@ -9,22 +9,61 @@ export interface WSConnectionState {
 }
 
 export class WSHelper {
-  /**
-   * Kết nối WebSocket (single connection)
-   */
   static async connect(): Promise<{ success: boolean; error?: string }> {
     try {
+      // Log API Provider trước khi connect
+      const storageResult = await new Promise<any>((resolve) => {
+        chrome.storage.local.get(["apiProvider"], (data: any) => {
+          resolve(data || {});
+        });
+      });
+      const apiProvider = storageResult?.apiProvider || "";
+      console.log(
+        `[WSHelper] 🔌 Connecting to API Provider: "${
+          apiProvider || "(not configured)"
+        }"`
+      );
+
       const response = await chrome.runtime.sendMessage({
         action: "connectWebSocket",
       });
 
-      // ✅ FIX: Validate response structure trước khi return
-      if (!response || typeof response !== "object") {
-        return { success: false, error: "Invalid response from background" };
-      }
+      // ✅ FIX: Nếu response invalid, đợi storage state thay đổi thay vì retry message
+      if (
+        !response ||
+        typeof response !== "object" ||
+        typeof response.success !== "boolean"
+      ) {
+        console.warn(
+          "[WSHelper] ⚠️ Invalid response, waiting for storage state change..."
+        );
 
-      if (typeof response.success !== "boolean") {
-        return { success: false, error: "Response missing success field" };
+        // Đợi tối đa 3 giây để storage state thay đổi
+        const maxWaitTime = 3000;
+        const startTime = Date.now();
+
+        while (Date.now() - startTime < maxWaitTime) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+
+          // Kiểm tra storage state
+          const state = await this.getConnectionState();
+          if (state && state.status === "connected") {
+            console.log(
+              "[WSHelper] ✅ Connection verified via storage polling"
+            );
+            return { success: true };
+          }
+
+          if (state && state.status === "error") {
+            return { success: false, error: "Connection failed" };
+          }
+        }
+
+        // Timeout sau 3 giây
+        return {
+          success: false,
+          error: "Connection timeout - no storage state change detected",
+        };
       }
 
       return response;
@@ -94,11 +133,11 @@ export class WSHelper {
           return null;
         }
 
-        // Return với fallback values nếu fields bị thiếu
+        // 🔥 FIX: Return với fallback values (KHÔNG hardcode URL)
         return {
           id: stateData.id || connectionId,
-          port: stateData.port || 3030,
-          url: stateData.url || "ws://localhost:3030/ws",
+          port: stateData.port || 0, // 0 = chưa config
+          url: stateData.url || "", // Empty = chưa config
           status: stateData.status || "disconnected",
           lastConnected: stateData.lastConnected,
         };
@@ -127,7 +166,7 @@ export class WSHelper {
           const connectionId = connectionIds[0];
           const stateData = states[connectionId];
 
-          // 🔥 CRITICAL FIX: Validate và return với fallback values
+          // 🔥 CRITICAL FIX: Validate và return với fallback values (KHÔNG hardcode)
           if (!stateData || typeof stateData !== "object") {
             console.error(
               `[WSHelper] ❌ Invalid fallback stateData:`,
@@ -138,8 +177,8 @@ export class WSHelper {
 
           return {
             id: stateData.id || connectionId,
-            port: stateData.port || 3030,
-            url: stateData.url || "ws://localhost:3030/ws",
+            port: stateData.port || 0, // 0 = chưa config
+            url: stateData.url || "", // Empty = chưa config
             status: stateData.status || "disconnected",
             lastConnected: stateData.lastConnected,
           };

@@ -20,12 +20,17 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
   const [language, setLanguage] = useState<string>("en");
 
   useEffect(() => {
-    setApiProvider(currentApiProvider);
+    // 🔥 FIX: Sync local state với prop từ Sidebar (đã được sync với storage)
+    if (currentApiProvider && currentApiProvider !== apiProvider) {
+      console.log(
+        `[SettingDrawer] 🔄 Syncing API Provider: ${apiProvider} → ${currentApiProvider}`
+      );
+      setApiProvider(currentApiProvider);
+    }
   }, [currentApiProvider]);
 
-  const apiProviderOptions = [
-    { value: "localhost:3030", label: "localhost:3030" },
-  ];
+  // 🔥 FIX: Không có option mặc định - user tự nhập hoàn toàn
+  const apiProviderOptions: Array<{ value: string; label: string }> = [];
 
   const languageOptions = [
     { value: "en", label: "English" },
@@ -34,7 +39,14 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
 
   const handleApiProviderChange = (value: string | string[]) => {
     const providerValue = Array.isArray(value) ? value[0] : value;
+
+    // 🔥 FIX: Update local state FIRST, then notify parent to save to storage
+    console.log(
+      `[SettingDrawer] 📝 User changed API Provider to: ${providerValue}`
+    );
     setApiProvider(providerValue);
+
+    // 🔥 CRITICAL: Parent (Sidebar) will handle storage write and WebSocket reconnect
     onApiProviderChange(providerValue);
   };
 
@@ -71,14 +83,17 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
               value={apiProvider}
               options={apiProviderOptions}
               onChange={handleApiProviderChange}
-              placeholder="Enter API provider (e.g., localhost:xxxx or https://example.com)..."
+              placeholder="Enter API provider (e.g., 192.168.1.100:8080 or https://api.example.com)..."
               creatable={true}
               size="sm"
             />
             <p className="text-xs text-text-secondary mt-1 ml-1">
               💡 Tip: Use <span className="font-mono">https://</span> prefix for
-              secure connections (wss://). Backend port is auto-detected (3030
-              for localhost, 443 for HTTPS).
+              secure connections (wss://). Default port is 80 for http://, 443
+              for https://. You must specify port explicitly (e.g.,{" "}
+              <span className="font-mono">192.168.1.100:8080</span>). Example:{" "}
+              <span className="font-mono">192.168.1.100:8080</span> or{" "}
+              <span className="font-mono">https://api.example.com:443</span>
             </p>
           </div>
 
