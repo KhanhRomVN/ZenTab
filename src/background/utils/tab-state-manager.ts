@@ -1170,6 +1170,20 @@ export class TabStateManager {
         await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
       }
 
+      // 🆕 CRITICAL: Clear accumulated tokens for this folder
+      try {
+        // Dynamic import để tránh circular dependency
+        const { PromptController } = await import(
+          "../deepseek/prompt-controller"
+        );
+        await PromptController.clearTokensForFolder(folderPath);
+      } catch (error) {
+        console.error(
+          `[TabStateManager] ❌ Error clearing tokens for folder "${folderPath}":`,
+          error
+        );
+      }
+
       return true;
     } catch (error) {
       console.error(`[TabStateManager] ❌ Error unlinking folder:`, error);

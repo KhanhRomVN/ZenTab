@@ -93,4 +93,9 @@ export class DeepSeekController {
       );
     }
   }
+
+  // Token management operations
+  static async clearTokensForFolder(folderPath: string): Promise<void> {
+    return PromptController.clearTokensForFolder(folderPath);
+  }
 }

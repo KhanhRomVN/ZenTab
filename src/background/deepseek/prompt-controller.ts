@@ -10,6 +10,301 @@ export class PromptController {
   private static activePollingTasks: Map<number, string> = new Map();
   private static config: DeepSeekConfig = DEFAULT_CONFIG;
   private static tabStateManager = TabStateManager.getInstance();
+  /**
+   * 🆕 STORAGE KEY cho folder tokens
+   */
+  private static readonly FOLDER_TOKENS_KEY = "folderTokenAccumulator";
+
+  /**
+   * 🆕 ACCURATE TOKEN CALCULATION using gpt-tokenizer (pure JS, no WASM)
+   */
+  private static calculateTokensAndLog(text: string, label: string): number {
+    if (!text) {
+      console.log(`[TokenCalculation] ${label}: Empty text → 0 tokens`);
+      return 0;
+    }
+
+    try {
+      // Tokenize text using gpt-tokenizer (GPT-3.5/GPT-4 compatible)
+      const tokens = encode(text);
+      const tokenCount = tokens.length;
+
+      // Count words (split by whitespace)
+      const words = text
+        .trim()
+        .split(/\s+/)
+        .filter((w) => w.length > 0);
+      const wordCount = words.length;
+
+      // Count characters
+      const charCount = text.length;
+
+      // 🆕 LOG: Detailed statistics
+      console.log(`[TokenCalculation] ═══════════════════════════════════════`);
+      console.log(`[TokenCalculation] ${label} Statistics:`);
+      console.log(
+        `[TokenCalculation]   📝 Characters: ${charCount.toLocaleString()}`
+      );
+      console.log(
+        `[TokenCalculation]   📖 Words: ${wordCount.toLocaleString()}`
+      );
+      console.log(
+        `[TokenCalculation]   🎯 Tokens: ${tokenCount.toLocaleString()}`
+      );
+      console.log(
+        `[TokenCalculation]   📊 Chars/Token ratio: ${(
+          charCount / tokenCount
+        ).toFixed(2)}`
+      );
+      console.log(
+        `[TokenCalculation]   📊 Words/Token ratio: ${(
+          wordCount / tokenCount
+        ).toFixed(2)}`
+      );
+
+      // Preview first 100 chars
+      const preview = text.substring(0, 100).replace(/\n/g, "\\n");
+      console.log(
+        `[TokenCalculation]   👁️  Preview: "${preview}${
+          text.length > 100 ? "..." : ""
+        }"`
+      );
+      console.log(`[TokenCalculation] ═══════════════════════════════════════`);
+
+      return tokenCount;
+    } catch (error) {
+      console.error(
+        `[TokenCalculation] ❌ Error calculating tokens for ${label}:`,
+        error
+      );
+      console.error(`[TokenCalculation] 🔍 Text length: ${text.length} chars`);
+      console.error(
+        `[TokenCalculation] 🔍 Text preview: "${text.substring(0, 200)}"`
+      );
+
+      // Fallback to word-based estimation
+      const words = text
+        .trim()
+        .split(/\s+/)
+        .filter((w) => w.length > 0);
+      const wordCount = words.length;
+
+      // Estimate: ~0.75 tokens per word (more accurate than char-based)
+      const estimatedTokens = Math.ceil(wordCount * 0.75);
+
+      console.warn(
+        `[TokenCalculation] ⚠️ Using fallback estimation: ${estimatedTokens} tokens (based on ${wordCount} words)`
+      );
+
+      return estimatedTokens;
+    }
+  }
+
+  /**
+   * 🆕 Save accumulated tokens cho một folder_path
+   */
+  // 🆕 ADD: Mutex lock để tránh race condition
+  private static folderTokenMutex: Map<string, Promise<void>> = new Map();
+
+  private static async saveTokensForFolder(
+    folderPath: string,
+    prompt_tokens: number,
+    completion_tokens: number,
+    total_tokens: number
+  ): Promise<void> {
+    // 🔒 CRITICAL: Acquire lock cho folder này
+    while (this.folderTokenMutex.has(folderPath)) {
+      await this.folderTokenMutex.get(folderPath);
+    }
+
+    // Tạo promise để lock
+    let releaseLock: () => void;
+    const lockPromise = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    this.folderTokenMutex.set(folderPath, lockPromise);
+
+    try {
+      const browserAPI = getBrowserAPI();
+
+      // Đọc current accumulator (giờ đã được protect bởi mutex)
+      const result = await new Promise<any>((resolve, reject) => {
+        browserAPI.storage.session.get(
+          [this.FOLDER_TOKENS_KEY],
+          (data: any) => {
+            if (browserAPI.runtime.lastError) {
+              reject(browserAPI.runtime.lastError);
+              return;
+            }
+            resolve(data || {});
+          }
+        );
+      });
+
+      const accumulator = result[this.FOLDER_TOKENS_KEY] || {};
+
+      // 🔥 CRITICAL: Đọc giá trị hiện tại từ accumulator
+      const currentTokens = accumulator[folderPath] || {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+      };
+
+      // 🔥 DEBUG LOG: Trước khi cộng dồn
+      console.log(`[TokenAccumulation] 🔍 Before accumulation:`);
+      console.log(
+        `[TokenAccumulation]   - Current in storage: prompt=${currentTokens.prompt_tokens}, completion=${currentTokens.completion_tokens}, total=${currentTokens.total_tokens}`
+      );
+      console.log(
+        `[TokenAccumulation]   - Adding this request: prompt=${prompt_tokens}, completion=${completion_tokens}, total=${total_tokens}`
+      );
+
+      // 🔥 CRITICAL: Cộng dồn tokens
+      const newPromptTokens = currentTokens.prompt_tokens + prompt_tokens;
+      const newCompletionTokens =
+        currentTokens.completion_tokens + completion_tokens;
+      const newTotalTokens = currentTokens.total_tokens + total_tokens;
+
+      // 🔥 DEBUG LOG: Sau khi cộng dồn
+      console.log(`[TokenAccumulation] 🔍 After accumulation:`);
+      console.log(
+        `[TokenAccumulation]   - New totals: prompt=${newPromptTokens}, completion=${newCompletionTokens}, total=${newTotalTokens}`
+      );
+
+      // 🔥 CRITICAL: Validate calculation
+      if (newTotalTokens !== newPromptTokens + newCompletionTokens) {
+        console.error(
+          `[TokenAccumulation] ❌ CALCULATION ERROR! total_tokens mismatch!`
+        );
+        console.error(
+          `[TokenAccumulation]   - Expected: ${
+            newPromptTokens + newCompletionTokens
+          }`
+        );
+        console.error(`[TokenAccumulation]   - Got: ${newTotalTokens}`);
+      }
+
+      accumulator[folderPath] = {
+        prompt_tokens: newPromptTokens,
+        completion_tokens: newCompletionTokens,
+        total_tokens: newTotalTokens,
+        lastUpdated: Date.now(),
+      };
+
+      // Save lại
+      await new Promise<void>((resolve, reject) => {
+        browserAPI.storage.session.set(
+          { [this.FOLDER_TOKENS_KEY]: accumulator },
+          () => {
+            if (browserAPI.runtime.lastError) {
+              reject(browserAPI.runtime.lastError);
+              return;
+            }
+            resolve();
+          }
+        );
+      });
+
+      console.log(
+        `[PromptController] 📊 Saved tokens for folder "${folderPath}":`,
+        accumulator[folderPath]
+      );
+    } catch (error) {
+      console.error(
+        `[PromptController] ❌ Error saving tokens for folder:`,
+        error
+      );
+    } finally {
+      // 🔓 CRITICAL: Release lock
+      this.folderTokenMutex.delete(folderPath);
+      releaseLock!();
+    }
+  }
+
+  /**
+   * 🆕 Get accumulated tokens cho một folder_path
+   */
+  private static async getTokensForFolder(folderPath: string): Promise<{
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  } | null> {
+    try {
+      const browserAPI = getBrowserAPI();
+
+      const result = await new Promise<any>((resolve, reject) => {
+        browserAPI.storage.session.get(
+          [this.FOLDER_TOKENS_KEY],
+          (data: any) => {
+            if (browserAPI.runtime.lastError) {
+              reject(browserAPI.runtime.lastError);
+              return;
+            }
+            resolve(data || {});
+          }
+        );
+      });
+
+      const accumulator = result[this.FOLDER_TOKENS_KEY] || {};
+      return accumulator[folderPath] || null;
+    } catch (error) {
+      console.error(
+        `[PromptController] ❌ Error getting tokens for folder:`,
+        error
+      );
+      return null;
+    }
+  }
+
+  /**
+   * 🆕 Clear accumulated tokens cho một folder_path
+   */
+  public static async clearTokensForFolder(folderPath: string): Promise<void> {
+    try {
+      const browserAPI = getBrowserAPI();
+
+      const result = await new Promise<any>((resolve, reject) => {
+        browserAPI.storage.session.get(
+          [this.FOLDER_TOKENS_KEY],
+          (data: any) => {
+            if (browserAPI.runtime.lastError) {
+              reject(browserAPI.runtime.lastError);
+              return;
+            }
+            resolve(data || {});
+          }
+        );
+      });
+
+      const accumulator = result[this.FOLDER_TOKENS_KEY] || {};
+
+      if (accumulator[folderPath]) {
+        delete accumulator[folderPath];
+
+        await new Promise<void>((resolve, reject) => {
+          browserAPI.storage.session.set(
+            { [this.FOLDER_TOKENS_KEY]: accumulator },
+            () => {
+              if (browserAPI.runtime.lastError) {
+                reject(browserAPI.runtime.lastError);
+                return;
+              }
+              resolve();
+            }
+          );
+        });
+
+        console.log(
+          `[PromptController] 🧹 Cleared tokens for folder "${folderPath}"`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `[PromptController] ❌ Error clearing tokens for folder:`,
+        error
+      );
+    }
+  }
 
   // Language rule - yêu cầu AI trả lời bằng tiếng Việt
   private static readonly LANGUAGE_RULE = `
@@ -1019,7 +1314,110 @@ REMEMBER:
               );
             }
 
+            // 🆕 FALLBACK: Nếu không tìm thấy folderPath từ wsMessages, thử lấy từ tab state
+            if (!folderPathToLink) {
+              console.warn(
+                `[PromptController] ⚠️ folderPath not found in wsMessages for request ${capturedRequestId}, trying fallback...`
+              );
+
+              try {
+                const tabState = await this.tabStateManager.getTabState(tabId);
+                if (tabState && tabState.folderPath) {
+                  folderPathToLink = tabState.folderPath;
+                  console.log(
+                    `[PromptController] ✅ Fallback successful: got folderPath from tab state: "${folderPathToLink}"`
+                  );
+                } else {
+                  console.warn(
+                    `[PromptController] ⚠️ Fallback failed: tab state has no folderPath. Tokens will NOT be accumulated!`
+                  );
+                }
+              } catch (fallbackError) {
+                console.error(
+                  `[PromptController] ❌ Fallback error:`,
+                  fallbackError
+                );
+              }
+            }
+
+            // STEP 2: Tính tokens cho request hiện tại
+            const currentPromptTokens = this.calculateTokensAndLog(
+              originalPrompt,
+              "CURRENT_REQUEST_PROMPT"
+            );
+            const currentCompletionTokens = this.calculateTokensAndLog(
+              typeof rawResponse === "string"
+                ? rawResponse
+                : JSON.stringify(rawResponse),
+              "CURRENT_REQUEST_COMPLETION"
+            );
+            const currentTotalTokens =
+              currentPromptTokens + currentCompletionTokens;
+
+            // 🆕 STEP 3: Save tokens vào folder accumulator (nếu có folderPath)
             if (folderPathToLink) {
+              console.log(
+                `[PromptController] 💾 Saving tokens to accumulator for folder: "${folderPathToLink}"`
+              );
+              console.log(
+                `[PromptController] 💾 Current request tokens: prompt=${currentPromptTokens}, completion=${currentCompletionTokens}, total=${currentTotalTokens}`
+              );
+
+              await this.saveTokensForFolder(
+                folderPathToLink,
+                currentPromptTokens,
+                currentCompletionTokens,
+                currentTotalTokens
+              );
+
+              // 🆕 VERIFY: Đọc lại để verify tokens đã được save
+              const verifyTokens = await this.getTokensForFolder(
+                folderPathToLink
+              );
+              if (verifyTokens) {
+                console.log(
+                  `[PromptController] ✅ Verified accumulated tokens: prompt=${verifyTokens.prompt_tokens}, completion=${verifyTokens.completion_tokens}, total=${verifyTokens.total_tokens}`
+                );
+
+                // 🆕 DEBUG: Log chi tiết để track accumulation
+                console.log(
+                  `[TokenAccumulation] ═══════════════════════════════════════`
+                );
+                console.log(
+                  `[TokenAccumulation] 📂 Folder: "${folderPathToLink}"`
+                );
+                console.log(
+                  `[TokenAccumulation] 📝 Request ID: ${capturedRequestId}`
+                );
+                console.log(`[TokenAccumulation] 📊 Current Request:`);
+                console.log(
+                  `[TokenAccumulation]   - Prompt: ${currentPromptTokens}`
+                );
+                console.log(
+                  `[TokenAccumulation]   - Completion: ${currentCompletionTokens}`
+                );
+                console.log(
+                  `[TokenAccumulation]   - Total: ${currentTotalTokens}`
+                );
+                console.log(`[TokenAccumulation] 📊 Accumulated Total:`);
+                console.log(
+                  `[TokenAccumulation]   - Prompt: ${verifyTokens.prompt_tokens}`
+                );
+                console.log(
+                  `[TokenAccumulation]   - Completion: ${verifyTokens.completion_tokens}`
+                );
+                console.log(
+                  `[TokenAccumulation]   - Total: ${verifyTokens.total_tokens}`
+                );
+                console.log(
+                  `[TokenAccumulation] ═══════════════════════════════════════`
+                );
+              } else {
+                console.error(
+                  `[PromptController] ❌ Failed to verify accumulated tokens for folder "${folderPathToLink}"`
+                );
+              }
+
               const freeSuccess =
                 await this.tabStateManager.markTabFreeWithFolder(
                   tabId,
@@ -1052,9 +1450,23 @@ REMEMBER:
                   typeof parsedObject === "object" &&
                   parsedObject.choices
                 ) {
-                  responseToSend = JSON.stringify(parsedObject);
+                  // 🆕 FIX: Nếu đã có JSON response từ DeepSeek, vẫn cần rebuild với accumulated tokens
+                  if (folderPathToLink) {
+                    const builtResponse = await this.buildOpenAIResponse(
+                      rawResponse,
+                      originalPrompt,
+                      folderPathToLink
+                    );
+                    responseToSend = JSON.stringify(builtResponse);
+                  } else {
+                    responseToSend = JSON.stringify(parsedObject);
+                  }
                 } else {
-                  const builtResponse = this.buildOpenAIResponse(rawResponse);
+                  const builtResponse = await this.buildOpenAIResponse(
+                    rawResponse,
+                    originalPrompt,
+                    folderPathToLink
+                  );
                   responseToSend = JSON.stringify(builtResponse);
                 }
               } catch (parseError) {
@@ -1075,9 +1487,10 @@ REMEMBER:
                   )}"`
                 );
 
-                const builtResponse = this.buildOpenAIResponse(
+                const builtResponse = await this.buildOpenAIResponse(
                   rawResponse,
-                  originalPrompt
+                  originalPrompt,
+                  folderPathToLink
                 );
                 responseToSend = JSON.stringify(builtResponse);
               }
@@ -1112,9 +1525,10 @@ REMEMBER:
                   )}"`
                 );
 
-                const builtResponse = this.buildOpenAIResponse(
+                const builtResponse = await this.buildOpenAIResponse(
                   JSON.stringify(responseObj),
-                  originalPrompt
+                  originalPrompt,
+                  folderPathToLink
                 );
                 responseToSend = JSON.stringify(builtResponse);
               }
@@ -1141,9 +1555,10 @@ REMEMBER:
                 )}"`
               );
 
-              const builtResponse = this.buildOpenAIResponse(
+              const builtResponse = await this.buildOpenAIResponse(
                 String(rawResponse),
-                originalPrompt
+                originalPrompt,
+                folderPathToLink
               );
               responseToSend = JSON.stringify(builtResponse);
             }
@@ -2326,10 +2741,11 @@ REMEMBER:
    * @param content - Response content từ DeepSeek
    * @param originalPrompt - Original prompt để tính prompt_tokens
    */
-  private static buildOpenAIResponse(
+  private static async buildOpenAIResponse(
     content: string,
-    originalPrompt: string = ""
-  ): any {
+    originalPrompt: string = "",
+    folderPath: string | null = null
+  ): Promise<any> {
     // 🆕 LOG: Debug parameters received
     console.log(`[PromptController] 🔍 buildOpenAIResponse called with:`);
     console.log(
@@ -2338,6 +2754,7 @@ REMEMBER:
     console.log(
       `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
     );
+    console.log(`[PromptController]   - folderPath: ${folderPath || "(none)"}`);
     console.log(
       `[PromptController]   - originalPrompt value: "${originalPrompt.substring(
         0,
@@ -2356,104 +2773,64 @@ REMEMBER:
     const systemFingerprint = `fp_${generateHex(8)}`;
     const timestamp = Math.floor(Date.now() / 1000);
 
-    // 🆕 ACCURATE TOKEN CALCULATION using gpt-tokenizer (pure JS, no WASM)
-    const calculateTokensAndLog = (text: string, label: string): number => {
-      if (!text) {
-        console.log(`[TokenCalculation] ${label}: Empty text → 0 tokens`);
-        return 0;
-      }
+    // 🆕 CRITICAL: Nếu có folderPath, dùng accumulated tokens thay vì tính riêng lẻ
+    let prompt_tokens = 0;
+    let completion_tokens = 0;
+    let total_tokens = 0;
 
-      try {
-        // Tokenize text using gpt-tokenizer (GPT-3.5/GPT-4 compatible)
-        const tokens = encode(text);
-        const tokenCount = tokens.length;
+    if (folderPath) {
+      console.log(
+        `[PromptController] 🔍 Attempting to get accumulated tokens for folder: "${folderPath}"`
+      );
 
-        // Count words (split by whitespace)
-        const words = text
-          .trim()
-          .split(/\s+/)
-          .filter((w) => w.length > 0);
-        const wordCount = words.length;
+      const accumulatedTokens = await this.getTokensForFolder(folderPath);
 
-        // Count characters
-        const charCount = text.length;
+      if (accumulatedTokens) {
+        prompt_tokens = accumulatedTokens.prompt_tokens;
+        completion_tokens = accumulatedTokens.completion_tokens;
+        total_tokens = accumulatedTokens.total_tokens;
 
-        // 🆕 LOG: Detailed statistics
         console.log(
-          `[TokenCalculation] ═══════════════════════════════════════`
-        );
-        console.log(`[TokenCalculation] ${label} Statistics:`);
-        console.log(
-          `[TokenCalculation]   📝 Characters: ${charCount.toLocaleString()}`
+          `[PromptController] 📊 Using accumulated tokens for folder "${folderPath}"`
         );
         console.log(
-          `[TokenCalculation]   📖 Words: ${wordCount.toLocaleString()}`
+          `[PromptController] 📊 Accumulated values: prompt=${prompt_tokens}, completion=${completion_tokens}, total=${total_tokens}`
         );
-        console.log(
-          `[TokenCalculation]   🎯 Tokens: ${tokenCount.toLocaleString()}`
-        );
-        console.log(
-          `[TokenCalculation]   📊 Chars/Token ratio: ${(
-            charCount / tokenCount
-          ).toFixed(2)}`
-        );
-        console.log(
-          `[TokenCalculation]   📊 Words/Token ratio: ${(
-            wordCount / tokenCount
-          ).toFixed(2)}`
-        );
-
-        // Preview first 100 chars
-        const preview = text.substring(0, 100).replace(/\n/g, "\\n");
-        console.log(
-          `[TokenCalculation]   👁️  Preview: "${preview}${
-            text.length > 100 ? "..." : ""
-          }"`
-        );
-        console.log(
-          `[TokenCalculation] ═══════════════════════════════════════`
-        );
-
-        return tokenCount;
-      } catch (error) {
-        console.error(
-          `[TokenCalculation] ❌ Error calculating tokens for ${label}:`,
-          error
-        );
-        console.error(
-          `[TokenCalculation] 🔍 Text length: ${text.length} chars`
-        );
-        console.error(
-          `[TokenCalculation] 🔍 Text preview: "${text.substring(0, 200)}"`
-        );
-
-        // Fallback to word-based estimation
-        const words = text
-          .trim()
-          .split(/\s+/)
-          .filter((w) => w.length > 0);
-        const wordCount = words.length;
-
-        // Estimate: ~0.75 tokens per word (more accurate than char-based)
-        const estimatedTokens = Math.ceil(wordCount * 0.75);
-
+      } else {
         console.warn(
-          `[TokenCalculation] ⚠️ Using fallback estimation: ${estimatedTokens} tokens (based on ${wordCount} words)`
+          `[PromptController] ⚠️ No accumulated tokens found for folder "${folderPath}" - this should not happen!`
+        );
+        console.warn(
+          `[PromptController] 💡 Falling back to calculating tokens for this request only`
         );
 
-        return estimatedTokens;
+        // Fallback: Tính tokens như cũ nếu chưa có accumulator
+        prompt_tokens = this.calculateTokensAndLog(
+          originalPrompt,
+          "PROMPT_TOKENS (FALLBACK)"
+        );
+        completion_tokens = this.calculateTokensAndLog(
+          content,
+          "COMPLETION_TOKENS (FALLBACK)"
+        );
+        total_tokens = prompt_tokens + completion_tokens;
       }
-    };
+    } else {
+      console.log(
+        `[PromptController] 🔍 No folderPath provided - calculating tokens for single request`
+      );
 
-    const prompt_tokens = calculateTokensAndLog(
-      originalPrompt,
-      "PROMPT_TOKENS"
-    );
-    const completion_tokens = calculateTokensAndLog(
-      content,
-      "COMPLETION_TOKENS"
-    );
-    const total_tokens = prompt_tokens + completion_tokens;
+      // Không có folderPath → tính tokens cho single request
+      prompt_tokens = this.calculateTokensAndLog(
+        originalPrompt,
+        "PROMPT_TOKENS"
+      );
+      completion_tokens = this.calculateTokensAndLog(
+        content,
+        "COMPLETION_TOKENS"
+      );
+      total_tokens = prompt_tokens + completion_tokens;
+    }
 
     // 🆕 LOG: Summary
     console.log(`[TokenCalculation] ═══════════════════════════════════════`);
