@@ -62,6 +62,7 @@ export class TabStateManager {
   > = new Map();
   private readonly CACHE_TTL = 10000; // 10 seconds
   private readonly storageMutex = new StorageMutex();
+  private initializationLocks: Map<number, Promise<void>> = new Map();
 
   private constructor() {
     this.enable();
@@ -72,14 +73,29 @@ export class TabStateManager {
   private setupTabListeners(): void {
     // Listen for new tabs created
     chrome.tabs.onCreated.addListener((tab) => {
+      console.log(
+        `[TabStateManager] 🆕 onCreated event - Tab ID: ${tab.id}, URL: ${
+          tab.url || tab.pendingUrl || "unknown"
+        }`
+      );
+
       if (
         tab.url?.includes("deepseek.com") ||
         tab.pendingUrl?.includes("deepseek.com")
       ) {
+        console.log(
+          `[TabStateManager] ✅ Detected NEW DeepSeek tab ${tab.id}, scheduling initialization in 2s...`
+        );
+
         // Wait for tab to fully load before initializing
         setTimeout(() => {
+          console.log(
+            `[TabStateManager] ⏰ 2s delay passed, initializing tab ${tab.id} now...`
+          );
           this.initializeNewTab(tab.id!);
         }, 2000);
+      } else {
+        console.log(`[TabStateManager] ⏭️ Skipping non-DeepSeek tab ${tab.id}`);
       }
     });
 
@@ -89,13 +105,25 @@ export class TabStateManager {
         changeInfo.status === "complete" &&
         tab.url?.includes("deepseek.com")
       ) {
+        console.log(
+          `[TabStateManager] 🔄 onUpdated event - Tab ${tabId} navigated to DeepSeek (status: complete)`
+        );
+
         // Đọc trực tiếp từ storage thay vì gọi getTabState() (tránh warn)
         chrome.storage.session.get([this.STORAGE_KEY], (result) => {
           const states = (result && result[this.STORAGE_KEY]) || {};
           const existingState = states[tabId];
 
           if (!existingState) {
+            console.log(
+              `[TabStateManager] 🆕 Tab ${tabId} not found in states, initializing...`
+            );
             this.initializeNewTab(tabId);
+          } else {
+            console.log(
+              `[TabStateManager] ✅ Tab ${tabId} already exists in states:`,
+              JSON.stringify(existingState, null, 2)
+            );
           }
         });
       }
@@ -103,6 +131,9 @@ export class TabStateManager {
 
     // Listen for tab removal (cleanup)
     chrome.tabs.onRemoved.addListener((tabId) => {
+      console.log(
+        `[TabStateManager] 🗑️ onRemoved event - Tab ${tabId} closed, cleaning up...`
+      );
       this.invalidateCache(tabId);
       this.removeTabState(tabId);
     });
@@ -152,44 +183,146 @@ export class TabStateManager {
   }
 
   private async initializeNewTab(tabId: number): Promise<void> {
+    // 🔒 CRITICAL: Deduplicate initialization requests
+    const existingLock = this.initializationLocks.get(tabId);
+    if (existingLock) {
+      console.log(
+        `[TabStateManager] ⏳ Tab ${tabId} initialization already in progress, waiting...`
+      );
+      await existingLock;
+      console.log(
+        `[TabStateManager] ✅ Tab ${tabId} initialization completed by another call`
+      );
+      return;
+    }
+
+    // Create new lock promise
+    let resolveLock: () => void;
+    const lockPromise = new Promise<void>((resolve) => {
+      resolveLock = resolve;
+    });
+    this.initializationLocks.set(tabId, lockPromise);
+
     try {
+      console.log(`[TabStateManager] 🆕 Initializing NEW tab ${tabId}...`);
+
       // Check if tab still exists
       const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
         chrome.tabs.get(tabId, (result) => {
           if (chrome.runtime.lastError) {
+            console.error(
+              `[TabStateManager] ❌ Tab ${tabId} not found:`,
+              chrome.runtime.lastError
+            );
             resolve(null);
             return;
           }
+          console.log(
+            `[TabStateManager] ✅ Tab ${tabId} exists - URL: ${result.url}, Title: ${result.title}`
+          );
           resolve(result);
         });
       });
 
       if (!tab) {
+        console.warn(
+          `[TabStateManager] ⚠️ Tab ${tabId} no longer exists, aborting initialization`
+        );
+        return;
+      }
+
+      // 🔒 CRITICAL: Check if state already exists (race condition protection)
+      const existingStateCheck = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const existingStates =
+        (existingStateCheck && existingStateCheck[this.STORAGE_KEY]) || {};
+      if (existingStates[tabId]) {
+        console.log(
+          `[TabStateManager] ✅ Tab ${tabId} state already exists, skipping initialization`
+        );
         return;
       }
 
       // Kiểm tra sleep state trước
       const isSleepTab = this.isSleepTab(tab);
+      console.log(
+        `[TabStateManager] 💤 Tab ${tabId} sleep check: ${
+          isSleepTab ? "SLEEP" : "ACTIVE"
+        }`
+      );
 
       let initialStatus: "free" | "busy" | "sleep" = "free";
 
       if (isSleepTab) {
         initialStatus = "sleep";
+        console.log(`[TabStateManager] 💤 Tab ${tabId} marked as SLEEP`);
       } else {
         // Check button state to determine initial status
-        const buttonState = await Promise.race([
-          this.checkButtonState(tabId),
-          new Promise<{ isBusy: false }>((resolve) =>
-            setTimeout(() => {
-              resolve({ isBusy: false });
-            }, 3000)
-          ),
-        ]);
+        console.log(
+          `[TabStateManager] 🔍 Checking button state for tab ${tabId}...`
+        );
+        let abortController: AbortController | null = null;
+        let timeoutId: NodeJS.Timeout | null = null;
 
-        initialStatus = buttonState.isBusy ? "busy" : "free";
+        try {
+          abortController = new AbortController();
+
+          const buttonCheckPromise = this.checkButtonState(
+            tabId,
+            abortController.signal
+          );
+
+          const timeoutPromise = new Promise<{ isBusy: false }>((resolve) => {
+            timeoutId = setTimeout(() => {
+              console.warn(
+                `[TabStateManager] ⏱️ Button state check timeout for tab ${tabId}, defaulting to FREE`
+              );
+              if (abortController) {
+                abortController.abort();
+              }
+              resolve({ isBusy: false });
+            }, 2000);
+          });
+
+          const buttonState = await Promise.race([
+            buttonCheckPromise,
+            timeoutPromise,
+          ]);
+
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+
+          initialStatus = buttonState.isBusy ? "busy" : "free";
+          console.log(
+            `[TabStateManager] ✅ Tab ${tabId} initial status determined: ${initialStatus.toUpperCase()}`
+          );
+        } catch (error) {
+          console.error(
+            `[TabStateManager] ❌ Button check error for tab ${tabId}, defaulting to FREE:`,
+            error
+          );
+          initialStatus = "free";
+        } finally {
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+          abortController = null;
+        }
       }
 
       // Get current states
+      console.log(
+        `[TabStateManager] 📖 Reading current states from storage...`
+      );
       const result = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
           if (chrome.runtime.lastError) {
@@ -201,6 +334,11 @@ export class TabStateManager {
       });
 
       const states = (result && result[this.STORAGE_KEY]) || {};
+      console.log(
+        `[TabStateManager] 📊 Current states contain ${
+          Object.keys(states).length
+        } tabs`
+      );
 
       // Add new tab state
       states[tabId] = {
@@ -209,35 +347,112 @@ export class TabStateManager {
         requestCount: 0,
         folderPath: null,
       };
+      console.log(
+        `[TabStateManager] ➕ Added tab ${tabId} to states:`,
+        JSON.stringify(states[tabId], null, 2)
+      );
 
       // Save updated states
+      console.log(`[TabStateManager] 💾 Saving updated states to storage...`);
       await new Promise<void>((resolve, reject) => {
         chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
           if (chrome.runtime.lastError) {
+            console.error(
+              `[TabStateManager] ❌ Failed to save states:`,
+              chrome.runtime.lastError
+            );
             reject(chrome.runtime.lastError);
             return;
           }
+          console.log(`[TabStateManager] ✅ States saved successfully`);
           resolve();
         });
       });
 
+      // Verification
+      console.log(
+        `[TabStateManager] 🔍 VERIFICATION: Reading back from storage...`
+      );
+      const verifyResult = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const verifyStates =
+        (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
+      const savedState = verifyStates[tabId];
+
+      if (savedState) {
+        console.log(
+          `[TabStateManager] ✅ VERIFICATION SUCCESS: Tab ${tabId} state found in storage:`,
+          JSON.stringify(savedState, null, 2)
+        );
+
+        if (savedState.status === initialStatus) {
+          console.log(
+            `[TabStateManager] ✅ Status matches: ${savedState.status}`
+          );
+        } else {
+          console.error(
+            `[TabStateManager] ❌ Status MISMATCH! Expected: ${initialStatus}, Got: ${savedState.status}`
+          );
+        }
+      } else {
+        console.error(
+          `[TabStateManager] ❌ VERIFICATION FAILED: Tab ${tabId} state NOT FOUND in storage after save!`
+        );
+        console.error(
+          `[TabStateManager] 🔍 Available tab IDs in storage:`,
+          Object.keys(verifyStates)
+        );
+      }
+
       // Invalidate cache to force UI refresh
       this.invalidateCache(tabId);
+      console.log(`[TabStateManager] 🗑️ Cache invalidated for tab ${tabId}`);
 
-      // Notify UI about state change - với delay để đảm bảo storage đã sync
+      // Notify UI about state change
       setTimeout(() => {
+        console.log(
+          `[TabStateManager] 📢 Notifying UI about tab ${tabId} state change (first notification)`
+        );
         this.notifyUIUpdate();
 
-        // Double check: Nếu UI vẫn chưa update sau 2s, force thêm 1 lần nữa
         setTimeout(() => {
+          console.log(
+            `[TabStateManager] 📢 Notifying UI about tab ${tabId} state change (second notification - fallback)`
+          );
           this.notifyUIUpdate();
         }, 2000);
       }, 100);
+
+      console.log(
+        `[TabStateManager] 🎉 Tab ${tabId} initialization completed successfully`
+      );
     } catch (error) {
       console.error(
-        `[TabStateManager] ❌ Error initializing new tab ${tabId}:`,
+        `[TabStateManager] ❌ EXCEPTION during tab ${tabId} initialization:`,
         error
       );
+      console.error(
+        `[TabStateManager] 🔍 Error type: ${
+          error instanceof Error ? error.constructor.name : typeof error
+        }`
+      );
+      console.error(
+        `[TabStateManager] 🔍 Error message: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    } finally {
+      // 🔓 CRITICAL: Release lock
+      this.initializationLocks.delete(tabId);
+      resolveLock!();
     }
   }
 
@@ -367,17 +582,31 @@ export class TabStateManager {
 
     const states: Record<number, TabStateData> = {};
 
+    console.log(
+      `[TabStateManager] 🔍 Processing ${tabs.length} DeepSeek tabs...`
+    );
+
     for (let i = 0; i < tabs.length; i++) {
       const tab = tabs[i];
       if (!tab.id) {
+        console.warn(
+          `[TabStateManager] ⚠️ Tab at index ${i} has no ID, skipping`
+        );
         continue;
       }
+
+      console.log(
+        `[TabStateManager] 📋 Processing tab ${tab.id} (${i + 1}/${
+          tabs.length
+        }) - Title: "${tab.title}", URL: ${tab.url}`
+      );
 
       try {
         // Kiểm tra sleep state TRƯỚC (dựa vào title hoặc discarded property)
         const isSleepTab = this.isSleepTab(tab);
 
         if (isSleepTab) {
+          console.log(`[TabStateManager] 💤 Tab ${tab.id} is SLEEP tab`);
           states[tab.id] = {
             status: "sleep",
             requestId: null,
@@ -387,21 +616,64 @@ export class TabStateManager {
           continue;
         }
 
-        const buttonState = await Promise.race([
-          this.checkButtonState(tab.id),
-          new Promise<{ isBusy: false }>((resolve) =>
-            setTimeout(() => {
-              resolve({ isBusy: false });
-            }, 2000)
-          ),
-        ]);
+        console.log(
+          `[TabStateManager] 🔍 Checking button state for tab ${tab.id}...`
+        );
 
-        states[tab.id] = {
-          status: buttonState.isBusy ? "busy" : "free",
-          requestId: null,
-          requestCount: 0,
-          folderPath: null,
-        };
+        // 🆕 CRITICAL: Sử dụng AbortController giống như initializeNewTab()
+        let abortController: AbortController | null = null;
+        let timeoutId: NodeJS.Timeout | null = null;
+
+        try {
+          abortController = new AbortController();
+
+          const buttonCheckPromise = this.checkButtonState(
+            tab.id,
+            abortController.signal
+          );
+
+          const timeoutPromise = new Promise<{ isBusy: false }>((resolve) => {
+            timeoutId = setTimeout(() => {
+              console.warn(
+                `[TabStateManager] ⏱️ Button check timeout for tab ${tab.id}`
+              );
+              if (abortController) {
+                abortController.abort(); // ✅ Cancel button check
+              }
+              resolve({ isBusy: false });
+            }, 2000);
+          });
+
+          const buttonState = await Promise.race([
+            buttonCheckPromise,
+            timeoutPromise,
+          ]);
+
+          // ✅ Cleanup timeout nếu button check win
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+
+          const determinedStatus = buttonState.isBusy ? "busy" : "free";
+          console.log(
+            `[TabStateManager] ✅ Tab ${
+              tab.id
+            } status: ${determinedStatus.toUpperCase()}`
+          );
+
+          states[tab.id] = {
+            status: determinedStatus,
+            requestId: null,
+            requestCount: 0,
+            folderPath: null,
+          };
+        } finally {
+          // ✅ Cleanup resources
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+          }
+          abortController = null;
+        }
       } catch (buttonError) {
         console.error(
           `[TabStateManager] ❌ Button check failed for tab ${tab.id}:`,
@@ -414,8 +686,21 @@ export class TabStateManager {
           requestCount: 0,
           folderPath: null,
         };
+        console.log(
+          `[TabStateManager] ⚠️ Tab ${tab.id} defaulted to FREE due to error`
+        );
       }
     }
+
+    console.log(
+      `[TabStateManager] 💾 Saving ${
+        Object.keys(states).length
+      } tab states to storage...`
+    );
+    console.log(
+      `[TabStateManager] 📊 States to save:`,
+      JSON.stringify(states, null, 2)
+    );
 
     await new Promise<void>((resolve, reject) => {
       chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
@@ -427,15 +712,65 @@ export class TabStateManager {
           reject(chrome.runtime.lastError);
           return;
         }
+        console.log(
+          `[TabStateManager] ✅ States saved successfully to storage`
+        );
         resolve();
       });
     });
 
+    // 🆕 VERIFICATION: Đọc lại từ storage để verify
+    console.log(
+      `[TabStateManager] 🔍 VERIFICATION: Reading back from storage...`
+    );
+    const verifyResult = await new Promise<any>((resolve, reject) => {
+      chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError);
+          return;
+        }
+        resolve(data || {});
+      });
+    });
+
+    const verifyStates = (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
+    console.log(
+      `[TabStateManager] ✅ VERIFICATION: Found ${
+        Object.keys(verifyStates).length
+      } tabs in storage`
+    );
+
+    // Check if all tabs were saved
+    const savedTabIds = Object.keys(verifyStates).map((id) => parseInt(id));
+    const expectedTabIds = Object.keys(states).map((id) => parseInt(id));
+    const missingSaves = expectedTabIds.filter(
+      (id) => !savedTabIds.includes(id)
+    );
+
+    if (missingSaves.length > 0) {
+      console.error(
+        `[TabStateManager] ❌ VERIFICATION FAILED: ${missingSaves.length} tabs missing from storage:`,
+        missingSaves
+      );
+    } else {
+      console.log(
+        `[TabStateManager] ✅ VERIFICATION SUCCESS: All ${expectedTabIds.length} tabs saved correctly`
+      );
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  private async checkButtonState(tabId: number): Promise<{ isBusy: boolean }> {
+  private async checkButtonState(
+    tabId: number,
+    signal?: AbortSignal // 🆕 ADD: AbortSignal parameter
+  ): Promise<{ isBusy: boolean }> {
     try {
+      // 🆕 CHECK: Nếu đã bị abort, return ngay
+      if (signal?.aborted) {
+        return { isBusy: false };
+      }
+
       const browserAPI =
         typeof (globalThis as any).browser !== "undefined"
           ? (globalThis as any).browser
@@ -443,49 +778,58 @@ export class TabStateManager {
 
       // Script code as string for Firefox compatibility
       const scriptCode = `
-        (function() {
-          const sendButton = document.querySelector(".ds-icon-button._7436101");
-          
-          if (!sendButton) {
-            return { isBusy: false, reason: "button_not_found" };
-          }
+      (function() {
+        const sendButton = document.querySelector(".ds-icon-button._7436101");
+        
+        if (!sendButton) {
+          return { isBusy: false, reason: "button_not_found" };
+        }
 
-          // ✅ NEW: Check button's disabled state AND aria-disabled
-          const isButtonDisabled = 
-            sendButton.hasAttribute("disabled") ||
-            sendButton.getAttribute("aria-disabled") === "true" ||
-            sendButton.classList.contains("ds-icon-button--disabled");
+        const isButtonDisabled = 
+          sendButton.hasAttribute("disabled") ||
+          sendButton.getAttribute("aria-disabled") === "true" ||
+          sendButton.classList.contains("ds-icon-button--disabled");
 
-          const svg = sendButton.querySelector("svg");
-          const path = svg?.querySelector("path");
-          const pathData = path?.getAttribute("d") || "";
+        const svg = sendButton.querySelector("svg");
+        const path = svg?.querySelector("path");
+        const pathData = path?.getAttribute("d") || "";
 
-          const isStopIcon = pathData.includes("M2 4.88006") && pathData.includes("C2 3.68015");
-          const isSendIcon = pathData.includes("M8.3125 0.981648") && pathData.includes("9.2627 1.4338");
+        const isStopIcon = pathData.includes("M2 4.88006") && pathData.includes("C2 3.68015");
+        const isSendIcon = pathData.includes("M8.3125 0.981648") && pathData.includes("9.2627 1.4338");
 
-          // ✅ CRITICAL: Stop icon + button NOT disabled = AI đang trả lời
-          if (isStopIcon && !isButtonDisabled) {
-            return { isBusy: true, reason: "stop_icon_ai_responding" };
-          }
+        if (isStopIcon && !isButtonDisabled) {
+          return { isBusy: true, reason: "stop_icon_ai_responding" };
+        }
 
-          // ✅ Send icon HOẶC Stop icon + button disabled = Tab rảnh
-          if (isSendIcon || (isStopIcon && isButtonDisabled)) {
-            return { isBusy: false, reason: "send_icon_or_disabled_stop_icon" };
-          }
+        if (isSendIcon || (isStopIcon && isButtonDisabled)) {
+          return { isBusy: false, reason: "send_icon_or_disabled_stop_icon" };
+        }
 
-          // ✅ Fallback: Nếu không xác định được icon, check disabled state
-          return { isBusy: !isButtonDisabled, reason: "fallback_by_disabled_state" };
-        })();
-      `;
+        return { isBusy: !isButtonDisabled, reason: "fallback_by_disabled_state" };
+      })();
+    `;
 
+      // 🆕 ADD: Wrap executeScript với abort check
       const result = await new Promise<any>((resolve, reject) => {
+        // 🆕 CHECK: Abort trước khi execute
+        if (signal?.aborted) {
+          reject(new Error("Aborted"));
+          return;
+        }
+
         browserAPI.tabs.executeScript(
           tabId,
           { code: scriptCode },
           (results?: any[]) => {
+            // 🆕 CHECK: Abort sau khi execute
+            if (signal?.aborted) {
+              reject(new Error("Aborted"));
+              return;
+            }
+
             if (browserAPI.runtime.lastError) {
               console.error(
-                `[TabStateManager]   ✗ executeScript error for tab ${tabId}:`,
+                `[TabStateManager] ✗ executeScript error for tab ${tabId}:`,
                 browserAPI.runtime.lastError
               );
               reject(browserAPI.runtime.lastError);
@@ -503,8 +847,13 @@ export class TabStateManager {
 
       return { isBusy: buttonState.isBusy };
     } catch (error) {
+      // 🆕 CHECK: Nếu error do abort, không log error
+      if (error instanceof Error && error.message === "Aborted") {
+        return { isBusy: false };
+      }
+
       console.error(
-        `[TabStateManager]   ✗ Error checking button state for tab ${tabId}:`,
+        `[TabStateManager] ✗ Error checking button state for tab ${tabId}:`,
         error
       );
       return { isBusy: false };

@@ -11,56 +11,74 @@ export interface WSConnectionState {
 export class WSHelper {
   static async connect(): Promise<{ success: boolean; error?: string }> {
     try {
-      // Log API Provider trước khi connect
-      const storageResult = await new Promise<any>((resolve) => {
-        chrome.storage.local.get(["apiProvider"], (data: any) => {
-          resolve(data || {});
+      // 🔥 STEP 1: CLEAN SLATE - Xóa toàn bộ state cũ trước khi connect
+      console.log("[WSHelper] 🧹 Cleaning old connection state...");
+      await new Promise<void>((resolve) => {
+        chrome.storage.local.remove(["wsStates", "wsMessages"], () => {
+          resolve();
         });
       });
-      const apiProvider = storageResult?.apiProvider || "";
 
+      // Small delay để đảm bảo storage đã clear
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      console.log(
+        "[WSHelper] ✅ Old state cleaned, initiating fresh connection..."
+      );
+
+      // 🔥 STEP 2: Gửi connect message (sẽ tạo state MỚI hoàn toàn)
       const response = await chrome.runtime.sendMessage({
         action: "connectWebSocket",
       });
 
-      // ✅ FIX: Nếu response invalid, đợi storage state thay đổi thay vì retry message
+      // 🔥 STEP 3: Validate response structure
       if (
         !response ||
         typeof response !== "object" ||
         typeof response.success !== "boolean"
       ) {
         console.warn(
-          "[WSHelper] ⚠️ Invalid response, waiting for storage state change..."
+          "[WSHelper] ⚠️ Invalid response structure, verifying via storage..."
         );
 
-        // Đợi tối đa 3 giây để storage state thay đổi
-        const maxWaitTime = 3000;
+        // Đợi backend ghi state vào storage (tối đa 2s)
+        const maxWaitTime = 2000;
+        const pollInterval = 200;
         const startTime = Date.now();
 
         while (Date.now() - startTime < maxWaitTime) {
-          await new Promise((resolve) => setTimeout(resolve, 200));
+          await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
-          // Kiểm tra storage state
           const state = await this.getConnectionState();
+
           if (state && state.status === "connected") {
+            console.log("[WSHelper] ✅ Connection verified via storage");
             return { success: true };
           }
 
           if (state && state.status === "error") {
+            console.error("[WSHelper] ❌ Connection error in storage");
             return { success: false, error: "Connection failed" };
           }
         }
 
-        // Timeout sau 3 giây
+        console.error("[WSHelper] ⏱️ Timeout waiting for connection state");
         return {
           success: false,
-          error: "Connection timeout - no storage state change detected",
+          error: "Connection timeout - no state update detected",
         };
+      }
+
+      // 🔥 STEP 4: Response hợp lệ → return ngay
+      if (response.success) {
+        console.log("[WSHelper] ✅ Connection successful");
+      } else {
+        console.error("[WSHelper] ❌ Connection failed:", response.error);
       }
 
       return response;
     } catch (error) {
-      console.error("[WSHelper] Connect error:", error);
+      console.error("[WSHelper] ❌ Connect exception:", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),

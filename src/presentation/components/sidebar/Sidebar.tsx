@@ -28,10 +28,10 @@ const Sidebar: React.FC = () => {
   } | null>(null);
 
   useEffect(() => {
-    // 🔥 FIX: Polling nhanh hơn để đảm bảo UI luôn sync với backend state
+    // 🔥 FIX: Polling với interval hợp lý (500ms) vì đã có clean slate mechanism
     const intervalId = setInterval(() => {
       loadWebSocketStatus();
-    }, 500); // Check every 500ms - nhanh hơn để catch state change
+    }, 500); // Không cần quá nhanh vì state đã được clean trước mỗi connect
 
     return () => clearInterval(intervalId);
   }, []); // Empty deps array - chạy 1 lần và maintain interval
@@ -318,31 +318,31 @@ const Sidebar: React.FC = () => {
           console.error("[Sidebar] ❌ Disconnect failed:", result.error);
         }
       } else {
+        // 🔥 CRITICAL: WSHelper.connect() đã clean state cũ rồi, chỉ cần gọi và đợi
         const result = await WSHelper.connect();
 
-        // ✅ FIX: Validate result structure với fallback verification
         if (!result || typeof result.success !== "boolean") {
           console.warn(
             "[Sidebar] ⚠️ Invalid response, verifying via storage..."
           );
 
-          // Fallback: Verify bằng cách đọc trực tiếp từ storage
-          await new Promise((resolve) => setTimeout(resolve, 200));
+          // Đợi 300ms để backend ghi state
+          await new Promise((resolve) => setTimeout(resolve, 300));
           const state = await WSHelper.getConnectionState();
 
           if (state && state.status === "connected") {
+            console.log("[Sidebar] ✅ Connected (verified via storage)");
             setWsStatus("connected");
             setWsConnection({
               id: state.id,
               status: state.status,
             });
           } else {
-            console.error(
-              "[Sidebar] ❌ Connect failed: Invalid response from background"
-            );
+            console.error("[Sidebar] ❌ Connect failed (no valid state)");
             setWsStatus("error");
           }
         } else if (result.success) {
+          console.log("[Sidebar] ✅ Connected (direct response)");
           setWsStatus("connected");
           await loadWebSocketStatus();
         } else {
@@ -351,7 +351,7 @@ const Sidebar: React.FC = () => {
         }
       }
     } catch (error) {
-      console.error("[Sidebar] ❌ Toggle WebSocket failed:", error);
+      console.error("[Sidebar] ❌ Toggle WebSocket exception:", error);
       setWsStatus("error");
       setWsConnection(null);
     } finally {
