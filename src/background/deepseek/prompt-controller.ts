@@ -4,6 +4,7 @@ import { StateController } from "./state-controller";
 import { ChatController } from "./chat-controller";
 import { DEFAULT_CONFIG, DeepSeekConfig } from "./types";
 import { TabStateManager } from "../utils/tab-state-manager";
+import { encode } from "gpt-tokenizer";
 
 export class PromptController {
   private static activePollingTasks: Map<number, string> = new Map();
@@ -825,7 +826,7 @@ REMEMBER:
       }
 
       this.activePollingTasks.set(tabId, requestId);
-      this.startResponsePolling(tabId, requestId);
+      this.startResponsePolling(tabId, requestId, finalPrompt);
 
       return true;
     } catch (error) {
@@ -926,13 +927,27 @@ REMEMBER:
 
   private static async startResponsePolling(
     tabId: number,
-    requestId: string
+    requestId: string,
+    originalPrompt: string = ""
   ): Promise<void> {
     const capturedRequestId = requestId;
     const isTestRequest = requestId.startsWith("test-");
     const browserAPI = getBrowserAPI();
     let pollCount = 0;
     let responseSent = false;
+
+    // 🆕 LOG: Debug originalPrompt parameter
+    console.log(`[PromptController] 🔍 startResponsePolling called with:`);
+    console.log(`[PromptController]   - requestId: ${requestId}`);
+    console.log(
+      `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
+    );
+    console.log(
+      `[PromptController]   - originalPrompt preview (first 200 chars): "${originalPrompt.substring(
+        0,
+        200
+      )}"`
+    );
 
     const poll = async () => {
       pollCount++;
@@ -962,8 +977,7 @@ REMEMBER:
             responseSent = true;
             this.activePollingTasks.delete(tabId);
 
-            // 🆕 STEP 1: Extract original prompt từ wsMessages để tính prompt_tokens
-            let originalPrompt = "";
+            // 🆕 STEP 1: Extract folderPath từ wsMessages (originalPrompt đã có từ parameter)
             let folderPathToLink: string | null = null;
             try {
               const messagesResult = await new Promise<any>(
@@ -995,20 +1009,12 @@ REMEMBER:
                   if (matchingMsg.data?.folderPath) {
                     folderPathToLink = matchingMsg.data.folderPath;
                   }
-
-                  // 🆕 Extract original prompt để tính tokens
-                  const systemPrompt = matchingMsg.data?.systemPrompt || "";
-                  const userPrompt = matchingMsg.data?.userPrompt || "";
-                  originalPrompt = systemPrompt
-                    ? `${systemPrompt}\n\n${userPrompt}`
-                    : userPrompt;
-
                   break;
                 }
               }
             } catch (error) {
               console.error(
-                "[PromptController] ❌ Failed to get data from wsMessages:",
+                "[PromptController] ❌ Failed to get folderPath from wsMessages:",
                 error
               );
             }
@@ -1052,7 +1058,27 @@ REMEMBER:
                   responseToSend = JSON.stringify(builtResponse);
                 }
               } catch (parseError) {
-                const builtResponse = this.buildOpenAIResponse(rawResponse);
+                // 🆕 LOG: Debug originalPrompt trước khi build response
+                console.log(
+                  `[PromptController] 🔍 Building OpenAI response (parseError path):`
+                );
+                console.log(
+                  `[PromptController]   - rawResponse length: ${rawResponse.length} chars`
+                );
+                console.log(
+                  `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
+                );
+                console.log(
+                  `[PromptController]   - originalPrompt preview: "${originalPrompt.substring(
+                    0,
+                    200
+                  )}"`
+                );
+
+                const builtResponse = this.buildOpenAIResponse(
+                  rawResponse,
+                  originalPrompt
+                );
                 responseToSend = JSON.stringify(builtResponse);
               }
             } else if (
@@ -1067,6 +1093,25 @@ REMEMBER:
                 responseToSend = JSON.stringify(responseObj);
               } else {
                 // Object thiếu structure → rebuild
+                // 🆕 LOG: Debug originalPrompt trước khi build response
+                console.log(
+                  `[PromptController] 🔍 Building OpenAI response (object rebuild path):`
+                );
+                console.log(
+                  `[PromptController]   - responseObj: ${JSON.stringify(
+                    responseObj
+                  ).substring(0, 200)}`
+                );
+                console.log(
+                  `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
+                );
+                console.log(
+                  `[PromptController]   - originalPrompt preview: "${originalPrompt.substring(
+                    0,
+                    200
+                  )}"`
+                );
+
                 const builtResponse = this.buildOpenAIResponse(
                   JSON.stringify(responseObj),
                   originalPrompt
@@ -1074,6 +1119,28 @@ REMEMBER:
                 responseToSend = JSON.stringify(builtResponse);
               }
             } else {
+              // 🆕 LOG: Debug originalPrompt trước khi build response
+              console.log(
+                `[PromptController] 🔍 Building OpenAI response (else path - String rawResponse):`
+              );
+              console.log(
+                `[PromptController]   - rawResponse type: ${typeof rawResponse}`
+              );
+              console.log(
+                `[PromptController]   - rawResponse length: ${
+                  String(rawResponse).length
+                } chars`
+              );
+              console.log(
+                `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
+              );
+              console.log(
+                `[PromptController]   - originalPrompt preview: "${originalPrompt.substring(
+                  0,
+                  200
+                )}"`
+              );
+
               const builtResponse = this.buildOpenAIResponse(
                 String(rawResponse),
                 originalPrompt
@@ -2250,7 +2317,12 @@ REMEMBER:
   }
 
   /**
-   * Build OpenAI response với ACCURATE token calculation
+   * Build OpenAI response với ACCURATE token calculation using tiktoken
+   * @param content - Response content từ DeepSeek
+   * @param originalPrompt - Original prompt để tính prompt_tokens
+   */
+  /**
+   * Build OpenAI response với ACCURATE token calculation using gpt-tokenizer
    * @param content - Response content từ DeepSeek
    * @param originalPrompt - Original prompt để tính prompt_tokens
    */
@@ -2258,6 +2330,21 @@ REMEMBER:
     content: string,
     originalPrompt: string = ""
   ): any {
+    // 🆕 LOG: Debug parameters received
+    console.log(`[PromptController] 🔍 buildOpenAIResponse called with:`);
+    console.log(
+      `[PromptController]   - content length: ${content.length} chars`
+    );
+    console.log(
+      `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
+    );
+    console.log(
+      `[PromptController]   - originalPrompt value: "${originalPrompt.substring(
+        0,
+        300
+      )}"`
+    );
+
     // Generate unique IDs
     const generateHex = (length: number): string => {
       return Array.from({ length }, () =>
@@ -2269,34 +2356,118 @@ REMEMBER:
     const systemFingerprint = `fp_${generateHex(8)}`;
     const timestamp = Math.floor(Date.now() / 1000);
 
-    // 🆕 ACCURATE TOKEN CALCULATION
-    // Method: GPT-style tokenization estimate (1 token ≈ 4 chars for English, 2-3 chars for Vietnamese/Chinese)
-    const calculateTokens = (text: string): number => {
-      if (!text) return 0;
-
-      // Count different character types
-      let asciiChars = 0;
-      let nonAsciiChars = 0;
-
-      for (let i = 0; i < text.length; i++) {
-        const code = text.charCodeAt(i);
-        if (code < 128) {
-          asciiChars++;
-        } else {
-          nonAsciiChars++;
-        }
+    // 🆕 ACCURATE TOKEN CALCULATION using gpt-tokenizer (pure JS, no WASM)
+    const calculateTokensAndLog = (text: string, label: string): number => {
+      if (!text) {
+        console.log(`[TokenCalculation] ${label}: Empty text → 0 tokens`);
+        return 0;
       }
 
-      // ASCII: ~4 chars per token, Non-ASCII (Vietnamese/Chinese): ~2.5 chars per token
-      const asciiTokens = Math.ceil(asciiChars / 4);
-      const nonAsciiTokens = Math.ceil(nonAsciiChars / 2.5);
+      try {
+        // Tokenize text using gpt-tokenizer (GPT-3.5/GPT-4 compatible)
+        const tokens = encode(text);
+        const tokenCount = tokens.length;
 
-      return asciiTokens + nonAsciiTokens;
+        // Count words (split by whitespace)
+        const words = text
+          .trim()
+          .split(/\s+/)
+          .filter((w) => w.length > 0);
+        const wordCount = words.length;
+
+        // Count characters
+        const charCount = text.length;
+
+        // 🆕 LOG: Detailed statistics
+        console.log(
+          `[TokenCalculation] ═══════════════════════════════════════`
+        );
+        console.log(`[TokenCalculation] ${label} Statistics:`);
+        console.log(
+          `[TokenCalculation]   📝 Characters: ${charCount.toLocaleString()}`
+        );
+        console.log(
+          `[TokenCalculation]   📖 Words: ${wordCount.toLocaleString()}`
+        );
+        console.log(
+          `[TokenCalculation]   🎯 Tokens: ${tokenCount.toLocaleString()}`
+        );
+        console.log(
+          `[TokenCalculation]   📊 Chars/Token ratio: ${(
+            charCount / tokenCount
+          ).toFixed(2)}`
+        );
+        console.log(
+          `[TokenCalculation]   📊 Words/Token ratio: ${(
+            wordCount / tokenCount
+          ).toFixed(2)}`
+        );
+
+        // Preview first 100 chars
+        const preview = text.substring(0, 100).replace(/\n/g, "\\n");
+        console.log(
+          `[TokenCalculation]   👁️  Preview: "${preview}${
+            text.length > 100 ? "..." : ""
+          }"`
+        );
+        console.log(
+          `[TokenCalculation] ═══════════════════════════════════════`
+        );
+
+        return tokenCount;
+      } catch (error) {
+        console.error(
+          `[TokenCalculation] ❌ Error calculating tokens for ${label}:`,
+          error
+        );
+        console.error(
+          `[TokenCalculation] 🔍 Text length: ${text.length} chars`
+        );
+        console.error(
+          `[TokenCalculation] 🔍 Text preview: "${text.substring(0, 200)}"`
+        );
+
+        // Fallback to word-based estimation
+        const words = text
+          .trim()
+          .split(/\s+/)
+          .filter((w) => w.length > 0);
+        const wordCount = words.length;
+
+        // Estimate: ~0.75 tokens per word (more accurate than char-based)
+        const estimatedTokens = Math.ceil(wordCount * 0.75);
+
+        console.warn(
+          `[TokenCalculation] ⚠️ Using fallback estimation: ${estimatedTokens} tokens (based on ${wordCount} words)`
+        );
+
+        return estimatedTokens;
+      }
     };
 
-    const prompt_tokens = calculateTokens(originalPrompt);
-    const completion_tokens = calculateTokens(content);
+    const prompt_tokens = calculateTokensAndLog(
+      originalPrompt,
+      "PROMPT_TOKENS"
+    );
+    const completion_tokens = calculateTokensAndLog(
+      content,
+      "COMPLETION_TOKENS"
+    );
     const total_tokens = prompt_tokens + completion_tokens;
+
+    // 🆕 LOG: Summary
+    console.log(`[TokenCalculation] ═══════════════════════════════════════`);
+    console.log(`[TokenCalculation] 📊 USAGE SUMMARY:`);
+    console.log(
+      `[TokenCalculation]   🔵 Prompt Tokens: ${prompt_tokens.toLocaleString()}`
+    );
+    console.log(
+      `[TokenCalculation]   🟢 Completion Tokens: ${completion_tokens.toLocaleString()}`
+    );
+    console.log(
+      `[TokenCalculation]   🟣 Total Tokens: ${total_tokens.toLocaleString()}`
+    );
+    console.log(`[TokenCalculation] ═══════════════════════════════════════`);
 
     const responseObject = {
       id: responseId,
