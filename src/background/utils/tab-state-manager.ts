@@ -73,29 +73,14 @@ export class TabStateManager {
   private setupTabListeners(): void {
     // Listen for new tabs created
     chrome.tabs.onCreated.addListener((tab) => {
-      console.log(
-        `[TabStateManager] 🆕 onCreated event - Tab ID: ${tab.id}, URL: ${
-          tab.url || tab.pendingUrl || "unknown"
-        }`
-      );
-
       if (
         tab.url?.includes("deepseek.com") ||
         tab.pendingUrl?.includes("deepseek.com")
       ) {
-        console.log(
-          `[TabStateManager] ✅ Detected NEW DeepSeek tab ${tab.id}, scheduling initialization in 2s...`
-        );
-
         // Wait for tab to fully load before initializing
         setTimeout(() => {
-          console.log(
-            `[TabStateManager] ⏰ 2s delay passed, initializing tab ${tab.id} now...`
-          );
           this.initializeNewTab(tab.id!);
         }, 2000);
-      } else {
-        console.log(`[TabStateManager] ⏭️ Skipping non-DeepSeek tab ${tab.id}`);
       }
     });
 
@@ -105,25 +90,13 @@ export class TabStateManager {
         changeInfo.status === "complete" &&
         tab.url?.includes("deepseek.com")
       ) {
-        console.log(
-          `[TabStateManager] 🔄 onUpdated event - Tab ${tabId} navigated to DeepSeek (status: complete)`
-        );
-
         // Đọc trực tiếp từ storage thay vì gọi getTabState() (tránh warn)
         chrome.storage.session.get([this.STORAGE_KEY], (result) => {
           const states = (result && result[this.STORAGE_KEY]) || {};
           const existingState = states[tabId];
 
           if (!existingState) {
-            console.log(
-              `[TabStateManager] 🆕 Tab ${tabId} not found in states, initializing...`
-            );
             this.initializeNewTab(tabId);
-          } else {
-            console.log(
-              `[TabStateManager] ✅ Tab ${tabId} already exists in states:`,
-              JSON.stringify(existingState, null, 2)
-            );
           }
         });
       }
@@ -131,9 +104,6 @@ export class TabStateManager {
 
     // Listen for tab removal (cleanup)
     chrome.tabs.onRemoved.addListener((tabId) => {
-      console.log(
-        `[TabStateManager] 🗑️ onRemoved event - Tab ${tabId} closed, cleaning up...`
-      );
       this.invalidateCache(tabId);
       this.removeTabState(tabId);
     });
@@ -186,13 +156,7 @@ export class TabStateManager {
     // 🔒 CRITICAL: Deduplicate initialization requests
     const existingLock = this.initializationLocks.get(tabId);
     if (existingLock) {
-      console.log(
-        `[TabStateManager] ⏳ Tab ${tabId} initialization already in progress, waiting...`
-      );
       await existingLock;
-      console.log(
-        `[TabStateManager] ✅ Tab ${tabId} initialization completed by another call`
-      );
       return;
     }
 
@@ -204,30 +168,18 @@ export class TabStateManager {
     this.initializationLocks.set(tabId, lockPromise);
 
     try {
-      console.log(`[TabStateManager] 🆕 Initializing NEW tab ${tabId}...`);
-
       // Check if tab still exists
       const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
         chrome.tabs.get(tabId, (result) => {
           if (chrome.runtime.lastError) {
-            console.error(
-              `[TabStateManager] ❌ Tab ${tabId} not found:`,
-              chrome.runtime.lastError
-            );
             resolve(null);
             return;
           }
-          console.log(
-            `[TabStateManager] ✅ Tab ${tabId} exists - URL: ${result.url}, Title: ${result.title}`
-          );
           resolve(result);
         });
       });
 
       if (!tab) {
-        console.warn(
-          `[TabStateManager] ⚠️ Tab ${tabId} no longer exists, aborting initialization`
-        );
         return;
       }
 
@@ -245,30 +197,18 @@ export class TabStateManager {
       const existingStates =
         (existingStateCheck && existingStateCheck[this.STORAGE_KEY]) || {};
       if (existingStates[tabId]) {
-        console.log(
-          `[TabStateManager] ✅ Tab ${tabId} state already exists, skipping initialization`
-        );
         return;
       }
 
       // Kiểm tra sleep state trước
       const isSleepTab = this.isSleepTab(tab);
-      console.log(
-        `[TabStateManager] 💤 Tab ${tabId} sleep check: ${
-          isSleepTab ? "SLEEP" : "ACTIVE"
-        }`
-      );
 
       let initialStatus: "free" | "busy" | "sleep" = "free";
 
       if (isSleepTab) {
         initialStatus = "sleep";
-        console.log(`[TabStateManager] 💤 Tab ${tabId} marked as SLEEP`);
       } else {
         // Check button state to determine initial status
-        console.log(
-          `[TabStateManager] 🔍 Checking button state for tab ${tabId}...`
-        );
         let abortController: AbortController | null = null;
         let timeoutId: NodeJS.Timeout | null = null;
 
@@ -282,9 +222,6 @@ export class TabStateManager {
 
           const timeoutPromise = new Promise<{ isBusy: false }>((resolve) => {
             timeoutId = setTimeout(() => {
-              console.warn(
-                `[TabStateManager] ⏱️ Button state check timeout for tab ${tabId}, defaulting to FREE`
-              );
               if (abortController) {
                 abortController.abort();
               }
@@ -302,14 +239,7 @@ export class TabStateManager {
           }
 
           initialStatus = buttonState.isBusy ? "busy" : "free";
-          console.log(
-            `[TabStateManager] ✅ Tab ${tabId} initial status determined: ${initialStatus.toUpperCase()}`
-          );
         } catch (error) {
-          console.error(
-            `[TabStateManager] ❌ Button check error for tab ${tabId}, defaulting to FREE:`,
-            error
-          );
           initialStatus = "free";
         } finally {
           if (timeoutId) {
@@ -320,9 +250,6 @@ export class TabStateManager {
       }
 
       // Get current states
-      console.log(
-        `[TabStateManager] 📖 Reading current states from storage...`
-      );
       const result = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
           if (chrome.runtime.lastError) {
@@ -334,11 +261,6 @@ export class TabStateManager {
       });
 
       const states = (result && result[this.STORAGE_KEY]) || {};
-      console.log(
-        `[TabStateManager] 📊 Current states contain ${
-          Object.keys(states).length
-        } tabs`
-      );
 
       // Add new tab state
       states[tabId] = {
@@ -347,32 +269,19 @@ export class TabStateManager {
         requestCount: 0,
         folderPath: null,
       };
-      console.log(
-        `[TabStateManager] ➕ Added tab ${tabId} to states:`,
-        JSON.stringify(states[tabId], null, 2)
-      );
 
       // Save updated states
-      console.log(`[TabStateManager] 💾 Saving updated states to storage...`);
       await new Promise<void>((resolve, reject) => {
         chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
           if (chrome.runtime.lastError) {
-            console.error(
-              `[TabStateManager] ❌ Failed to save states:`,
-              chrome.runtime.lastError
-            );
             reject(chrome.runtime.lastError);
             return;
           }
-          console.log(`[TabStateManager] ✅ States saved successfully`);
           resolve();
         });
       });
 
       // Verification
-      console.log(
-        `[TabStateManager] 🔍 VERIFICATION: Reading back from storage...`
-      );
       const verifyResult = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
           if (chrome.runtime.lastError) {
@@ -385,70 +294,21 @@ export class TabStateManager {
 
       const verifyStates =
         (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
-      const savedState = verifyStates[tabId];
-
-      if (savedState) {
-        console.log(
-          `[TabStateManager] ✅ VERIFICATION SUCCESS: Tab ${tabId} state found in storage:`,
-          JSON.stringify(savedState, null, 2)
-        );
-
-        if (savedState.status === initialStatus) {
-          console.log(
-            `[TabStateManager] ✅ Status matches: ${savedState.status}`
-          );
-        } else {
-          console.error(
-            `[TabStateManager] ❌ Status MISMATCH! Expected: ${initialStatus}, Got: ${savedState.status}`
-          );
-        }
-      } else {
-        console.error(
-          `[TabStateManager] ❌ VERIFICATION FAILED: Tab ${tabId} state NOT FOUND in storage after save!`
-        );
-        console.error(
-          `[TabStateManager] 🔍 Available tab IDs in storage:`,
-          Object.keys(verifyStates)
-        );
-      }
+      verifyStates[tabId];
 
       // Invalidate cache to force UI refresh
       this.invalidateCache(tabId);
-      console.log(`[TabStateManager] 🗑️ Cache invalidated for tab ${tabId}`);
 
       // Notify UI about state change
       setTimeout(() => {
-        console.log(
-          `[TabStateManager] 📢 Notifying UI about tab ${tabId} state change (first notification)`
-        );
         this.notifyUIUpdate();
 
         setTimeout(() => {
-          console.log(
-            `[TabStateManager] 📢 Notifying UI about tab ${tabId} state change (second notification - fallback)`
-          );
           this.notifyUIUpdate();
         }, 2000);
       }, 100);
-
-      console.log(
-        `[TabStateManager] 🎉 Tab ${tabId} initialization completed successfully`
-      );
     } catch (error) {
-      console.error(
-        `[TabStateManager] ❌ EXCEPTION during tab ${tabId} initialization:`,
-        error
-      );
-      console.error(
-        `[TabStateManager] 🔍 Error type: ${
-          error instanceof Error ? error.constructor.name : typeof error
-        }`
-      );
-      console.error(
-        `[TabStateManager] 🔍 Error message: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      // Silent error handling
     } finally {
       // 🔓 CRITICAL: Release lock
       this.initializationLocks.delete(tabId);
@@ -486,10 +346,6 @@ export class TabStateManager {
           },
           (queriedTabs) => {
             if (chrome.runtime.lastError) {
-              console.error(
-                "[TabStateManager] ❌ Query error:",
-                chrome.runtime.lastError
-              );
               reject(chrome.runtime.lastError);
               return;
             }
@@ -505,10 +361,6 @@ export class TabStateManager {
           (resolve, reject) => {
             chrome.tabs.query({}, (queriedTabs) => {
               if (chrome.runtime.lastError) {
-                console.error(
-                  "[TabStateManager] ❌ Alternative query error:",
-                  chrome.runtime.lastError
-                );
                 reject(chrome.runtime.lastError);
                 return;
               }
@@ -527,25 +379,11 @@ export class TabStateManager {
           : [];
       }
     } catch (error) {
-      console.error("[TabStateManager] ❌ Error querying tabs:", error);
-      console.error(
-        "[TabStateManager] 🔍 Error type:",
-        error instanceof Error ? error.constructor.name : typeof error
-      );
-      console.error(
-        "[TabStateManager] 🔍 Error message:",
-        error instanceof Error ? error.message : String(error)
-      );
-
       try {
         const allTabs = await new Promise<chrome.tabs.Tab[]>(
           (resolve, reject) => {
             chrome.tabs.query({}, (queriedTabs) => {
               if (chrome.runtime.lastError) {
-                console.error(
-                  "[TabStateManager] ❌ Fallback query error:",
-                  chrome.runtime.lastError
-                );
                 reject(chrome.runtime.lastError);
                 return;
               }
@@ -562,16 +400,6 @@ export class TabStateManager {
             )
           : [];
       } catch (fallbackError) {
-        console.error(
-          "[TabStateManager] ❌ Fallback also failed:",
-          fallbackError
-        );
-        console.error(
-          "[TabStateManager] 🔍 Fallback error type:",
-          fallbackError instanceof Error
-            ? fallbackError.constructor.name
-            : typeof fallbackError
-        );
         return;
       }
     }
@@ -582,31 +410,17 @@ export class TabStateManager {
 
     const states: Record<number, TabStateData> = {};
 
-    console.log(
-      `[TabStateManager] 🔍 Processing ${tabs.length} DeepSeek tabs...`
-    );
-
     for (let i = 0; i < tabs.length; i++) {
       const tab = tabs[i];
       if (!tab.id) {
-        console.warn(
-          `[TabStateManager] ⚠️ Tab at index ${i} has no ID, skipping`
-        );
         continue;
       }
-
-      console.log(
-        `[TabStateManager] 📋 Processing tab ${tab.id} (${i + 1}/${
-          tabs.length
-        }) - Title: "${tab.title}", URL: ${tab.url}`
-      );
 
       try {
         // Kiểm tra sleep state TRƯỚC (dựa vào title hoặc discarded property)
         const isSleepTab = this.isSleepTab(tab);
 
         if (isSleepTab) {
-          console.log(`[TabStateManager] 💤 Tab ${tab.id} is SLEEP tab`);
           states[tab.id] = {
             status: "sleep",
             requestId: null,
@@ -615,10 +429,6 @@ export class TabStateManager {
           };
           continue;
         }
-
-        console.log(
-          `[TabStateManager] 🔍 Checking button state for tab ${tab.id}...`
-        );
 
         // 🆕 CRITICAL: Sử dụng AbortController giống như initializeNewTab()
         let abortController: AbortController | null = null;
@@ -634,9 +444,6 @@ export class TabStateManager {
 
           const timeoutPromise = new Promise<{ isBusy: false }>((resolve) => {
             timeoutId = setTimeout(() => {
-              console.warn(
-                `[TabStateManager] ⏱️ Button check timeout for tab ${tab.id}`
-              );
               if (abortController) {
                 abortController.abort(); // ✅ Cancel button check
               }
@@ -655,11 +462,6 @@ export class TabStateManager {
           }
 
           const determinedStatus = buttonState.isBusy ? "busy" : "free";
-          console.log(
-            `[TabStateManager] ✅ Tab ${
-              tab.id
-            } status: ${determinedStatus.toUpperCase()}`
-          );
 
           states[tab.id] = {
             status: determinedStatus,
@@ -675,10 +477,6 @@ export class TabStateManager {
           abortController = null;
         }
       } catch (buttonError) {
-        console.error(
-          `[TabStateManager] ❌ Button check failed for tab ${tab.id}:`,
-          buttonError
-        );
         // Default to free state if check fails
         states[tab.id] = {
           status: "free",
@@ -686,44 +484,21 @@ export class TabStateManager {
           requestCount: 0,
           folderPath: null,
         };
-        console.log(
-          `[TabStateManager] ⚠️ Tab ${tab.id} defaulted to FREE due to error`
-        );
       }
     }
-
-    console.log(
-      `[TabStateManager] 💾 Saving ${
-        Object.keys(states).length
-      } tab states to storage...`
-    );
-    console.log(
-      `[TabStateManager] 📊 States to save:`,
-      JSON.stringify(states, null, 2)
-    );
 
     await new Promise<void>((resolve, reject) => {
       chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
         if (chrome.runtime.lastError) {
-          console.error(
-            "[TabStateManager] ❌ Error saving states:",
-            chrome.runtime.lastError
-          );
           reject(chrome.runtime.lastError);
           return;
         }
-        console.log(
-          `[TabStateManager] ✅ States saved successfully to storage`
-        );
         resolve();
       });
     });
 
     // 🆕 VERIFICATION: Đọc lại từ storage để verify
-    console.log(
-      `[TabStateManager] 🔍 VERIFICATION: Reading back from storage...`
-    );
-    const verifyResult = await new Promise<any>((resolve, reject) => {
+    await new Promise<any>((resolve, reject) => {
       chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
         if (chrome.runtime.lastError) {
           reject(chrome.runtime.lastError);
@@ -732,31 +507,6 @@ export class TabStateManager {
         resolve(data || {});
       });
     });
-
-    const verifyStates = (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
-    console.log(
-      `[TabStateManager] ✅ VERIFICATION: Found ${
-        Object.keys(verifyStates).length
-      } tabs in storage`
-    );
-
-    // Check if all tabs were saved
-    const savedTabIds = Object.keys(verifyStates).map((id) => parseInt(id));
-    const expectedTabIds = Object.keys(states).map((id) => parseInt(id));
-    const missingSaves = expectedTabIds.filter(
-      (id) => !savedTabIds.includes(id)
-    );
-
-    if (missingSaves.length > 0) {
-      console.error(
-        `[TabStateManager] ❌ VERIFICATION FAILED: ${missingSaves.length} tabs missing from storage:`,
-        missingSaves
-      );
-    } else {
-      console.log(
-        `[TabStateManager] ✅ VERIFICATION SUCCESS: All ${expectedTabIds.length} tabs saved correctly`
-      );
-    }
 
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -828,10 +578,6 @@ export class TabStateManager {
             }
 
             if (browserAPI.runtime.lastError) {
-              console.error(
-                `[TabStateManager] ✗ executeScript error for tab ${tabId}:`,
-                browserAPI.runtime.lastError
-              );
               reject(browserAPI.runtime.lastError);
               return;
             }
@@ -852,10 +598,6 @@ export class TabStateManager {
         return { isBusy: false };
       }
 
-      console.error(
-        `[TabStateManager] ✗ Error checking button state for tab ${tabId}:`,
-        error
-      );
       return { isBusy: false };
     }
   }
@@ -866,10 +608,6 @@ export class TabStateManager {
     const result = await new Promise<any>((resolve, reject) => {
       chrome.storage.session.get([this.STORAGE_KEY], (data) => {
         if (chrome.runtime.lastError) {
-          console.error(
-            "[TabStateManager] ❌ Error reading session storage:",
-            chrome.runtime.lastError
-          );
           reject(chrome.runtime.lastError);
           return;
         }
@@ -898,10 +636,6 @@ export class TabStateManager {
           },
           (queriedTabs) => {
             if (chrome.runtime.lastError) {
-              console.error(
-                "[TabStateManager] ❌ getAllTabStates query error:",
-                chrome.runtime.lastError
-              );
               reject(chrome.runtime.lastError);
               return;
             }
@@ -917,10 +651,6 @@ export class TabStateManager {
           (resolve, reject) => {
             chrome.tabs.query({}, (queriedTabs) => {
               if (chrome.runtime.lastError) {
-                console.error(
-                  "[TabStateManager] ❌ getAllTabStates alternative query error:",
-                  chrome.runtime.lastError
-                );
                 reject(chrome.runtime.lastError);
                 return;
               }
@@ -939,25 +669,11 @@ export class TabStateManager {
           : [];
       }
     } catch (error) {
-      console.error(
-        "[TabStateManager] ❌ getAllTabStates error querying tabs:",
-        error
-      );
-      console.error("[TabStateManager] 🔍 Error details:", {
-        type: error instanceof Error ? error.constructor.name : typeof error,
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      });
-
       try {
         const allTabs = await new Promise<chrome.tabs.Tab[]>(
           (resolve, reject) => {
             chrome.tabs.query({}, (queriedTabs) => {
               if (chrome.runtime.lastError) {
-                console.error(
-                  "[TabStateManager] ❌ getAllTabStates fallback error:",
-                  chrome.runtime.lastError
-                );
                 reject(chrome.runtime.lastError);
                 return;
               }
@@ -973,20 +689,6 @@ export class TabStateManager {
             )
           : [];
       } catch (fallbackError) {
-        console.error(
-          "[TabStateManager] ❌ Fallback also failed:",
-          fallbackError
-        );
-        console.error("[TabStateManager] 🔍 Fallback error details:", {
-          type:
-            fallbackError instanceof Error
-              ? fallbackError.constructor.name
-              : typeof fallbackError,
-          message:
-            fallbackError instanceof Error
-              ? fallbackError.message
-              : String(fallbackError),
-        });
         return [];
       }
     }
@@ -1095,7 +797,6 @@ export class TabStateManager {
 
       return true;
     } catch (error) {
-      console.error("[TabStateManager] ❌ Error marking tab busy:", error);
       return false;
     }
   }
@@ -1141,10 +842,6 @@ export class TabStateManager {
       await new Promise<void>((resolve, reject) => {
         chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
           if (chrome.runtime.lastError) {
-            console.error(
-              `[TabStateManager] ❌ storage.set error for tab ${tabId}:`,
-              chrome.runtime.lastError
-            );
             reject(chrome.runtime.lastError);
             return;
           }
@@ -1173,18 +870,9 @@ export class TabStateManager {
 
         return true;
       } else {
-        console.error(
-          `[TabStateManager] ❌ Verification FAILED for tab ${tabId}! Expected status=free, got status=${
-            verifyState?.status || "unknown"
-          }`
-        );
         return false;
       }
     } catch (error) {
-      console.error(
-        `[TabStateManager] ❌ EXCEPTION in markTabFreeInternal for tab ${tabId}:`,
-        error
-      );
       return false;
     }
   }
@@ -1246,15 +934,9 @@ export class TabStateManager {
         this.notifyUIUpdate();
         return true;
       } else {
-        console.error(
-          `[TabStateManager] ❌ Verification failed! Tab ${tabId} status: ${
-            verifyState?.status || "unknown"
-          }`
-        );
         return false;
       }
     } catch (error) {
-      console.error("[TabStateManager] ❌ Error marking tab sleep:", error);
       return false;
     }
   }
@@ -1321,15 +1003,9 @@ export class TabStateManager {
         this.notifyUIUpdate();
         return true;
       } else {
-        console.error(
-          `[TabStateManager] ❌ Verification failed! Tab ${tabId} status: ${
-            verifyState?.status || "unknown"
-          }`
-        );
         return false;
       }
     } catch (error) {
-      console.error("[TabStateManager] ❌ Error waking up tab:", error);
       return false;
     }
   }
@@ -1398,24 +1074,9 @@ export class TabStateManager {
         this.invalidateCache(tabId);
         return true;
       } else {
-        console.error(
-          `[TabStateManager] ❌ Atomic operation verification failed!`
-        );
-        console.error(
-          `[TabStateManager] 🔍 Expected: status=free, folderPath=${folderPath}`
-        );
-        console.error(
-          `[TabStateManager] 🔍 Got: status=${
-            verifyState?.status || "unknown"
-          }, folderPath=${verifyState?.folderPath || "null"}`
-        );
         return false;
       }
     } catch (error) {
-      console.error(
-        `[TabStateManager] ❌ Error in markTabFreeWithFolder:`,
-        error
-      );
       return false;
     }
   }
@@ -1479,19 +1140,9 @@ export class TabStateManager {
         this.invalidateCache(tabId);
         return true;
       } else {
-        console.error(
-          `[TabStateManager] ❌ Verification failed! Expected folderPath: ${folderPath}, got: ${
-            verifyState?.folderPath || "null"
-          }`
-        );
-        console.error(
-          `[TabStateManager] 🔍 Full verify state:`,
-          JSON.stringify(verifyState, null, 2)
-        );
         return false;
       }
     } catch (error) {
-      console.error(`[TabStateManager] ❌ Error linking tab to folder:`, error);
       return false;
     }
   }
@@ -1527,15 +1178,11 @@ export class TabStateManager {
         );
         await PromptController.clearTokensForFolder(folderPath);
       } catch (error) {
-        console.error(
-          `[TabStateManager] ❌ Error clearing tokens for folder "${folderPath}":`,
-          error
-        );
+        // Silent error handling
       }
 
       return true;
     } catch (error) {
-      console.error(`[TabStateManager] ❌ Error unlinking folder:`, error);
       return false;
     }
   }
@@ -1552,10 +1199,6 @@ export class TabStateManager {
 
       return matchingTabs;
     } catch (error) {
-      console.error(
-        `[TabStateManager] ❌ Error getting tabs by folder:`,
-        error
-      );
       return [];
     }
   }
@@ -1604,10 +1247,7 @@ export class TabStateManager {
         return retryState;
       }
     } catch (error) {
-      console.error(
-        `[TabStateManager] ❌ Error in getTabState fallback for tab ${tabId}:`,
-        error
-      );
+      // Silent error handling
     }
 
     return null;
@@ -1637,24 +1277,18 @@ export class TabStateManager {
       const states = (result && result[this.STORAGE_KEY]) || {};
 
       let recoveredCount = 0;
-      let busyTabsFound = 0;
 
       for (const [tabIdStr, state] of Object.entries(states)) {
         const tabState = state as TabStateData;
         const tabId = parseInt(tabIdStr);
 
         if (tabState.status === "busy") {
-          busyTabsFound++;
           const buttonState = await this.checkButtonState(tabId);
           if (!buttonState.isBusy) {
             const freeSuccess = await this.markTabFreeInternal(tabId);
 
             if (freeSuccess) {
               recoveredCount++;
-            } else {
-              console.error(
-                `[TabStateManager] ❌ Failed to mark tab ${tabId} FREE`
-              );
             }
           }
         }
@@ -1664,7 +1298,7 @@ export class TabStateManager {
         this.notifyUIUpdate();
       }
     } catch (error) {
-      console.error("[TabStateManager] ❌ Error in auto-recovery:", error);
+      // Silent error handling
     } finally {
       this.storageMutex.release();
     }
@@ -1705,10 +1339,7 @@ export class TabStateManager {
         this.notifyUIUpdate();
       }
     } catch (error) {
-      console.error(
-        `[TabStateManager] ❌ Error removing tab state ${tabId}:`,
-        error
-      );
+      // Silent error handling
     }
   }
 
@@ -1739,21 +1370,13 @@ export class TabStateManager {
                   retryPromise.then(() => {}).catch(() => {});
                 }
               } catch (retryError) {
-                console.error(
-                  `[TabStateManager] ❌ Exception during retry:`,
-                  retryError
-                );
+                // Silent error handling
               }
             }, 500);
           });
       }
     } catch (error) {
-      console.error("[TabStateManager] ❌ Exception in notifyUIUpdate:", error);
-      console.error(
-        `[TabStateManager] 🔍 Exception type: ${typeof error}, message: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      // Silent error handling
     }
   }
 }
