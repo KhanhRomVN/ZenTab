@@ -20,11 +20,7 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
   const [language, setLanguage] = useState<string>("en");
 
   useEffect(() => {
-    // 🔥 FIX: Sync local state với prop từ Sidebar (đã được sync với storage)
     if (currentApiProvider && currentApiProvider !== apiProvider) {
-      console.log(
-        `[SettingDrawer] 🔄 Syncing API Provider: ${apiProvider} → ${currentApiProvider}`
-      );
       setApiProvider(currentApiProvider);
     }
   }, [currentApiProvider]);
@@ -39,14 +35,7 @@ const SettingDrawer: React.FC<SettingDrawerProps> = ({
 
   const handleApiProviderChange = (value: string | string[]) => {
     const providerValue = Array.isArray(value) ? value[0] : value;
-
-    // 🔥 FIX: Update local state FIRST, then notify parent to save to storage
-    console.log(
-      `[SettingDrawer] 📝 User changed API Provider to: ${providerValue}`
-    );
     setApiProvider(providerValue);
-
-    // 🔥 CRITICAL: Parent (Sidebar) will handle storage write and WebSocket reconnect
     onApiProviderChange(providerValue);
   };
 

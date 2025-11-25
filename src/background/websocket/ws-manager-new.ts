@@ -55,11 +55,8 @@ export class WSManagerNew {
   } {
     let url = apiProvider.trim();
 
-    console.log(`[WSManager] 🔍 Parsing API Provider: "${apiProvider}"`);
-
     if (!url.startsWith("http://") && !url.startsWith("https://")) {
       url = `http://${url}`;
-      console.log(`[WSManager] 🔧 Added http:// prefix: ${url}`);
     }
 
     let urlObj: URL;
@@ -123,16 +120,8 @@ export class WSManagerNew {
         const newApiProvider = changes.apiProvider.newValue;
         const oldApiProvider = changes.apiProvider.oldValue;
 
-        // 🔥 FIX: Disconnect khi API Provider thay đổi (bất kể giá trị mới là gì)
         if (newApiProvider !== oldApiProvider) {
-          console.log(
-            `[WSManager] 🔄 API Provider changed: "${
-              oldApiProvider || "(empty)"
-            }" → "${newApiProvider || "(empty)"}"`
-          );
-
           if (this.connection) {
-            console.log(`[WSManager] 🔌 Disconnecting old connection...`);
             this.connection.disconnect();
             this.connection = null;
           }
@@ -143,7 +132,6 @@ export class WSManagerNew {
 
   public async connect(): Promise<{ success: boolean; error?: string }> {
     if (this.connection && this.connection.state.status === "connected") {
-      console.log(`[WSManager] ✅ Already connected - returning success`);
       return { success: true };
     }
 
@@ -161,11 +149,6 @@ export class WSManagerNew {
       });
 
       const apiProvider = storageResult?.apiProvider;
-      console.log(
-        `[WSManager] 📊 Read API Provider from storage: "${
-          apiProvider || "(empty)"
-        }"`
-      );
 
       // 🔥 FIX: Nếu chưa có API Provider, KHÔNG connect và throw error
       if (!apiProvider || !this.isValidApiProvider(apiProvider)) {
@@ -181,11 +164,6 @@ export class WSManagerNew {
 
       const { port, wsUrl } = this.parseApiProvider(apiProvider);
 
-      console.log(`[WSManager] 🔌 Parsed connection details:`);
-      console.log(`[WSManager]   • API Provider: ${apiProvider}`);
-      console.log(`[WSManager]   • WebSocket URL: ${wsUrl}`);
-      console.log(`[WSManager]   • Port: ${port}`);
-
       const connectionId = `ws-${Date.now()}-${port}`;
 
       this.connection = new WSConnection({
@@ -196,7 +174,6 @@ export class WSManagerNew {
 
       await this.connection.connect();
 
-      console.log(`[WSManager] ✅ Connection established successfully`);
       return { success: true };
     } catch (error) {
       console.error(`[WSManager] ❌ Connection failed:`, error);

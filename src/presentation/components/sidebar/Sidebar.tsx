@@ -38,17 +38,10 @@ const Sidebar: React.FC = () => {
 
   useEffect(() => {
     const initializeSidebar = async () => {
-      // 🔥 CRITICAL: Đọc API Provider từ storage TRƯỚC (single source of truth)
       const storageResult = await chrome.storage.local.get(["apiProvider"]);
       const storedProvider = storageResult?.apiProvider || "";
 
-      // 🔥 FIX: Sync UI state với storage value ngay lập tức (có thể là empty string)
       setApiProvider(storedProvider);
-      console.log(
-        `[Sidebar] 📊 Synced API Provider from storage: "${
-          storedProvider || "(empty)"
-        }"`
-      );
 
       // Load WebSocket status (chỉ load, không auto-connect)
       await loadWebSocketStatus();
@@ -116,9 +109,6 @@ const Sidebar: React.FC = () => {
 
         // 🔥 FIX: Sync UI state khi storage thay đổi (từ Settings hoặc backend)
         if (newProvider && newProvider !== oldProvider) {
-          console.log(
-            `[Sidebar] 🔄 API Provider changed: ${oldProvider} → ${newProvider}`
-          );
           setApiProvider(newProvider);
 
           // 🔥 NEW: Reload WebSocket status để update UI với connection mới
@@ -291,20 +281,12 @@ const Sidebar: React.FC = () => {
   };
 
   const handleApiProviderChange = async (newProvider: string) => {
-    console.log(`[Sidebar] 💾 Saving new API Provider: ${newProvider}`);
-
-    // 🔥 CRITICAL: Save to storage FIRST (single source of truth)
     await chrome.storage.local.set({
       apiProvider: newProvider,
     });
 
-    // 🔥 FIX: Sync UI state AFTER storage write completes
     setApiProvider(newProvider);
-    console.log(`[Sidebar] ✅ API Provider saved and UI synced`);
-
-    // Reconnect WebSocket với protocol mới (ws/wss)
     if (wsConnection?.status === "connected") {
-      console.log(`[Sidebar] 🔄 Reconnecting WebSocket with new provider...`);
       await WSHelper.disconnect();
 
       // Wait for disconnect to complete
@@ -315,7 +297,6 @@ const Sidebar: React.FC = () => {
 
       // Reload WebSocket status
       await loadWebSocketStatus();
-      console.log(`[Sidebar] ✅ WebSocket reconnected and status reloaded`);
     }
   };
 
@@ -350,7 +331,6 @@ const Sidebar: React.FC = () => {
           const state = await WSHelper.getConnectionState();
 
           if (state && state.status === "connected") {
-            console.log("[Sidebar] ✅ Connection verified via storage");
             setWsStatus("connected");
             setWsConnection({
               id: state.id,

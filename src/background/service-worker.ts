@@ -48,9 +48,6 @@ declare const browser: typeof chrome & any;
         );
 
         if (isLegacy) {
-          console.log(
-            `[ServiceWorker] 🧹 Removing legacy API Provider: ${allData.apiProvider}`
-          );
           keysToRemove.push("apiProvider");
         }
       }
@@ -71,15 +68,11 @@ declare const browser: typeof chrome & any;
       }
 
       if (keysToRemove.length > 0) {
-        console.log(
-          `[ServiceWorker] 🧹 Cleaning up ${keysToRemove.length} legacy keys`
-        );
         await new Promise<void>((resolve) => {
           browserAPI.storage.local.remove(keysToRemove, () => {
             resolve();
           });
         });
-        console.log(`[ServiceWorker] ✅ Legacy cleanup completed`);
       }
     } catch (error) {
       console.error(`[ServiceWorker] ❌ Legacy cleanup failed:`, error);
@@ -344,13 +337,7 @@ declare const browser: typeof chrome & any;
               return;
             }
 
-            const unlinked = await tabStateManager.unlinkFolder(folderPath);
-
-            if (unlinked) {
-              console.log(
-                `[ServiceWorker] ✅ Successfully unlinked tabs from folder: ${folderPath}`
-              );
-            }
+            await tabStateManager.unlinkFolder(folderPath);
 
             chrome.storage.local.remove(["wsIncomingRequest"]);
           } catch (error) {
@@ -455,8 +442,6 @@ declare const browser: typeof chrome & any;
         (async () => {
           try {
             const result = await wsManager.connect();
-            console.log(`[ServiceWorker] ✅ Connect result:`, result);
-
             // Validate result structure
             if (!result || typeof result.success !== "boolean") {
               console.error(

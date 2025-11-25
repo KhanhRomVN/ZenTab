@@ -20,7 +20,6 @@ export class PromptController {
    */
   private static calculateTokensAndLog(text: string, label: string): number {
     if (!text) {
-      console.log(`[TokenCalculation] ${label}: Empty text → 0 tokens`);
       return 0;
     }
 
@@ -28,49 +27,6 @@ export class PromptController {
       // Tokenize text using gpt-tokenizer (GPT-3.5/GPT-4 compatible)
       const tokens = encode(text);
       const tokenCount = tokens.length;
-
-      // Count words (split by whitespace)
-      const words = text
-        .trim()
-        .split(/\s+/)
-        .filter((w) => w.length > 0);
-      const wordCount = words.length;
-
-      // Count characters
-      const charCount = text.length;
-
-      // 🆕 LOG: Detailed statistics
-      console.log(`[TokenCalculation] ═══════════════════════════════════════`);
-      console.log(`[TokenCalculation] ${label} Statistics:`);
-      console.log(
-        `[TokenCalculation]   📝 Characters: ${charCount.toLocaleString()}`
-      );
-      console.log(
-        `[TokenCalculation]   📖 Words: ${wordCount.toLocaleString()}`
-      );
-      console.log(
-        `[TokenCalculation]   🎯 Tokens: ${tokenCount.toLocaleString()}`
-      );
-      console.log(
-        `[TokenCalculation]   📊 Chars/Token ratio: ${(
-          charCount / tokenCount
-        ).toFixed(2)}`
-      );
-      console.log(
-        `[TokenCalculation]   📊 Words/Token ratio: ${(
-          wordCount / tokenCount
-        ).toFixed(2)}`
-      );
-
-      // Preview first 100 chars
-      const preview = text.substring(0, 100).replace(/\n/g, "\\n");
-      console.log(
-        `[TokenCalculation]   👁️  Preview: "${preview}${
-          text.length > 100 ? "..." : ""
-        }"`
-      );
-      console.log(`[TokenCalculation] ═══════════════════════════════════════`);
-
       return tokenCount;
     } catch (error) {
       console.error(
@@ -142,34 +98,16 @@ export class PromptController {
       });
 
       const accumulator = result[this.FOLDER_TOKENS_KEY] || {};
-
-      // 🔥 CRITICAL: Đọc giá trị hiện tại từ accumulator
       const currentTokens = accumulator[folderPath] || {
         prompt_tokens: 0,
         completion_tokens: 0,
         total_tokens: 0,
       };
 
-      // 🔥 DEBUG LOG: Trước khi cộng dồn
-      console.log(`[TokenAccumulation] 🔍 Before accumulation:`);
-      console.log(
-        `[TokenAccumulation]   - Current in storage: prompt=${currentTokens.prompt_tokens}, completion=${currentTokens.completion_tokens}, total=${currentTokens.total_tokens}`
-      );
-      console.log(
-        `[TokenAccumulation]   - Adding this request: prompt=${prompt_tokens}, completion=${completion_tokens}, total=${total_tokens}`
-      );
-
-      // 🔥 CRITICAL: Cộng dồn tokens
       const newPromptTokens = currentTokens.prompt_tokens + prompt_tokens;
       const newCompletionTokens =
         currentTokens.completion_tokens + completion_tokens;
       const newTotalTokens = currentTokens.total_tokens + total_tokens;
-
-      // 🔥 DEBUG LOG: Sau khi cộng dồn
-      console.log(`[TokenAccumulation] 🔍 After accumulation:`);
-      console.log(
-        `[TokenAccumulation]   - New totals: prompt=${newPromptTokens}, completion=${newCompletionTokens}, total=${newTotalTokens}`
-      );
 
       // 🔥 CRITICAL: Validate calculation
       if (newTotalTokens !== newPromptTokens + newCompletionTokens) {
@@ -204,11 +142,6 @@ export class PromptController {
           }
         );
       });
-
-      console.log(
-        `[PromptController] 📊 Saved tokens for folder "${folderPath}":`,
-        accumulator[folderPath]
-      );
     } catch (error) {
       console.error(
         `[PromptController] ❌ Error saving tokens for folder:`,
@@ -293,10 +226,6 @@ export class PromptController {
             }
           );
         });
-
-        console.log(
-          `[PromptController] 🧹 Cleared tokens for folder "${folderPath}"`
-        );
       }
     } catch (error) {
       console.error(
@@ -1231,19 +1160,6 @@ REMEMBER:
     let pollCount = 0;
     let responseSent = false;
 
-    // 🆕 LOG: Debug originalPrompt parameter
-    console.log(`[PromptController] 🔍 startResponsePolling called with:`);
-    console.log(`[PromptController]   - requestId: ${requestId}`);
-    console.log(
-      `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
-    );
-    console.log(
-      `[PromptController]   - originalPrompt preview (first 200 chars): "${originalPrompt.substring(
-        0,
-        200
-      )}"`
-    );
-
     const poll = async () => {
       pollCount++;
 
@@ -1324,9 +1240,6 @@ REMEMBER:
                 const tabState = await this.tabStateManager.getTabState(tabId);
                 if (tabState && tabState.folderPath) {
                   folderPathToLink = tabState.folderPath;
-                  console.log(
-                    `[PromptController] ✅ Fallback successful: got folderPath from tab state: "${folderPathToLink}"`
-                  );
                 } else {
                   console.warn(
                     `[PromptController] ⚠️ Fallback failed: tab state has no folderPath. Tokens will NOT be accumulated!`
@@ -1356,13 +1269,6 @@ REMEMBER:
 
             // 🆕 STEP 3: Save tokens vào folder accumulator (nếu có folderPath)
             if (folderPathToLink) {
-              console.log(
-                `[PromptController] 💾 Saving tokens to accumulator for folder: "${folderPathToLink}"`
-              );
-              console.log(
-                `[PromptController] 💾 Current request tokens: prompt=${currentPromptTokens}, completion=${currentCompletionTokens}, total=${currentTotalTokens}`
-              );
-
               await this.saveTokensForFolder(
                 folderPathToLink,
                 currentPromptTokens,
@@ -1370,53 +1276,7 @@ REMEMBER:
                 currentTotalTokens
               );
 
-              // 🆕 VERIFY: Đọc lại để verify tokens đã được save
-              const verifyTokens = await this.getTokensForFolder(
-                folderPathToLink
-              );
-              if (verifyTokens) {
-                console.log(
-                  `[PromptController] ✅ Verified accumulated tokens: prompt=${verifyTokens.prompt_tokens}, completion=${verifyTokens.completion_tokens}, total=${verifyTokens.total_tokens}`
-                );
-
-                // 🆕 DEBUG: Log chi tiết để track accumulation
-                console.log(
-                  `[TokenAccumulation] ═══════════════════════════════════════`
-                );
-                console.log(
-                  `[TokenAccumulation] 📂 Folder: "${folderPathToLink}"`
-                );
-                console.log(
-                  `[TokenAccumulation] 📝 Request ID: ${capturedRequestId}`
-                );
-                console.log(`[TokenAccumulation] 📊 Current Request:`);
-                console.log(
-                  `[TokenAccumulation]   - Prompt: ${currentPromptTokens}`
-                );
-                console.log(
-                  `[TokenAccumulation]   - Completion: ${currentCompletionTokens}`
-                );
-                console.log(
-                  `[TokenAccumulation]   - Total: ${currentTotalTokens}`
-                );
-                console.log(`[TokenAccumulation] 📊 Accumulated Total:`);
-                console.log(
-                  `[TokenAccumulation]   - Prompt: ${verifyTokens.prompt_tokens}`
-                );
-                console.log(
-                  `[TokenAccumulation]   - Completion: ${verifyTokens.completion_tokens}`
-                );
-                console.log(
-                  `[TokenAccumulation]   - Total: ${verifyTokens.total_tokens}`
-                );
-                console.log(
-                  `[TokenAccumulation] ═══════════════════════════════════════`
-                );
-              } else {
-                console.error(
-                  `[PromptController] ❌ Failed to verify accumulated tokens for folder "${folderPathToLink}"`
-                );
-              }
+              await this.getTokensForFolder(folderPathToLink);
 
               const freeSuccess =
                 await this.tabStateManager.markTabFreeWithFolder(
@@ -1470,23 +1330,6 @@ REMEMBER:
                   responseToSend = JSON.stringify(builtResponse);
                 }
               } catch (parseError) {
-                // 🆕 LOG: Debug originalPrompt trước khi build response
-                console.log(
-                  `[PromptController] 🔍 Building OpenAI response (parseError path):`
-                );
-                console.log(
-                  `[PromptController]   - rawResponse length: ${rawResponse.length} chars`
-                );
-                console.log(
-                  `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
-                );
-                console.log(
-                  `[PromptController]   - originalPrompt preview: "${originalPrompt.substring(
-                    0,
-                    200
-                  )}"`
-                );
-
                 const builtResponse = await this.buildOpenAIResponse(
                   rawResponse,
                   originalPrompt,
@@ -1505,26 +1348,6 @@ REMEMBER:
               if (responseObj.choices) {
                 responseToSend = JSON.stringify(responseObj);
               } else {
-                // Object thiếu structure → rebuild
-                // 🆕 LOG: Debug originalPrompt trước khi build response
-                console.log(
-                  `[PromptController] 🔍 Building OpenAI response (object rebuild path):`
-                );
-                console.log(
-                  `[PromptController]   - responseObj: ${JSON.stringify(
-                    responseObj
-                  ).substring(0, 200)}`
-                );
-                console.log(
-                  `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
-                );
-                console.log(
-                  `[PromptController]   - originalPrompt preview: "${originalPrompt.substring(
-                    0,
-                    200
-                  )}"`
-                );
-
                 const builtResponse = await this.buildOpenAIResponse(
                   JSON.stringify(responseObj),
                   originalPrompt,
@@ -1533,28 +1356,6 @@ REMEMBER:
                 responseToSend = JSON.stringify(builtResponse);
               }
             } else {
-              // 🆕 LOG: Debug originalPrompt trước khi build response
-              console.log(
-                `[PromptController] 🔍 Building OpenAI response (else path - String rawResponse):`
-              );
-              console.log(
-                `[PromptController]   - rawResponse type: ${typeof rawResponse}`
-              );
-              console.log(
-                `[PromptController]   - rawResponse length: ${
-                  String(rawResponse).length
-                } chars`
-              );
-              console.log(
-                `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
-              );
-              console.log(
-                `[PromptController]   - originalPrompt preview: "${originalPrompt.substring(
-                  0,
-                  200
-                )}"`
-              );
-
               const builtResponse = await this.buildOpenAIResponse(
                 String(rawResponse),
                 originalPrompt,
@@ -2746,22 +2547,6 @@ REMEMBER:
     originalPrompt: string = "",
     folderPath: string | null = null
   ): Promise<any> {
-    // 🆕 LOG: Debug parameters received
-    console.log(`[PromptController] 🔍 buildOpenAIResponse called with:`);
-    console.log(
-      `[PromptController]   - content length: ${content.length} chars`
-    );
-    console.log(
-      `[PromptController]   - originalPrompt length: ${originalPrompt.length} chars`
-    );
-    console.log(`[PromptController]   - folderPath: ${folderPath || "(none)"}`);
-    console.log(
-      `[PromptController]   - originalPrompt value: "${originalPrompt.substring(
-        0,
-        300
-      )}"`
-    );
-
     // Generate unique IDs
     const generateHex = (length: number): string => {
       return Array.from({ length }, () =>
@@ -2779,23 +2564,12 @@ REMEMBER:
     let total_tokens = 0;
 
     if (folderPath) {
-      console.log(
-        `[PromptController] 🔍 Attempting to get accumulated tokens for folder: "${folderPath}"`
-      );
-
       const accumulatedTokens = await this.getTokensForFolder(folderPath);
 
       if (accumulatedTokens) {
         prompt_tokens = accumulatedTokens.prompt_tokens;
         completion_tokens = accumulatedTokens.completion_tokens;
         total_tokens = accumulatedTokens.total_tokens;
-
-        console.log(
-          `[PromptController] 📊 Using accumulated tokens for folder "${folderPath}"`
-        );
-        console.log(
-          `[PromptController] 📊 Accumulated values: prompt=${prompt_tokens}, completion=${completion_tokens}, total=${total_tokens}`
-        );
       } else {
         console.warn(
           `[PromptController] ⚠️ No accumulated tokens found for folder "${folderPath}" - this should not happen!`
@@ -2816,10 +2590,6 @@ REMEMBER:
         total_tokens = prompt_tokens + completion_tokens;
       }
     } else {
-      console.log(
-        `[PromptController] 🔍 No folderPath provided - calculating tokens for single request`
-      );
-
       // Không có folderPath → tính tokens cho single request
       prompt_tokens = this.calculateTokensAndLog(
         originalPrompt,
@@ -2831,20 +2601,6 @@ REMEMBER:
       );
       total_tokens = prompt_tokens + completion_tokens;
     }
-
-    // 🆕 LOG: Summary
-    console.log(`[TokenCalculation] ═══════════════════════════════════════`);
-    console.log(`[TokenCalculation] 📊 USAGE SUMMARY:`);
-    console.log(
-      `[TokenCalculation]   🔵 Prompt Tokens: ${prompt_tokens.toLocaleString()}`
-    );
-    console.log(
-      `[TokenCalculation]   🟢 Completion Tokens: ${completion_tokens.toLocaleString()}`
-    );
-    console.log(
-      `[TokenCalculation]   🟣 Total Tokens: ${total_tokens.toLocaleString()}`
-    );
-    console.log(`[TokenCalculation] ═══════════════════════════════════════`);
 
     const responseObject = {
       id: responseId,

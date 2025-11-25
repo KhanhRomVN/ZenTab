@@ -18,11 +18,6 @@ export class WSHelper {
         });
       });
       const apiProvider = storageResult?.apiProvider || "";
-      console.log(
-        `[WSHelper] 🔌 Connecting to API Provider: "${
-          apiProvider || "(not configured)"
-        }"`
-      );
 
       const response = await chrome.runtime.sendMessage({
         action: "connectWebSocket",
@@ -48,9 +43,6 @@ export class WSHelper {
           // Kiểm tra storage state
           const state = await this.getConnectionState();
           if (state && state.status === "connected") {
-            console.log(
-              "[WSHelper] ✅ Connection verified via storage polling"
-            );
             return { success: true };
           }
 

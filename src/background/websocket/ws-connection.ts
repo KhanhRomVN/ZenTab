@@ -57,10 +57,6 @@ export class WSConnection {
     this.state.status = "connecting";
     this.notifyStateChange();
 
-    console.log(
-      `[WSConnection] 🔌 Initiating WebSocket connection to: ${this.state.url}`
-    );
-
     return new Promise<void>((resolve) => {
       try {
         this.ws = new WebSocket(this.state.url);
