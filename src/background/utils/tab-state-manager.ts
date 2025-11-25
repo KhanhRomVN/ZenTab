@@ -169,7 +169,6 @@ export class TabStateManager {
   private getCachedState(tabId: number): TabStateData | null {
     const cached = this.tabStateCache.get(tabId);
     if (!cached) {
-      console.log(`[TabStateManager] 📭 Cache MISS for tab ${tabId}`);
       return null;
     }
 
@@ -177,25 +176,14 @@ export class TabStateManager {
     const cacheAge = now - cached.timestamp;
 
     if (cacheAge > this.CACHE_TTL) {
-      console.log(
-        `[TabStateManager] ⏰ Cache EXPIRED for tab ${tabId} (age: ${cacheAge}ms, TTL: ${this.CACHE_TTL}ms)`
-      );
       this.tabStateCache.delete(tabId);
       return null;
     }
 
-    console.log(
-      `[TabStateManager] ✅ Cache HIT for tab ${tabId} (age: ${cacheAge}ms, status: ${cached.state.status})`
-    );
     return cached.state;
   }
 
   private setCachedState(tabId: number, state: TabStateData): void {
-    console.log(
-      `[TabStateManager] 💾 Cache SET for tab ${tabId}: status=${
-        state.status
-      }, folderPath=${state.folderPath || "null"}`
-    );
     this.tabStateCache.set(tabId, {
       state: state,
       timestamp: Date.now(),
@@ -664,10 +652,6 @@ export class TabStateManager {
   }
 
   public async getAllTabStates(): Promise<TabStateInfo[]> {
-    console.log(
-      `[TabStateManager] 🔍 getAllTabStates() called at ${new Date().toISOString()}`
-    );
-
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     const result = await new Promise<any>((resolve, reject) => {
@@ -681,18 +665,6 @@ export class TabStateManager {
     });
 
     const states = (result && result[this.STORAGE_KEY]) || {};
-
-    console.log(`[TabStateManager] 📊 Raw states from storage:`, {
-      stateCount: Object.keys(states).length,
-      states: Object.entries(states).map(([id, state]: [string, any]) => ({
-        tabId: id,
-        status: state.status,
-        requestId: state.requestId,
-        folderPath: state.folderPath,
-        requestCount: state.requestCount,
-      })),
-    });
-
     for (const [tabIdStr, state] of Object.entries(states)) {
       const tabId = parseInt(tabIdStr);
       this.setCachedState(tabId, state as TabStateData);
@@ -788,16 +760,6 @@ export class TabStateManager {
         status: actualStatus,
       });
 
-      console.log(`[TabStateManager] 🏷️ Tab ${tab.id} state:`, {
-        title: tab.title?.substring(0, 30),
-        status: actualStatus,
-        canAccept: canAccept,
-        requestCount: state.requestCount || 0,
-        folderPath: state.folderPath || null,
-        isSleepTab: isSleepTab,
-        rawStatus: state.status,
-      });
-
       return {
         tabId: tab.id!,
         containerName: `Tab ${tab.id}`,
@@ -809,17 +771,6 @@ export class TabStateManager {
         folderPath: state.folderPath || null,
       };
     });
-
-    console.log(
-      `[TabStateManager] ✅ getAllTabStates() returning ${tabStates.length} tabs:`,
-      {
-        total: tabStates.length,
-        free: tabStates.filter((t) => t.status === "free").length,
-        busy: tabStates.filter((t) => t.status === "busy").length,
-        sleep: tabStates.filter((t) => t.status === "sleep").length,
-        canAccept: tabStates.filter((t) => t.canAccept).length,
-      }
-    );
 
     return tabStates;
   }
@@ -852,10 +803,6 @@ export class TabStateManager {
     tabId: number,
     requestId: string
   ): Promise<boolean> {
-    console.log(
-      `[TabStateManager] 🔒 markTabBusy() called for tab ${tabId}, requestId: ${requestId}`
-    );
-
     try {
       // 🔥 CRITICAL: Wrap storage.get() để đảm bảo async completion
       const result = await new Promise<any>((resolve, reject) => {
@@ -874,30 +821,12 @@ export class TabStateManager {
         folderPath: null,
       };
 
-      console.log(`[TabStateManager] 📊 Current state before marking BUSY:`, {
-        tabId: tabId,
-        currentStatus: currentState.status || "undefined",
-        currentRequestId: currentState.requestId || "null",
-        currentRequestCount: currentState.requestCount || 0,
-        currentFolderPath: currentState.folderPath || "null",
-      });
-
-      // 🔥 CRITICAL: Preserve folderPath - use currentState.folderPath directly
-      // KHÔNG dùng || null vì có thể gây mất dữ liệu
       states[tabId] = {
         status: "busy",
         requestId: requestId,
         requestCount: (currentState.requestCount || 0) + 1,
-        folderPath: currentState.folderPath ?? null, // ✅ Dùng ?? thay vì ||
+        folderPath: currentState.folderPath ?? null,
       };
-
-      console.log(`[TabStateManager] 🔄 New state to save:`, {
-        tabId: tabId,
-        status: "busy",
-        requestId: requestId,
-        requestCount: states[tabId].requestCount,
-        folderPath: states[tabId].folderPath,
-      });
 
       // 🔥 CRITICAL: Wrap storage.set() để đảm bảo async completion
       await new Promise<void>((resolve, reject) => {
@@ -924,25 +853,12 @@ export class TabStateManager {
       const verifyStates =
         (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
       const verifyState = verifyStates[tabId];
-
-      console.log(`[TabStateManager] ✅ Verification after marking BUSY:`, {
-        tabId: tabId,
-        savedStatus: verifyState?.status || "not_found",
-        savedRequestId: verifyState?.requestId || "null",
-        expectedStatus: "busy",
-        expectedRequestId: requestId,
-        success: verifyState?.status === "busy",
-      });
-
       if (verifyState && verifyState.status === "busy") {
         this.invalidateCache(tabId);
 
         // 🔥 NEW: Notify UI immediately after marking BUSY
         this.notifyUIUpdate();
 
-        console.log(
-          `[TabStateManager] ✅ Tab ${tabId} successfully marked as BUSY`
-        );
         return true;
       } else {
         console.error(
@@ -972,8 +888,6 @@ export class TabStateManager {
   }
 
   private async markTabFreeInternal(tabId: number): Promise<boolean> {
-    console.log(`[TabStateManager] 🔓 markTabFree() called for tab ${tabId}`);
-
     try {
       const result = await new Promise<any>((resolve, reject) => {
         chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
@@ -991,28 +905,12 @@ export class TabStateManager {
         folderPath: null,
       };
 
-      console.log(`[TabStateManager] 📊 Current state before marking FREE:`, {
-        tabId: tabId,
-        currentStatus: currentState.status || "undefined",
-        currentRequestId: currentState.requestId || "null",
-        currentRequestCount: currentState.requestCount || 0,
-        currentFolderPath: currentState.folderPath || "null",
-      });
-
       states[tabId] = {
         status: "free",
         requestId: null,
         requestCount: currentState.requestCount || 0,
         folderPath: currentState.folderPath || null,
       };
-
-      console.log(`[TabStateManager] 🔄 New state to save:`, {
-        tabId: tabId,
-        status: "free",
-        requestId: null,
-        requestCount: states[tabId].requestCount,
-        folderPath: states[tabId].folderPath,
-      });
 
       await new Promise<void>((resolve, reject) => {
         chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
@@ -1040,18 +938,8 @@ export class TabStateManager {
         (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
       const verifyState = verifyStates[tabId];
 
-      console.log(`[TabStateManager] ✅ Verification after marking FREE:`, {
-        tabId: tabId,
-        savedStatus: verifyState?.status || "not_found",
-        expectedStatus: "free",
-        success: verifyState?.status === "free",
-      });
-
       if (verifyState && verifyState.status === "free") {
         this.notifyUIUpdate();
-        console.log(
-          `[TabStateManager] ✅ Tab ${tabId} successfully marked as FREE`
-        );
         return true;
       } else {
         console.error(
@@ -1415,36 +1303,19 @@ export class TabStateManager {
   }
 
   public async getTabState(tabId: number): Promise<TabStateData | null> {
-    console.log(`[TabStateManager] 🔍 getTabState() called for tab ${tabId}`);
-
     const cachedState = this.getCachedState(tabId);
     if (cachedState) {
-      console.log(
-        `[TabStateManager] ✅ Returning cached state for tab ${tabId}:`,
-        cachedState
-      );
       return cachedState;
     }
 
-    console.log(
-      `[TabStateManager] 📖 Reading state from storage for tab ${tabId}...`
-    );
     const result = await chrome.storage.session.get([this.STORAGE_KEY]);
     const states = (result && result[this.STORAGE_KEY]) || {};
     const state = states[tabId] || null;
 
     if (state) {
-      console.log(
-        `[TabStateManager] ✅ Found state in storage for tab ${tabId}:`,
-        state
-      );
       this.setCachedState(tabId, state);
       return state;
     }
-
-    console.log(
-      `[TabStateManager] ⚠️ No state found for tab ${tabId}, checking if it's a DeepSeek tab...`
-    );
 
     // Kiểm tra xem tab có phải DeepSeek tab không TRƯỚC KHI warn
     try {
