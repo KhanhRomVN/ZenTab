@@ -1178,19 +1178,37 @@ REMEMBER:
         const isGenerating = await StateController.isGenerating(tabId);
         if (!isGenerating && pollCount >= 3) {
           if (responseSent) {
+            console.log(
+              `[PromptController] ⏭️ Response already sent, skipping...`
+            );
             return;
           }
 
+          console.log(
+            `[PromptController] ⏳ Waiting 1s before fetching response...`
+          );
           await new Promise((resolve) => setTimeout(resolve, 1000));
+
+          console.log(
+            `[PromptController] 🔍 Fetching latest response from tab ${tabId}...`
+          );
           const rawResponse = await this.getLatestResponseDirectly(tabId);
 
           if (rawResponse) {
+            console.log(
+              `[PromptController] ✅ Response fetched successfully (length: ${
+                typeof rawResponse === "string" ? rawResponse.length : "N/A"
+              } chars)`
+            );
             responseSent = true;
             this.activePollingTasks.delete(tabId);
 
             // 🆕 STEP 1: Extract folderPath từ wsMessages (originalPrompt đã có từ parameter)
             let folderPathToLink: string | null = null;
             try {
+              console.log(
+                `[PromptController] 🔍 Extracting folderPath from wsMessages...`
+              );
               const messagesResult = await new Promise<any>(
                 (resolve, reject) => {
                   browserAPI.storage.local.get(["wsMessages"], (data: any) => {
@@ -1219,6 +1237,9 @@ REMEMBER:
                   // 🆕 Extract folderPath
                   if (matchingMsg.data?.folderPath) {
                     folderPathToLink = matchingMsg.data.folderPath;
+                    console.log(
+                      `[PromptController] ✅ Found folderPath: "${folderPathToLink}"`
+                    );
                   }
                   break;
                 }
@@ -1240,6 +1261,9 @@ REMEMBER:
                 const tabState = await this.tabStateManager.getTabState(tabId);
                 if (tabState && tabState.folderPath) {
                   folderPathToLink = tabState.folderPath;
+                  console.log(
+                    `[PromptController] ✅ Fallback: Found folderPath from tab state: "${folderPathToLink}"`
+                  );
                 } else {
                   console.warn(
                     `[PromptController] ⚠️ Fallback failed: tab state has no folderPath. Tokens will NOT be accumulated!`
@@ -1254,6 +1278,7 @@ REMEMBER:
             }
 
             // STEP 2: Tính tokens cho request hiện tại
+            console.log(`[PromptController] 🔢 Calculating tokens...`);
             const currentPromptTokens = this.calculateTokensAndLog(
               originalPrompt,
               "CURRENT_REQUEST_PROMPT"
@@ -1267,8 +1292,17 @@ REMEMBER:
             const currentTotalTokens =
               currentPromptTokens + currentCompletionTokens;
 
+            console.log(`[PromptController] 📊 Token calculation complete:`, {
+              promptTokens: currentPromptTokens,
+              completionTokens: currentCompletionTokens,
+              totalTokens: currentTotalTokens,
+            });
+
             // 🆕 STEP 3: Save tokens vào folder accumulator (nếu có folderPath)
             if (folderPathToLink) {
+              console.log(
+                `[PromptController] 💾 Saving tokens for folder: "${folderPathToLink}"...`
+              );
               await this.saveTokensForFolder(
                 folderPathToLink,
                 currentPromptTokens,
@@ -1278,11 +1312,27 @@ REMEMBER:
 
               await this.getTokensForFolder(folderPathToLink);
 
+              console.log(
+                `[PromptController] 🔄 Marking tab ${tabId} as FREE (with folder link)...`
+              );
+              console.log(`[PromptController] 📊 PRE-FREE State:`, {
+                tabId,
+                folderPath: folderPathToLink,
+                timestamp: Date.now(),
+              });
+
               const freeSuccess =
                 await this.tabStateManager.markTabFreeWithFolder(
                   tabId,
                   folderPathToLink
                 );
+
+              console.log(`[PromptController] 📊 POST-FREE Result:`, {
+                success: freeSuccess,
+                tabId,
+                folderPath: folderPathToLink,
+                timestamp: Date.now(),
+              });
 
               if (!freeSuccess) {
                 console.error(
@@ -1290,12 +1340,39 @@ REMEMBER:
                 );
                 return;
               }
+              console.log(
+                `[PromptController] ✅ Tab ${tabId} marked as FREE successfully`
+              );
             } else {
-              await this.tabStateManager.markTabFree(tabId);
+              console.log(
+                `[PromptController] 🔄 Marking tab ${tabId} as FREE (no folder link)...`
+              );
+              console.log(`[PromptController] 📊 PRE-FREE State:`, {
+                tabId,
+                timestamp: Date.now(),
+              });
+
+              const freeResult = await this.tabStateManager.markTabFree(tabId);
+
+              console.log(`[PromptController] 📊 POST-FREE Result:`, {
+                success: freeResult,
+                tabId,
+                timestamp: Date.now(),
+              });
+
+              console.log(
+                `[PromptController] ✅ Tab ${tabId} marked as FREE successfully`
+              );
             }
 
             // ✅ NEW: Force invalidate cache và notify UI
+            console.log(
+              `[PromptController] ⏳ Waiting 100ms before UI update...`
+            );
             await new Promise((resolve) => setTimeout(resolve, 100));
+            console.log(
+              `[PromptController] ✅ Wait complete, UI should update now`
+            );
 
             let responseToSend: string = "";
 

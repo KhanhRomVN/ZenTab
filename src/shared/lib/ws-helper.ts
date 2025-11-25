@@ -12,7 +12,6 @@ export class WSHelper {
   static async connect(): Promise<{ success: boolean; error?: string }> {
     try {
       // 🔥 STEP 1: CLEAN SLATE - Xóa toàn bộ state cũ trước khi connect
-      console.log("[WSHelper] 🧹 Cleaning old connection state...");
       await new Promise<void>((resolve) => {
         chrome.storage.local.remove(["wsStates", "wsMessages"], () => {
           resolve();
@@ -21,10 +20,6 @@ export class WSHelper {
 
       // Small delay để đảm bảo storage đã clear
       await new Promise((resolve) => setTimeout(resolve, 100));
-
-      console.log(
-        "[WSHelper] ✅ Old state cleaned, initiating fresh connection..."
-      );
 
       // 🔥 STEP 2: Gửi connect message (sẽ tạo state MỚI hoàn toàn)
       const response = await chrome.runtime.sendMessage({
@@ -52,7 +47,6 @@ export class WSHelper {
           const state = await this.getConnectionState();
 
           if (state && state.status === "connected") {
-            console.log("[WSHelper] ✅ Connection verified via storage");
             return { success: true };
           }
 

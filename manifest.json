@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "ZenTab",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Minimal container-based tab management with DeepSeek Chat",
   "permissions": ["tabs", "storage", "<all_urls>", "clipboardRead"],
   "background": {
