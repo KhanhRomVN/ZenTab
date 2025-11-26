@@ -247,7 +247,55 @@ CRITICAL LANGUAGE RULE:
 CRITICAL CLARIFICATION RULES (STRICTLY ENFORCED):
 
 ═══════════════════════════════════════════════════════════════════
-RULE 1: WHEN TO ASK FOR CLARIFICATION (MANDATORY)
+RULE 1: MANDATORY READ_FILE BEFORE REPLACE_IN_FILE (CRITICAL)
+═══════════════════════════════════════════════════════════════════
+You MUST follow this strict workflow when using <replace_in_file>:
+
+1. **FIRST USE OF replace_in_file ON A FILE:**
+   ✅ MUST call <read_file> first to get current content
+   ❌ NEVER use <replace_in_file> without reading file first
+   
+   Example (CORRECT):
+   <read_file>
+   <path>src/test.ts</path>
+   </read_file>
+   
+   ... (after getting file content)
+   
+   <replace_in_file>
+   <path>src/test.ts</path>
+   <diff>...</diff>
+   </replace_in_file>
+
+2. **SUBSEQUENT replace_in_file AFTER A PREVIOUS replace_in_file:**
+   ✅ MUST call <read_file> again before next <replace_in_file>
+   ⚠️ Reason: File may be auto-formatted by editor (VSCode, etc.)
+   ❌ NEVER assume file content is unchanged
+   
+   Example (CORRECT):
+   Request 1:
+   <read_file><path>src/test.ts</path></read_file>
+   <replace_in_file><path>src/test.ts</path>...</replace_in_file>
+   
+   Request 2 (later):
+   <read_file><path>src/test.ts</path></read_file>  ← MUST read again!
+   <replace_in_file><path>src/test.ts</path>...</replace_in_file>
+
+3. **WHEN YOU DON'T NEED TO read_file AGAIN:**
+   ✅ If you already <read_file> but haven't done <replace_in_file> yet
+   
+   Example (CORRECT - no redundant read):
+   <read_file><path>src/test.ts</path></read_file>
+   ... (analyze content)
+   <replace_in_file><path>src/test.ts</path>...</replace_in_file>  ← OK, no need to read again
+
+4. **TRACKING RULE:**
+   - Track per file: "Did I read this file?" + "Did I replace after reading?"
+   - If "replaced after reading" = YES → MUST read again before next replace
+   - If "read but not replaced yet" = YES → Can replace without re-reading
+
+═══════════════════════════════════════════════════════════════════
+RULE 2: WHEN TO ASK FOR CLARIFICATION (MANDATORY)
 ═══════════════════════════════════════════════════════════════════
 You MUST use <ask_followup_question> tool when:
 
@@ -275,7 +323,7 @@ You MUST use <ask_followup_question> tool when:
    ✅ ALWAYS ask when uncertain
 
 ═══════════════════════════════════════════════════════════════════
-RULE 2: HOW TO ASK (FORMAT)
+RULE 3: HOW TO ASK (FORMAT)
 ═══════════════════════════════════════════════════════════════════
 Use this format:
 
@@ -1178,37 +1226,230 @@ REMEMBER:
         const isGenerating = await StateController.isGenerating(tabId);
         if (!isGenerating && pollCount >= 3) {
           if (responseSent) {
-            console.log(
-              `[PromptController] ⏭️ Response already sent, skipping...`
-            );
             return;
           }
 
-          console.log(
-            `[PromptController] ⏳ Waiting 1s before fetching response...`
-          );
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          // 🆕 CRITICAL: Kiểm tra button "Continue" trước khi lấy response
+          const hasContinueButton = await executeScript(tabId, () => {
+            const continueButton = document.querySelector(
+              'button.ds-basic-button.ds-basic-button--outlined[role="button"]'
+            ) as HTMLButtonElement;
 
-          console.log(
-            `[PromptController] 🔍 Fetching latest response from tab ${tabId}...`
-          );
-          const rawResponse = await this.getLatestResponseDirectly(tabId);
+            if (!continueButton) {
+              return false;
+            }
 
-          if (rawResponse) {
+            const buttonText = continueButton.textContent?.trim() || "";
+            return buttonText === "Continue";
+          });
+
+          if (hasContinueButton) {
             console.log(
-              `[PromptController] ✅ Response fetched successfully (length: ${
-                typeof rawResponse === "string" ? rawResponse.length : "N/A"
-              } chars)`
+              `[PromptController] ⚠️ Detected "Continue" button for request ${capturedRequestId} - DeepSeek response truncated, generating error response...`
             );
+
+            // 🆕 STEP 1: Lấy folderPath từ wsMessages (giống logic ở dưới)
+            let folderPathToLink: string | null = null;
+            try {
+              const messagesResult = await new Promise<any>(
+                (resolve, reject) => {
+                  browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+                    if (browserAPI.runtime.lastError) {
+                      reject(browserAPI.runtime.lastError);
+                      return;
+                    }
+                    resolve(data || {});
+                  });
+                }
+              );
+
+              const wsMessages = messagesResult?.wsMessages || {};
+
+              for (const [, msgArray] of Object.entries(wsMessages)) {
+                const msgs = msgArray as Array<{
+                  timestamp: number;
+                  data: any;
+                }>;
+
+                const matchingMsg = msgs.find(
+                  (msg) => msg.data?.requestId === capturedRequestId
+                );
+
+                if (matchingMsg) {
+                  if (matchingMsg.data?.folderPath) {
+                    folderPathToLink = matchingMsg.data.folderPath;
+                  }
+                  break;
+                }
+              }
+            } catch (error) {
+              console.error(
+                "[PromptController] ❌ Failed to get folderPath from wsMessages:",
+                error
+              );
+            }
+
+            // 🆕 FALLBACK: Nếu không tìm thấy folderPath từ wsMessages, thử lấy từ tab state
+            if (!folderPathToLink) {
+              console.warn(
+                `[PromptController] ⚠️ folderPath not found in wsMessages for request ${capturedRequestId}, trying fallback...`
+              );
+
+              try {
+                const tabState = await this.tabStateManager.getTabState(tabId);
+                if (tabState && tabState.folderPath) {
+                  folderPathToLink = tabState.folderPath;
+                } else {
+                  console.warn(
+                    `[PromptController] ⚠️ Fallback failed: tab state has no folderPath. Tokens will NOT be accumulated!`
+                  );
+                }
+              } catch (fallbackError) {
+                console.error(
+                  `[PromptController] ❌ Fallback error:`,
+                  fallbackError
+                );
+              }
+            }
+
+            // 🔥 NEW: Tạo error response thay vì click button
+            const errorContent = `❌ **LỖI: Response bị cắt cụt bởi DeepSeek**
+
+**Nguyên nhân:**
+DeepSeek đã dừng response và yêu cầu nhấn "Continue" để tiếp tục. Điều này xảy ra khi:
+- Response quá dài và vượt quá giới hạn của DeepSeek
+- DeepSeek phát hiện nội dung nhạy cảm hoặc vi phạm chính sách
+- Có lỗi không mong muốn trong quá trình generate
+
+**Khuyến nghị:**
+1. Chia nhỏ task thành các phần nhỏ hơn
+2. Yêu cầu response ngắn gọn hơn (tránh generate quá nhiều code một lúc)
+3. Kiểm tra lại nội dung prompt có vi phạm chính sách của DeepSeek không
+
+**Thời gian:** ${new Date().toISOString()}
+**Request ID:** ${capturedRequestId}
+**Tab ID:** ${tabId}`;
+
+            // Build error response theo format OpenAI
+            const errorResponse = await this.buildOpenAIResponse(
+              errorContent,
+              originalPrompt,
+              folderPathToLink
+            );
+
             responseSent = true;
             this.activePollingTasks.delete(tabId);
 
-            // 🆕 STEP 1: Extract folderPath từ wsMessages (originalPrompt đã có từ parameter)
+            if (folderPathToLink) {
+              await this.tabStateManager.markTabFreeWithFolder(
+                tabId,
+                folderPathToLink
+              );
+            } else {
+              await this.tabStateManager.markTabFree(tabId);
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 100));
+
+            const responseToSend = JSON.stringify(errorResponse);
+
+            if (isTestRequest) {
+              await browserAPI.storage.local.set({
+                [`testResponse_${tabId}`]: {
+                  requestId: capturedRequestId,
+                  response: responseToSend,
+                  error: "CONTINUE_BUTTON_DETECTED",
+                  timestamp: Date.now(),
+                },
+              });
+
+              this.activePollingTasks.delete(tabId);
+              return;
+            }
+
+            // Gửi error response qua wsOutgoingMessage
+            const responseData = {
+              type: "promptResponse",
+              requestId: requestId,
+              tabId: tabId,
+              success: true,
+              response: responseToSend,
+              errorType: "CONTINUE_BUTTON_DETECTED",
+              timestamp: Date.now(),
+            };
+
+            try {
+              const messagesResult = await new Promise<any>(
+                (resolve, reject) => {
+                  browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+                    if (browserAPI.runtime.lastError) {
+                      reject(browserAPI.runtime.lastError);
+                      return;
+                    }
+                    resolve(data || {});
+                  });
+                }
+              );
+
+              const wsMessages = messagesResult?.wsMessages || {};
+              let targetConnectionId: string | null = null;
+
+              for (const [connId, msgArray] of Object.entries(wsMessages)) {
+                const msgs = msgArray as Array<{
+                  timestamp: number;
+                  data: any;
+                }>;
+                const matchingMsg = msgs.find(
+                  (msg) =>
+                    msg.data?.requestId === requestId &&
+                    msg.data?.type === "sendPrompt"
+                );
+                if (matchingMsg) {
+                  targetConnectionId = connId;
+                  break;
+                }
+              }
+
+              if (targetConnectionId) {
+                await new Promise<void>((resolve, reject) => {
+                  browserAPI.storage.local.set(
+                    {
+                      wsOutgoingMessage: {
+                        connectionId: targetConnectionId,
+                        data: responseData,
+                        timestamp: Date.now(),
+                      },
+                    },
+                    () => {
+                      if (browserAPI.runtime.lastError) {
+                        reject(browserAPI.runtime.lastError);
+                        return;
+                      }
+                      resolve();
+                    }
+                  );
+                });
+              }
+            } catch (sendError) {
+              console.error(
+                "[PromptController] ❌ Exception sending error response:",
+                sendError
+              );
+            }
+
+            this.activePollingTasks.delete(tabId);
+            return;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const rawResponse = await this.getLatestResponseDirectly(tabId);
+
+          if (rawResponse) {
+            responseSent = true;
+            this.activePollingTasks.delete(tabId);
+
             let folderPathToLink: string | null = null;
             try {
-              console.log(
-                `[PromptController] 🔍 Extracting folderPath from wsMessages...`
-              );
               const messagesResult = await new Promise<any>(
                 (resolve, reject) => {
                   browserAPI.storage.local.get(["wsMessages"], (data: any) => {
@@ -1237,9 +1478,6 @@ REMEMBER:
                   // 🆕 Extract folderPath
                   if (matchingMsg.data?.folderPath) {
                     folderPathToLink = matchingMsg.data.folderPath;
-                    console.log(
-                      `[PromptController] ✅ Found folderPath: "${folderPathToLink}"`
-                    );
                   }
                   break;
                 }
@@ -1261,9 +1499,6 @@ REMEMBER:
                 const tabState = await this.tabStateManager.getTabState(tabId);
                 if (tabState && tabState.folderPath) {
                   folderPathToLink = tabState.folderPath;
-                  console.log(
-                    `[PromptController] ✅ Fallback: Found folderPath from tab state: "${folderPathToLink}"`
-                  );
                 } else {
                   console.warn(
                     `[PromptController] ⚠️ Fallback failed: tab state has no folderPath. Tokens will NOT be accumulated!`
@@ -1278,7 +1513,6 @@ REMEMBER:
             }
 
             // STEP 2: Tính tokens cho request hiện tại
-            console.log(`[PromptController] 🔢 Calculating tokens...`);
             const currentPromptTokens = this.calculateTokensAndLog(
               originalPrompt,
               "CURRENT_REQUEST_PROMPT"
@@ -1292,17 +1526,8 @@ REMEMBER:
             const currentTotalTokens =
               currentPromptTokens + currentCompletionTokens;
 
-            console.log(`[PromptController] 📊 Token calculation complete:`, {
-              promptTokens: currentPromptTokens,
-              completionTokens: currentCompletionTokens,
-              totalTokens: currentTotalTokens,
-            });
-
             // 🆕 STEP 3: Save tokens vào folder accumulator (nếu có folderPath)
             if (folderPathToLink) {
-              console.log(
-                `[PromptController] 💾 Saving tokens for folder: "${folderPathToLink}"...`
-              );
               await this.saveTokensForFolder(
                 folderPathToLink,
                 currentPromptTokens,
@@ -1312,27 +1537,11 @@ REMEMBER:
 
               await this.getTokensForFolder(folderPathToLink);
 
-              console.log(
-                `[PromptController] 🔄 Marking tab ${tabId} as FREE (with folder link)...`
-              );
-              console.log(`[PromptController] 📊 PRE-FREE State:`, {
-                tabId,
-                folderPath: folderPathToLink,
-                timestamp: Date.now(),
-              });
-
               const freeSuccess =
                 await this.tabStateManager.markTabFreeWithFolder(
                   tabId,
                   folderPathToLink
                 );
-
-              console.log(`[PromptController] 📊 POST-FREE Result:`, {
-                success: freeSuccess,
-                tabId,
-                folderPath: folderPathToLink,
-                timestamp: Date.now(),
-              });
 
               if (!freeSuccess) {
                 console.error(
@@ -1340,39 +1549,11 @@ REMEMBER:
                 );
                 return;
               }
-              console.log(
-                `[PromptController] ✅ Tab ${tabId} marked as FREE successfully`
-              );
             } else {
-              console.log(
-                `[PromptController] 🔄 Marking tab ${tabId} as FREE (no folder link)...`
-              );
-              console.log(`[PromptController] 📊 PRE-FREE State:`, {
-                tabId,
-                timestamp: Date.now(),
-              });
-
-              const freeResult = await this.tabStateManager.markTabFree(tabId);
-
-              console.log(`[PromptController] 📊 POST-FREE Result:`, {
-                success: freeResult,
-                tabId,
-                timestamp: Date.now(),
-              });
-
-              console.log(
-                `[PromptController] ✅ Tab ${tabId} marked as FREE successfully`
-              );
+              await this.tabStateManager.markTabFree(tabId);
             }
 
-            // ✅ NEW: Force invalidate cache và notify UI
-            console.log(
-              `[PromptController] ⏳ Waiting 100ms before UI update...`
-            );
             await new Promise((resolve) => setTimeout(resolve, 100));
-            console.log(
-              `[PromptController] ✅ Wait complete, UI should update now`
-            );
 
             let responseToSend: string = "";
 
@@ -2208,9 +2389,9 @@ REMEMBER:
       };
 
       // LOG 1: Raw HTML content nhận từ DeepSeek (full content)
-      // console.log(
-      //   `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
-      // );
+      console.log(
+        `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
+      );
 
       // Step 2: Decode HTML entities
       const decodedResult = this.decodeHtmlEntities(content);
@@ -2258,9 +2439,9 @@ REMEMBER:
       cleanedResult = this.cleanContentCodeFences(cleanedResult);
 
       // LOG 2: Response sau xử lý (full cleaned content)
-      // console.log(
-      //   `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
-      // );
+      console.log(
+        `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
+      );
 
       // Step 3: Try to parse as JSON ONLY if ENTIRE response is JSON (không chứa XML tags)
       try {
@@ -2360,40 +2541,23 @@ REMEMBER:
     return fixed;
   }
 
-  /**
-   * Unwrap <task_progress> blocks nếu chúng bị wrap trong ```text code blocks
-   * Pattern: ```text...any text...<task_progress>...</task_progress>...``` → <task_progress>...</task_progress>
-   * Xử lý cả trường hợp có "Copy", "Download" hoặc text khác giữa ```text và <task_progress>
-   */
   private static unwrapTaskProgress(content: string): string {
-    // Pattern 1: Unwrap task_progress từ ```text blocks
-    // Loại bỏ hoàn toàn wrapper ```text...``` và các UI artifacts (Copy, Download)
     const textBlockPattern =
       /```text[\s\S]*?(<task_progress>[\s\S]*?<\/task_progress>)[\s\S]*?```/g;
 
     let unwrapped = content.replace(textBlockPattern, "$1");
-
-    // Pattern 2: Loại bỏ các UI button text (Copy, Download) xuất hiện trước/sau XML tags
-    // Xử lý trường hợp: "Copy\nDownload\n\n<tag>..."
     unwrapped = unwrapped.replace(
       /(Copy\s*(?:Download)?\s*\n+)(<[a-z_]+>)/gi,
       "$2"
     );
 
-    // Pattern 3: Loại bỏ "text" keyword đơn lẻ trước XML tags
     unwrapped = unwrapped.replace(/\btext\s*\n+(<[a-z_]+>)/gi, "$1");
-
-    // Pattern 4: Loại bỏ các code block markers còn sót lại xung quanh XML tags
-    // Xử lý: ```\n<task_progress>...</task_progress>\n```
     unwrapped = unwrapped.replace(
       /```\s*\n*(<task_progress>[\s\S]*?<\/task_progress>)\s*\n*```/g,
       "$1"
     );
 
-    // Pattern 5: Loại bỏ ``` đơn lẻ trước XML tags
     unwrapped = unwrapped.replace(/```\s*\n+(<[a-z_]+>)/gi, "$1");
-
-    // Pattern 6: Loại bỏ ``` đơn lẻ sau XML closing tags
     unwrapped = unwrapped.replace(/(<\/[a-z_]+>)\s*\n+```/gi, "$1");
 
     return unwrapped;

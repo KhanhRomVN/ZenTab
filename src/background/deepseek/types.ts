@@ -10,7 +10,7 @@ export interface DeepSeekConfig {
 }
 
 export const DEFAULT_CONFIG: DeepSeekConfig = {
-  maxPolls: 180,
+  maxPolls: 1500,
   pollInterval: 1000,
   initialDelay: 3000,
   maxRetries: 20,
