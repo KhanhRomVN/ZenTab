@@ -1,5 +1,5 @@
-import React from "react";
-import { Activity } from "lucide-react";
+import React, { useState } from "react";
+import { Activity, X } from "lucide-react";
 
 interface TabCardProps {
   tab: {
@@ -13,6 +13,45 @@ interface TabCardProps {
 }
 
 const TabCard: React.FC<TabCardProps> = ({ tab }) => {
+  const [isHoveringFolder, setIsHoveringFolder] = useState(false);
+
+  const handleRemoveFolderLink = async () => {
+    if (!tab.folderPath) {
+      console.warn(`[TabCard] ⚠️ No folderPath to unlink for tab ${tab.tabId}`);
+      return;
+    }
+
+    console.log(
+      `[TabCard] 🔗 Unlinking folder "${tab.folderPath}" from tab ${tab.tabId}...`
+    );
+
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: "unlinkTabFromFolder",
+        tabId: tab.tabId,
+        folderPath: tab.folderPath,
+      });
+
+      console.log(`[TabCard] 📬 Response from ServiceWorker:`, response);
+
+      if (response && response.success) {
+        console.log(
+          `[TabCard] ✅ Successfully unlinked folder from tab ${tab.tabId}`
+        );
+      } else {
+        console.error(`[TabCard] ❌ Failed to unlink folder:`, response);
+        alert(`Failed to unlink folder: ${response?.error || "Unknown error"}`);
+      }
+    } catch (error) {
+      console.error(`[TabCard] ❌ Exception while unlinking folder:`, error);
+      alert(
+        `Error unlinking folder: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  };
+
   const getStatusColor = (status: string): string => {
     if (status === "busy") return "text-yellow-600 dark:text-yellow-400";
     if (status === "sleep") return "text-purple-600 dark:text-purple-400";
@@ -58,13 +97,13 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
         {/* Tab Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium truncate text-text-primary">
+            <span className="text-sm font-medium truncate text-text-primary line-clamp-1">
               {tab.title}
             </span>
           </div>
 
           <div className="flex flex-col gap-1 mt-1 text-xs text-text-secondary">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 line-clamp-1">
               <div className="flex items-center gap-1">
                 <span className="font-mono">ID: {tab.tabId}</span>
               </div>
@@ -83,11 +122,24 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
               </div>
             </div>
             {tab.folderPath && (
-              <div className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400">
+              <div
+                className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 group/folder"
+                onMouseEnter={() => setIsHoveringFolder(true)}
+                onMouseLeave={() => setIsHoveringFolder(false)}
+              >
                 <span>📁</span>
-                <span className="truncate max-w-[200px]" title={tab.folderPath}>
+                <span className="truncate max-w-[180px]" title={tab.folderPath}>
                   {tab.folderPath.split("/").pop() || tab.folderPath}
                 </span>
+                {isHoveringFolder && (
+                  <button
+                    onClick={handleRemoveFolderLink}
+                    className="opacity-0 group-hover/folder:opacity-100 transition-opacity p-0.5 hover:bg-red-100 dark:hover:bg-red-900/20 rounded"
+                    title="Xóa liên kết folder"
+                  >
+                    <X className="w-3 h-3 text-red-600 dark:text-red-400" />
+                  </button>
+                )}
               </div>
             )}
           </div>

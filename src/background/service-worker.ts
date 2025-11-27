@@ -151,6 +151,32 @@ declare const browser: typeof chrome & any;
 
           const requestKey = `processed_${requestId}`;
 
+          console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+          console.log(
+            `[ServiceWorker] 📥 RECEIVED SENDPROMPT MESSAGE from Backend`
+          );
+          console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+          console.log(`[ServiceWorker] 📌 Message Data:`);
+          console.log(`[ServiceWorker]   - requestId: ${requestId}`);
+          console.log(`[ServiceWorker]   - tabId: ${tabId}`);
+          console.log(
+            `[ServiceWorker]   - hasSystemPrompt: ${!!systemPrompt} (${
+              systemPrompt ? systemPrompt.length : 0
+            } chars)`
+          );
+          console.log(
+            `[ServiceWorker]   - userPrompt length: ${
+              userPrompt ? userPrompt.length : 0
+            } chars`
+          );
+          console.log(
+            `[ServiceWorker]   - isNewTask: ${isNewTask} (${typeof isNewTask})`
+          );
+          console.log(
+            `[ServiceWorker]   - folderPath: ${folderPath || "null"}`
+          );
+          console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
           // Wrap in async IIFE to use await
           (async () => {
             try {
@@ -175,6 +201,24 @@ declare const browser: typeof chrome & any;
               });
 
               const isNewTaskBool = isNewTask === true;
+
+              console.log(
+                `[ServiceWorker] 🔄 Forwarding to DeepSeekController.sendPrompt()`
+              );
+              console.log(`[ServiceWorker] 📌 Arguments:`);
+              console.log(`[ServiceWorker]   - tabId: ${tabId}`);
+              console.log(
+                `[ServiceWorker]   - systemPrompt: ${
+                  systemPrompt ? "provided" : "null"
+                }`
+              );
+              console.log(
+                `[ServiceWorker]   - userPrompt length: ${userPrompt.length}`
+              );
+              console.log(`[ServiceWorker]   - requestId: ${requestId}`);
+              console.log(
+                `[ServiceWorker]   - isNewTaskBool: ${isNewTaskBool} (converted from ${isNewTask})`
+              );
 
               // Gọi sendPrompt với overload signature mới (5 arguments)
               // Signature: sendPrompt(tabId, systemPrompt, userPrompt, requestId, isNewTask)
@@ -661,6 +705,64 @@ declare const browser: typeof chrome & any;
               sendResponse({ input });
             }
           );
+          return true;
+
+        case "unlinkTabFromFolder":
+          (async () => {
+            try {
+              console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+              console.log(`[ServiceWorker] 🔗 UNLINK TAB FROM FOLDER REQUEST`);
+              console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+              console.log(`[ServiceWorker] 📌 Message data:`, {
+                action: message.action,
+                tabId: message.tabId,
+                folderPath: message.folderPath,
+              });
+
+              if (!tabStateManager) {
+                console.error(
+                  `[ServiceWorker] ❌ TabStateManager not available!`
+                );
+                sendResponse({
+                  success: false,
+                  error: "TabStateManager not initialized",
+                });
+                return;
+              }
+
+              const success = await tabStateManager.unlinkTabFromFolder(
+                message.tabId
+              );
+
+              console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+              console.log(
+                `[ServiceWorker] ${
+                  success ? "✅ SUCCESS" : "❌ FAILED"
+                }: Unlink result = ${success}`
+              );
+              console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
+              sendResponse({ success });
+            } catch (error) {
+              console.error(
+                `[ServiceWorker] ❌ Exception in unlinkTabFromFolder:`,
+                error
+              );
+              console.error(`[ServiceWorker] 🔍 Error details:`, {
+                type:
+                  error instanceof Error
+                    ? error.constructor.name
+                    : typeof error,
+                message: error instanceof Error ? error.message : String(error),
+                stack: error instanceof Error ? error.stack : undefined,
+              });
+
+              sendResponse({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          })();
           return true;
 
         case "getAvailableTabs":

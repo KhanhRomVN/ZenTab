@@ -1246,6 +1246,76 @@ export class TabStateManager {
     }
   }
 
+  public async unlinkTabFromFolder(tabId: number): Promise<boolean> {
+    try {
+      console.log(
+        `[TabStateManager] 🔗 Starting unlinkTabFromFolder for tab ${tabId}`
+      );
+
+      const result = await chrome.storage.session.get([this.STORAGE_KEY]);
+      const states = (result && result[this.STORAGE_KEY]) || {};
+
+      console.log(`[TabStateManager] 📊 Current states:`, states);
+      console.log(
+        `[TabStateManager] 📊 State for tab ${tabId}:`,
+        states[tabId]
+      );
+
+      if (!states[tabId]) {
+        console.error(`[TabStateManager] ❌ Tab ${tabId} not found in states`);
+        return false;
+      }
+
+      const currentState = states[tabId];
+
+      if (!currentState.folderPath) {
+        console.warn(
+          `[TabStateManager] ⚠️ Tab ${tabId} has no folderPath to unlink`
+        );
+        return false;
+      }
+
+      console.log(
+        `[TabStateManager] 🔗 Unlinking folder: ${currentState.folderPath}`
+      );
+
+      states[tabId] = {
+        ...currentState,
+        folderPath: null,
+      };
+
+      await chrome.storage.session.set({ [this.STORAGE_KEY]: states });
+
+      // Verify unlink was successful
+      const verifyResult = await chrome.storage.session.get([this.STORAGE_KEY]);
+      const verifyStates =
+        (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
+      const verifyState = verifyStates[tabId];
+
+      if (!verifyState || verifyState.folderPath !== null) {
+        console.error(
+          `[TabStateManager] ❌ Verification failed - folderPath still exists: ${verifyState?.folderPath}`
+        );
+        return false;
+      }
+
+      console.log(
+        `[TabStateManager] ✅ Successfully unlinked folder from tab ${tabId}`
+      );
+
+      this.invalidateCache(tabId);
+      this.notifyUIUpdate();
+
+      return true;
+    } catch (error) {
+      console.error(
+        `[TabStateManager] ❌ Exception in unlinkTabFromFolder:`,
+        error
+      );
+      return false;
+    }
+  }
+
   public async unlinkFolder(folderPath: string): Promise<boolean> {
     try {
       const result = await chrome.storage.session.get([this.STORAGE_KEY]);

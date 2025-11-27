@@ -14,6 +14,11 @@ export class PromptController {
    * 🆕 STORAGE KEY cho folder tokens
    */
   private static readonly FOLDER_TOKENS_KEY = "folderTokenAccumulator";
+  /**
+   * 🆕 TRACKING: Đếm số lần replace_in_file liên tiếp trên cùng 1 file
+   * Key: filePath, Value: số lần replace liên tiếp
+   */
+  private static replaceInFileCounter: Map<string, number> = new Map();
 
   /**
    * 🆕 ACCURATE TOKEN CALCULATION using gpt-tokenizer (pure JS, no WASM)
@@ -295,6 +300,43 @@ You MUST follow this strict workflow when using <replace_in_file>:
    - If "read but not replaced yet" = YES → Can replace without re-reading
 
 ═══════════════════════════════════════════════════════════════════
+RULE 1.5: PREVENT INFINITE REPLACE_IN_FILE LOOP (CRITICAL)
+═══════════════════════════════════════════════════════════════════
+**TRACKING MECHANISM:**
+- Track số lần <replace_in_file> LIÊN TIẾP trên CÙNG MỘT FILE
+- Nếu đã <replace_in_file> trên file X >= 2 lần LIÊN TIẾP mà vẫn có lỗi
+  → MUST call <read_file> on file X để xem toàn bộ nội dung hiện tại
+
+**WHY THIS RULE EXISTS:**
+- File có thể bị auto-format bởi VSCode/Prettier
+- Spacing/indentation có thể thay đổi sau mỗi replace
+- SEARCH block không match được do indentation sai
+- Blind replace without re-reading = infinite loop
+
+**CORRECT WORKFLOW:**
+Request 1: <replace_in_file> on file.ts → fails
+Request 2: <replace_in_file> on file.ts → fails again
+Request 3: ⚠️ STOP! Must <read_file> on file.ts first
+           → Analyze current state
+           → Then <replace_in_file> with correct SEARCH block
+
+**EXAMPLE - WRONG (INFINITE LOOP):**
+Request 1: <replace_in_file path="test.ts"> ... </replace_in_file> → error
+Request 2: <replace_in_file path="test.ts"> ... </replace_in_file> → error
+Request 3: <replace_in_file path="test.ts"> ... </replace_in_file> → error (LOOP!)
+
+**EXAMPLE - CORRECT (WITH READ):**
+Request 1: <replace_in_file path="test.ts"> ... </replace_in_file> → error
+Request 2: <replace_in_file path="test.ts"> ... </replace_in_file> → error
+Request 3: <read_file path="test.ts"> → Read current state
+Request 4: <replace_in_file path="test.ts"> → Now use EXACT spacing from read result
+
+**IMPLEMENTATION:**
+- Maintain counter per file: Map<filePath, consecutiveReplaceCount>
+- Reset counter when <read_file> is called on that file
+- If counter >= 2 → Force <read_file> before next <replace_in_file>
+
+═══════════════════════════════════════════════════════════════════
 RULE 2: WHEN TO ASK FOR CLARIFICATION (MANDATORY)
 ═══════════════════════════════════════════════════════════════════
 You MUST use <ask_followup_question> tool when:
@@ -413,7 +455,7 @@ GOLDEN RULE: When in doubt, ASK. Don't guess.
 
   // Text wrapping rules - quy tắc format XML tags và code blocks
   private static readonly TEXT_WRAP_RULE = `
-CRITICAL TEXT BLOCK WRAPPING RULES (20 RULES - STRICTLY ENFORCED):
+CRITICAL TEXT BLOCK WRAPPING RULES (25 RULES - STRICTLY ENFORCED):
 
 ═══════════════════════════════════════════════════════════════════
 RULE GROUP 1: WHAT MUST BE WRAPPED (MANDATORY)
@@ -429,12 +471,22 @@ RULE GROUP 1: WHAT MUST BE WRAPPED (MANDATORY)
    - Format: <<<<<<< SEARCH\n\`\`\`text\nOLD_CODE\n\`\`\`\n=======\n\`\`\`text\nNEW_CODE\n\`\`\`\n>>>>>>> REPLACE
 
 ═══════════════════════════════════════════════════════════════════
-RULE GROUP 2: WRAPPER FORMAT (EXACT SYNTAX)
+RULE GROUP 2: WRAPPER FORMAT (EXACT SYNTAX) - CRITICAL
 ═══════════════════════════════════════════════════════════════════
-4. Text block MUST start with exactly: \`\`\`text (lowercase "text", no spaces)
+4. Text block MUST start with EXACTLY: \`\`\`text (lowercase "text", no spaces)
+   ❌ FORBIDDEN: \`\`\`typescript, \`\`\`python, \`\`\`javascript, \`\`\`java, \`\`\`cpp, \`\`\`bash, etc.
+   ✅ ONLY ALLOWED: \`\`\`text
+
 5. Text block MUST end with exactly: \`\`\` (three backticks, nothing else)
+
 6. NO content allowed before \`\`\`text or after closing \`\`\`
+
 7. Each wrappable item gets its OWN separate \`\`\`text...\`\`\` block
+
+8. 🔥 CRITICAL: NEVER use language-specific code fence markers
+   - Even if code is TypeScript/Python/Java/etc., you MUST use \`\`\`text
+   - Language detection is NOT your responsibility
+   - Parser expects ONLY \`\`\`text for ALL code blocks
 
 ═══════════════════════════════════════════════════════════════════
 RULE GROUP 3: WHAT SHOULD NOT BE WRAPPED
@@ -521,6 +573,7 @@ function newFunction() {
 </replace_in_file>
 
 ═══════════════════════════════════════════════════════════════════
+═══════════════════════════════════════════════════════════════════
 INCORRECT FORMAT EXAMPLES (WILL BE REJECTED)
 ═══════════════════════════════════════════════════════════════════
 
@@ -548,6 +601,68 @@ function test() {}
 </content>
 </write_to_file>
 
+❌ Example 4 - Using language-specific marker (CRITICAL ERROR):
+<write_to_file>
+<path>src/utils/helper.ts</path>
+<content>
+\`\`\`typescript
+function helper() {
+  return true;
+}
+\`\`\`
+</content>
+</write_to_file>
+🔥 REASON: Must use \`\`\`text instead of \`\`\`typescript
+
+❌ Example 5 - Using Python marker (CRITICAL ERROR):
+<write_to_file>
+<path>calculator.py</path>
+<content>
+\`\`\`python
+def add(a, b):
+    return a + b
+\`\`\`
+</content>
+</write_to_file>
+🔥 REASON: Must use \`\`\`text instead of \`\`\`python
+
+❌ Example 6 - Using Java marker in SEARCH block (CRITICAL ERROR):
+<replace_in_file>
+<path>Main.java</path>
+<diff>
+<<<<<<< SEARCH
+\`\`\`java
+public class Main {
+}
+\`\`\`
+=======
+\`\`\`text
+public class Main {
+    public static void main(String[] args) {}
+}
+\`\`\`
+>>>>>>> REPLACE
+</diff>
+</replace_in_file>
+🔥 REASON: BOTH SEARCH and REPLACE must use \`\`\`text
+
+❌ Example 7 - Mixed markers (CRITICAL ERROR):
+<replace_in_file>
+<path>script.sh</path>
+<diff>
+<<<<<<< SEARCH
+\`\`\`bash
+echo "old"
+\`\`\`
+=======
+\`\`\`shell
+echo "new"
+\`\`\`
+>>>>>>> REPLACE
+</diff>
+</replace_in_file>
+🔥 REASON: BOTH blocks must use \`\`\`text (not bash, not shell)
+
 ❌ Example 4 - Mixing content in text block:
 \`\`\`text
 Some explanation text here
@@ -558,11 +673,30 @@ More text here
 \`\`\`
 
 ═══════════════════════════════════════════════════════════════════
-FINAL REMINDER
+FINAL REMINDER (CRITICAL - READ TWICE)
 ═══════════════════════════════════════════════════════════════════
-If you output <task_progress> without wrapping it in \`\`\`text...\`\`\`, 
-the system will FAIL to parse your response and the user will see an error.
-ALWAYS wrap <task_progress> in \`\`\`text code blocks - NO EXCEPTIONS!
+1. If you output <task_progress> without wrapping it in \`\`\`text...\`\`\`, 
+   the system will FAIL to parse your response and the user will see an error.
+   ALWAYS wrap <task_progress> in \`\`\`text code blocks - NO EXCEPTIONS!
+
+2. 🔥 NEVER use language-specific code fence markers:
+   ❌ \`\`\`typescript  ❌ \`\`\`python    ❌ \`\`\`javascript
+   ❌ \`\`\`java        ❌ \`\`\`cpp       ❌ \`\`\`bash
+   ❌ \`\`\`shell       ❌ \`\`\`go        ❌ \`\`\`rust
+   ❌ \`\`\`php         ❌ \`\`\`ruby      ❌ \`\`\`swift
+   
+   ✅ ONLY USE: \`\`\`text (for ALL code, regardless of language)
+
+3. This rule applies to:
+   - <content> blocks in <write_to_file>
+   - SEARCH sections in <replace_in_file>
+   - REPLACE sections in <replace_in_file>
+   - <task_progress> blocks
+   - ALL other code blocks
+
+4. If you use \`\`\`typescript or any language marker, the parser will FAIL
+   and your response will be rejected.
+
 ═══════════════════════════════════════════════════════════════════
 
 CRITICAL INDENTATION RULES:
@@ -576,9 +710,11 @@ CRITICAL INDENTATION RULES:
 - When using <replace_in_file>, the SEARCH block MUST match indentation EXACTLY character-by-character
 - When using <write_to_file>, preserve the indentation style of existing files in the project
 
-CORRECT FORMAT EXAMPLES:
+═══════════════════════════════════════════════════════════════════
+CORRECT FORMAT EXAMPLES
+═══════════════════════════════════════════════════════════════════
 
-Example 1 - Task Progress:
+✅ Example 1 - Task Progress (CORRECT):
 <read_file>
 <path>test.ts</path>
 \`\`\`text
@@ -591,7 +727,7 @@ Example 1 - Task Progress:
 \`\`\`
 </read_file>
 
-Example 2 - Replace In File with Code (BOTH old and new code wrapped, preserving 2-space indent):
+✅ Example 2 - Replace In File with TypeScript Code (CORRECT - use \`\`\`text for ALL code):
 <replace_in_file>
 <path>src/utils/helper.ts</path>
 <diff>
@@ -610,6 +746,34 @@ function newFunction() {
 >>>>>>> REPLACE
 </diff>
 </replace_in_file>
+
+✅ Example 3 - Write Python File (CORRECT - use \`\`\`text even for Python):
+<write_to_file>
+<path>src/calculator.py</path>
+<content>
+\`\`\`text
+def add(a, b):
+    return a + b
+
+def subtract(a, b):
+    return a - b
+\`\`\`
+</content>
+</write_to_file>
+
+✅ Example 4 - Write Java File (CORRECT - use \`\`\`text even for Java):
+<write_to_file>
+<path>src/Main.java</path>
+<content>
+\`\`\`text
+public class Main {
+    public static void main(String[] args) {
+        System.out.println("Hello World");
+    }
+}
+\`\`\`
+</content>
+</write_to_file>
 
 Example 3 - Write To File with Code (CORRECT - has <content> tag and preserves 2-space indent):
 <write_to_file>
@@ -873,9 +1037,116 @@ REMEMBER:
 
       await this.tabStateManager.markTabBusy(tabId, requestId);
 
+      // 🆕 CRITICAL LOG: Chi tiết đầy đủ về New Chat decision
+      console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+      console.log(`[PromptController] 🎯 NEW CHAT DECISION ANALYSIS`);
+      console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+      console.log(`[PromptController] 📌 Request Info:`);
+      console.log(`[PromptController]   - requestId: ${requestId}`);
+      console.log(`[PromptController]   - tabId: ${tabId}`);
+      console.log(`[PromptController] 📌 isNewTask Flag:`);
+      console.log(`[PromptController]   - isNewTask param (raw): ${isNewTask}`);
+      console.log(
+        `[PromptController]   - isNewTaskFlag (computed): ${isNewTaskFlag}`
+      );
+      console.log(
+        `[PromptController]   - Type: ${typeof isNewTaskFlag} (should be boolean)`
+      );
+      console.log(
+        `[PromptController]   - Will click New Chat? ${
+          isNewTaskFlag === true ? "YES ✅" : "NO ❌"
+        }`
+      );
+      console.log(`[PromptController] 📌 Prompt Structure:`);
+      console.log(
+        `[PromptController]   - finalPrompt length: ${finalPrompt.length} chars`
+      );
+      console.log(
+        `[PromptController]   - hasSystemPrompt: ${Boolean(
+          promptOrSystemPrompt
+        )}`
+      );
+      console.log(
+        `[PromptController]   - systemPrompt length: ${
+          typeof promptOrSystemPrompt === "string"
+            ? promptOrSystemPrompt.length
+            : 0
+        } chars`
+      );
+      console.log(
+        `[PromptController]   - userPrompt length: ${
+          typeof userPromptOrRequestId === "string"
+            ? userPromptOrRequestId.length
+            : 0
+        } chars`
+      );
+      console.log(`[PromptController] 📌 Overload Detection:`);
+      console.log(
+        `[PromptController]   - Using overload: ${
+          typeof requestIdOrIsNewTask === "string" ? "2 (5 args)" : "1 (4 args)"
+        }`
+      );
+      console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
+      // 🔥 CRITICAL: Validation - đảm bảo isNewTaskFlag là boolean
+      if (typeof isNewTaskFlag !== "boolean") {
+        console.error(
+          `[PromptController] ❌ CRITICAL: isNewTaskFlag is NOT a boolean!`
+        );
+        console.error(`[PromptController] 🔍 Type: ${typeof isNewTaskFlag}`);
+        console.error(`[PromptController] 🔍 Value: ${isNewTaskFlag}`);
+        console.error(
+          `[PromptController] 💡 This will cause unexpected behavior!`
+        );
+        console.error(`[PromptController] 💡 Arguments received:`);
+        console.error(
+          `[PromptController]   - tabId: ${tabId} (${typeof tabId})`
+        );
+        console.error(
+          `[PromptController]   - promptOrSystemPrompt: ${typeof promptOrSystemPrompt}`
+        );
+        console.error(
+          `[PromptController]   - userPromptOrRequestId: ${typeof userPromptOrRequestId}`
+        );
+        console.error(
+          `[PromptController]   - requestIdOrIsNewTask: ${requestIdOrIsNewTask} (${typeof requestIdOrIsNewTask})`
+        );
+        console.error(
+          `[PromptController]   - isNewTask: ${isNewTask} (${typeof isNewTask})`
+        );
+      }
+
       if (isNewTaskFlag === true) {
+        console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(
+          `[PromptController] 🆕 EXECUTING NEW CHAT CLICK for tab ${tabId}`
+        );
+        console.log(
+          `[PromptController] 🔍 Reason: isNewTask === true (explicit request)`
+        );
+        console.log(`[PromptController] ⏱️ Timestamp: ${Date.now()}`);
+        console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
         await ChatController.clickNewChatButton(tabId);
+
+        console.log(
+          `[PromptController] ✅ New Chat button clicked, waiting 1s for UI...`
+        );
+
         await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        console.log(
+          `[PromptController] ✅ New Chat preparation complete for tab ${tabId}`
+        );
+      } else {
+        console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(
+          `[PromptController] ⏭️ SKIPPING NEW CHAT CLICK for tab ${tabId}`
+        );
+        console.log(
+          `[PromptController] 🔍 Reason: isNewTask !== true (continuing existing chat)`
+        );
+        console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
       }
 
       let retries = 3;
