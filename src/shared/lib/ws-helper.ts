@@ -11,20 +11,39 @@ export interface WSConnectionState {
 export class WSHelper {
   static async connect(): Promise<{ success: boolean; error?: string }> {
     try {
+      console.log(`[WSHelper] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+      console.log(
+        `[WSHelper] 🚀 CONNECT() CALLED - Starting connection flow...`
+      );
+      console.log(`[WSHelper] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
       // 🔥 STEP 1: CLEAN SLATE - Xóa toàn bộ state cũ trước khi connect
+      console.log(
+        `[WSHelper] 🧹 STEP 1: Clearing old storage (wsStates, wsMessages)...`
+      );
+
       await new Promise<void>((resolve) => {
         chrome.storage.local.remove(["wsStates", "wsMessages"], () => {
+          console.log(`[WSHelper] ✅ Storage cleared successfully`);
           resolve();
         });
       });
 
       // Small delay để đảm bảo storage đã clear
+      console.log(`[WSHelper] ⏱️ Waiting 100ms for storage clear to settle...`);
       await new Promise((resolve) => setTimeout(resolve, 100));
 
       // 🔥 STEP 2: Gửi connect message (sẽ tạo state MỚI hoàn toàn)
+      console.log(
+        `[WSHelper] 📤 STEP 2: Sending connectWebSocket message to service worker...`
+      );
       const response = await chrome.runtime.sendMessage({
         action: "connectWebSocket",
       });
+      console.log(
+        `[WSHelper] 📥 Received response from service worker:`,
+        response
+      );
 
       // 🔥 STEP 3: Validate response structure
       if (
@@ -35,18 +54,32 @@ export class WSHelper {
         console.warn(
           "[WSHelper] ⚠️ Invalid response structure, verifying via storage..."
         );
+        console.warn(`[WSHelper] 🔍 Response type: ${typeof response}`);
+        console.warn(`[WSHelper] 🔍 Response value:`, response);
 
         // Đợi backend ghi state vào storage (tối đa 2s)
         const maxWaitTime = 2000;
         const pollInterval = 200;
         const startTime = Date.now();
 
+        console.log(
+          `[WSHelper] 🔄 Starting storage polling (max ${maxWaitTime}ms, interval ${pollInterval}ms)...`
+        );
+
+        let pollCount = 0;
         while (Date.now() - startTime < maxWaitTime) {
+          pollCount++;
+          console.log(`[WSHelper] 🔄 Poll attempt #${pollCount}...`);
+
           await new Promise((resolve) => setTimeout(resolve, pollInterval));
 
           const state = await this.getConnectionState();
+          console.log(`[WSHelper] 📊 Poll result:`, state);
 
           if (state && state.status === "connected") {
+            console.log(
+              `[WSHelper] ✅ Connection state found in storage (connected) after ${pollCount} polls`
+            );
             return { success: true };
           }
 
@@ -56,7 +89,9 @@ export class WSHelper {
           }
         }
 
-        console.error("[WSHelper] ⏱️ Timeout waiting for connection state");
+        console.error(
+          `[WSHelper] ⏱️ Timeout waiting for connection state (${pollCount} polls)`
+        );
         return {
           success: false,
           error: "Connection timeout - no state update detected",
@@ -65,14 +100,28 @@ export class WSHelper {
 
       // 🔥 STEP 4: Response hợp lệ → return ngay
       if (response.success) {
-        console.log("[WSHelper] ✅ Connection successful");
+        console.log("[WSHelper] ✅ Connection successful (from response)");
+        console.log(`[WSHelper] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`[WSHelper] 🎉 CONNECT() COMPLETED SUCCESSFULLY`);
+        console.log(`[WSHelper] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
       } else {
         console.error("[WSHelper] ❌ Connection failed:", response.error);
+        console.log(`[WSHelper] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
       }
 
       return response;
     } catch (error) {
       console.error("[WSHelper] ❌ Connect exception:", error);
+      console.error(
+        `[WSHelper] 🔍 Exception type: ${
+          error instanceof Error ? error.constructor.name : typeof error
+        }`
+      );
+      console.error(
+        `[WSHelper] 🔍 Exception message: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),

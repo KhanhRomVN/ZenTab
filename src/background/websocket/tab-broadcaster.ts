@@ -11,7 +11,7 @@ interface FocusedTab {
 export class TabBroadcaster {
   private wsManager: WSManagerNew;
   private lastBroadcastTime = 0;
-  private readonly BROADCAST_THROTTLE = 1000;
+  private readonly BROADCAST_THROTTLE = 2000; // 2 seconds để tránh spam
   private broadcastCount = 0;
 
   constructor(wsManager: WSManagerNew) {
@@ -36,30 +36,129 @@ export class TabBroadcaster {
       if (areaName !== "local") return;
 
       if (changes.zenTabSelectedTabs) {
+        console.log(
+          `[TabBroadcaster] 🔔 zenTabSelectedTabs changed, triggering broadcast`
+        );
         debouncedBroadcast();
       }
 
       if (changes.wsStates) {
+        console.log(`[TabBroadcaster] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`[TabBroadcaster] 📡 wsStates CHANGED - Analyzing...`);
+        console.log(`[TabBroadcaster] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
         const newStates = changes.wsStates.newValue || {};
         const oldStates = changes.wsStates.oldValue || {};
 
-        let hasNewConnection = false;
-        for (const [connId, newState] of Object.entries(newStates)) {
-          const typedNewState = newState as { status: string };
-          const oldState = oldStates[connId] as { status: string } | undefined;
+        console.log(`[TabBroadcaster] 📊 Storage Change Details:`);
+        console.log(
+          `[TabBroadcaster]   - oldStates keys: [${Object.keys(oldStates).join(
+            ", "
+          )}]`
+        );
+        console.log(
+          `[TabBroadcaster]   - newStates keys: [${Object.keys(newStates).join(
+            ", "
+          )}]`
+        );
+        console.log(
+          `[TabBroadcaster]   - oldStates content:`,
+          JSON.stringify(oldStates, null, 2)
+        );
+        console.log(
+          `[TabBroadcaster]   - newStates content:`,
+          JSON.stringify(newStates, null, 2)
+        );
 
-          // Không cần kiểm tra "default connection" vì chỉ có 1 connection duy nhất
-          if (
-            typedNewState.status === "connected" &&
-            oldState?.status !== "connected"
-          ) {
-            hasNewConnection = true;
-            break;
+        let hasNewConnection = false;
+
+        // Check 1: Detect NEW connectionId (server restart)
+        const newConnIds = Object.keys(newStates);
+        const oldConnIds = Object.keys(oldStates);
+
+        console.log(`[TabBroadcaster] 🔍 Connection ID Analysis:`);
+        console.log(
+          `[TabBroadcaster]   - Old connection IDs count: ${oldConnIds.length}`
+        );
+        console.log(
+          `[TabBroadcaster]   - New connection IDs count: ${newConnIds.length}`
+        );
+
+        if (newConnIds.length > 0) {
+          const latestConnId = newConnIds[0];
+          console.log(
+            `[TabBroadcaster]   - Latest connection ID: ${latestConnId}`
+          );
+
+          // Case 1: connectionId mới xuất hiện (không có trong oldStates)
+          if (!oldConnIds.includes(latestConnId)) {
+            console.log(
+              `[TabBroadcaster] ✅ CASE 1: NEW connection ID detected!`
+            );
+            const newState = newStates[latestConnId] as { status: string };
+            console.log(
+              `[TabBroadcaster]   - New state status: ${newState.status}`
+            );
+
+            if (newState.status === "connected") {
+              console.log(
+                `[TabBroadcaster] 🔔 NEW CONNECTION ID detected (${latestConnId}), triggering broadcast`
+              );
+              hasNewConnection = true;
+            } else {
+              console.log(
+                `[TabBroadcaster] ⚠️ New connection ID but status is NOT 'connected' (status: ${newState.status})`
+              );
+            }
+          } else {
+            console.log(
+              `[TabBroadcaster] ✅ CASE 2: EXISTING connection ID, checking status change...`
+            );
+            // Case 2: connectionId cũ nhưng status changed to "connected"
+            const newState = newStates[latestConnId] as { status: string };
+            const oldState = oldStates[latestConnId] as
+              | { status: string }
+              | undefined;
+
+            console.log(
+              `[TabBroadcaster]   - Old status: ${
+                oldState?.status || "undefined"
+              }`
+            );
+            console.log(`[TabBroadcaster]   - New status: ${newState.status}`);
+
+            if (
+              newState.status === "connected" &&
+              oldState?.status !== "connected"
+            ) {
+              console.log(
+                `[TabBroadcaster] 🔔 Connection status changed to CONNECTED (${latestConnId}), triggering broadcast`
+              );
+              hasNewConnection = true;
+            } else {
+              console.log(
+                `[TabBroadcaster] ⚠️ No status change to 'connected' detected`
+              );
+            }
           }
+        } else {
+          console.log(
+            `[TabBroadcaster] ⚠️ No connection IDs in newStates (storage might be empty)`
+          );
         }
 
+        console.log(
+          `[TabBroadcaster] 🎯 Final Decision: hasNewConnection = ${hasNewConnection}`
+        );
+        console.log(`[TabBroadcaster] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
         if (hasNewConnection) {
+          console.log(`[TabBroadcaster] 🚀 Calling debouncedBroadcast()...`);
           debouncedBroadcast();
+        } else {
+          console.log(
+            `[TabBroadcaster] 🛑 NOT calling broadcast (no new connection detected)`
+          );
         }
       }
     });
@@ -80,10 +179,9 @@ export class TabBroadcaster {
 
   public async broadcastFocusedTabs(): Promise<void> {
     this.broadcastCount++;
-
-    if (this.broadcastCount % 10 !== 1) {
-      return;
-    }
+    console.log(
+      `[TabBroadcaster] 📊 Broadcast attempt #${this.broadcastCount}`
+    );
 
     const hasConnections = await this.wsManager.hasActiveConnections();
 
@@ -110,8 +208,13 @@ export class TabBroadcaster {
         timestamp: Date.now(),
       };
 
+      console.log(
+        `[TabBroadcaster] 📡 Broadcasting ${focusedTabs.length} tabs to Zen extension`
+      );
       this.wsManager.broadcastToAll(message);
-    } catch (error) {}
+    } catch (error) {
+      console.error(`[TabBroadcaster] ❌ Error broadcasting tabs:`, error);
+    }
   }
 
   /**

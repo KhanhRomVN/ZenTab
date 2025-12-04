@@ -14,11 +14,6 @@ export class PromptController {
    * 🆕 STORAGE KEY cho folder tokens
    */
   private static readonly FOLDER_TOKENS_KEY = "folderTokenAccumulator";
-  /**
-   * 🆕 TRACKING: Đếm số lần replace_in_file liên tiếp trên cùng 1 file
-   * Key: filePath, Value: số lần replace liên tiếp
-   */
-  private static replaceInFileCounter: Map<string, number> = new Map();
 
   /**
    * 🆕 ACCURATE TOKEN CALCULATION using gpt-tokenizer (pure JS, no WASM)
@@ -1037,116 +1032,9 @@ REMEMBER:
 
       await this.tabStateManager.markTabBusy(tabId, requestId);
 
-      // 🆕 CRITICAL LOG: Chi tiết đầy đủ về New Chat decision
-      console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-      console.log(`[PromptController] 🎯 NEW CHAT DECISION ANALYSIS`);
-      console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-      console.log(`[PromptController] 📌 Request Info:`);
-      console.log(`[PromptController]   - requestId: ${requestId}`);
-      console.log(`[PromptController]   - tabId: ${tabId}`);
-      console.log(`[PromptController] 📌 isNewTask Flag:`);
-      console.log(`[PromptController]   - isNewTask param (raw): ${isNewTask}`);
-      console.log(
-        `[PromptController]   - isNewTaskFlag (computed): ${isNewTaskFlag}`
-      );
-      console.log(
-        `[PromptController]   - Type: ${typeof isNewTaskFlag} (should be boolean)`
-      );
-      console.log(
-        `[PromptController]   - Will click New Chat? ${
-          isNewTaskFlag === true ? "YES ✅" : "NO ❌"
-        }`
-      );
-      console.log(`[PromptController] 📌 Prompt Structure:`);
-      console.log(
-        `[PromptController]   - finalPrompt length: ${finalPrompt.length} chars`
-      );
-      console.log(
-        `[PromptController]   - hasSystemPrompt: ${Boolean(
-          promptOrSystemPrompt
-        )}`
-      );
-      console.log(
-        `[PromptController]   - systemPrompt length: ${
-          typeof promptOrSystemPrompt === "string"
-            ? promptOrSystemPrompt.length
-            : 0
-        } chars`
-      );
-      console.log(
-        `[PromptController]   - userPrompt length: ${
-          typeof userPromptOrRequestId === "string"
-            ? userPromptOrRequestId.length
-            : 0
-        } chars`
-      );
-      console.log(`[PromptController] 📌 Overload Detection:`);
-      console.log(
-        `[PromptController]   - Using overload: ${
-          typeof requestIdOrIsNewTask === "string" ? "2 (5 args)" : "1 (4 args)"
-        }`
-      );
-      console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-
-      // 🔥 CRITICAL: Validation - đảm bảo isNewTaskFlag là boolean
-      if (typeof isNewTaskFlag !== "boolean") {
-        console.error(
-          `[PromptController] ❌ CRITICAL: isNewTaskFlag is NOT a boolean!`
-        );
-        console.error(`[PromptController] 🔍 Type: ${typeof isNewTaskFlag}`);
-        console.error(`[PromptController] 🔍 Value: ${isNewTaskFlag}`);
-        console.error(
-          `[PromptController] 💡 This will cause unexpected behavior!`
-        );
-        console.error(`[PromptController] 💡 Arguments received:`);
-        console.error(
-          `[PromptController]   - tabId: ${tabId} (${typeof tabId})`
-        );
-        console.error(
-          `[PromptController]   - promptOrSystemPrompt: ${typeof promptOrSystemPrompt}`
-        );
-        console.error(
-          `[PromptController]   - userPromptOrRequestId: ${typeof userPromptOrRequestId}`
-        );
-        console.error(
-          `[PromptController]   - requestIdOrIsNewTask: ${requestIdOrIsNewTask} (${typeof requestIdOrIsNewTask})`
-        );
-        console.error(
-          `[PromptController]   - isNewTask: ${isNewTask} (${typeof isNewTask})`
-        );
-      }
-
       if (isNewTaskFlag === true) {
-        console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-        console.log(
-          `[PromptController] 🆕 EXECUTING NEW CHAT CLICK for tab ${tabId}`
-        );
-        console.log(
-          `[PromptController] 🔍 Reason: isNewTask === true (explicit request)`
-        );
-        console.log(`[PromptController] ⏱️ Timestamp: ${Date.now()}`);
-        console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-
         await ChatController.clickNewChatButton(tabId);
-
-        console.log(
-          `[PromptController] ✅ New Chat button clicked, waiting 1s for UI...`
-        );
-
         await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        console.log(
-          `[PromptController] ✅ New Chat preparation complete for tab ${tabId}`
-        );
-      } else {
-        console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-        console.log(
-          `[PromptController] ⏭️ SKIPPING NEW CHAT CLICK for tab ${tabId}`
-        );
-        console.log(
-          `[PromptController] 🔍 Reason: isNewTask !== true (continuing existing chat)`
-        );
-        console.log(`[PromptController] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
       }
 
       let retries = 3;

@@ -96,10 +96,27 @@ export class WSManagerNew {
   public broadcastToAll(message: any): void {
     if (this.connection && this.connection.state.status === "connected") {
       try {
+        console.log(
+          `[WSManager] 📤 Broadcasting message type: ${message.type}`
+        );
         this.connection.send(message);
       } catch (error) {
         console.error("[WSManager] ❌ Failed to broadcast message:", error);
+        console.error(`[WSManager] 🔍 Message type: ${message.type}`);
+        console.error(
+          `[WSManager] 🔍 Connection state: ${this.connection.state.status}`
+        );
       }
+    } else {
+      console.warn(
+        `[WSManager] ⚠️ Cannot broadcast - connection not available or not connected`
+      );
+      console.warn(`[WSManager] 🔍 Connection exists: ${!!this.connection}`);
+      console.warn(
+        `[WSManager] 🔍 Connection status: ${
+          this.connection?.state.status || "N/A"
+        }`
+      );
     }
   }
 
@@ -166,6 +183,14 @@ export class WSManagerNew {
 
       const connectionId = `ws-${Date.now()}-${port}`;
 
+      console.log(`[WSManager] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+      console.log(`[WSManager] 🆕 CREATING NEW CONNECTION`);
+      console.log(`[WSManager] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+      console.log(`[WSManager]   - Connection ID: ${connectionId}`);
+      console.log(`[WSManager]   - URL: ${wsUrl}`);
+      console.log(`[WSManager]   - Port: ${port}`);
+      console.log(`[WSManager] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
       this.connection = new WSConnection({
         id: connectionId,
         port: port,
@@ -173,6 +198,8 @@ export class WSManagerNew {
       });
 
       await this.connection.connect();
+
+      console.log(`[WSManager] ✅ Connection established successfully`);
 
       return { success: true };
     } catch (error) {

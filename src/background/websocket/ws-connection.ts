@@ -64,6 +64,17 @@ export class WSConnection {
           this.state.status = "connected";
           this.state.lastConnected = Date.now();
           this.lastPingTime = Date.now(); // Initialize ping time
+
+          console.log(
+            `[WSConnection] ✅ WebSocket CONNECTED: ${this.state.id}`
+          );
+          console.log(`[WSConnection] 📊 Connection details:`, {
+            id: this.state.id,
+            url: this.state.url,
+            port: this.state.port,
+            timestamp: new Date().toISOString(),
+          });
+
           this.notifyStateChange();
 
           // Start health monitoring
@@ -125,7 +136,21 @@ export class WSConnection {
 
   public send(data: any): void {
     if (this.ws && this.state.status === "connected") {
-      this.ws.send(JSON.stringify(data));
+      try {
+        const messageStr = JSON.stringify(data);
+        console.log(
+          `[WSConnection] 📤 Sending message: type=${data.type}, size=${messageStr.length} bytes`
+        );
+        this.ws.send(messageStr);
+      } catch (error) {
+        console.error(`[WSConnection] ❌ Failed to send message:`, error);
+        console.error(`[WSConnection] 🔍 Data type: ${typeof data}`);
+        console.error(`[WSConnection] 🔍 Data:`, data);
+      }
+    } else {
+      console.warn(`[WSConnection] ⚠️ Cannot send - WebSocket not ready`);
+      console.warn(`[WSConnection] 🔍 WebSocket exists: ${!!this.ws}`);
+      console.warn(`[WSConnection] 🔍 Connection status: ${this.state.status}`);
     }
   }
 
@@ -447,8 +472,22 @@ export class WSConnection {
   }
 
   private notifyStateChange(): void {
+    console.log(`[WSConnection] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`[WSConnection] 📢 notifyStateChange() CALLED`);
+    console.log(`[WSConnection] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+    console.log(`[WSConnection] 📊 Current State:`, {
+      id: this.state.id,
+      port: this.state.port,
+      url: this.state.url,
+      status: this.state.status,
+      lastConnected: this.state.lastConnected,
+    });
+
     const updateStorage = async () => {
       try {
+        console.log(
+          `[WSConnection] 🔍 Reading current wsStates from storage...`
+        );
         const result = await new Promise<any>((resolve, reject) => {
           chrome.storage.local.get(["wsStates"], (data: any) => {
             if (chrome.runtime.lastError) {
@@ -460,6 +499,7 @@ export class WSConnection {
         });
 
         const states = result.wsStates || {};
+        console.log(`[WSConnection] 📊 Current wsStates in storage:`, states);
 
         // 🔥 CRITICAL FIX: Lưu FULL state object thay vì chỉ 2 fields
         const newState = {
@@ -470,6 +510,7 @@ export class WSConnection {
           lastConnected: this.state.lastConnected,
         };
 
+        console.log(`[WSConnection] 💾 Saving new state to storage:`, newState);
         states[this.state.id] = newState;
 
         await new Promise<void>((resolve, reject) => {
@@ -483,9 +524,40 @@ export class WSConnection {
               return;
             }
 
+            console.log(
+              `[WSConnection] ✅ State saved successfully to storage`
+            );
             resolve();
           });
         });
+
+        // 🆕 VERIFICATION: Đọc lại để confirm
+        const verifyResult = await new Promise<any>((resolve, reject) => {
+          chrome.storage.local.get(["wsStates"], (data: any) => {
+            if (chrome.runtime.lastError) {
+              reject(chrome.runtime.lastError);
+              return;
+            }
+            resolve(data || {});
+          });
+        });
+
+        const verifyStates = verifyResult.wsStates || {};
+        console.log(
+          `[WSConnection] ✅ Verification - wsStates after save:`,
+          verifyStates
+        );
+
+        if (verifyStates[this.state.id]) {
+          console.log(
+            `[WSConnection] ✅ State verified in storage:`,
+            verifyStates[this.state.id]
+          );
+        } else {
+          console.error(
+            `[WSConnection] ❌ State NOT found in storage after save!`
+          );
+        }
       } catch (error) {
         console.error("[WSConnection] ❌ Error in notifyStateChange:", error);
       }
@@ -507,6 +579,8 @@ export class WSConnection {
     } catch (error) {
       // Ignore message errors
     }
+
+    console.log(`[WSConnection] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   }
 
   public getState(): WSConnectionState {

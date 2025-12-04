@@ -482,24 +482,50 @@ declare const browser: typeof chrome & any;
     (message: any, _sender: any, sendResponse: any) => {
       // Handle WebSocket connect/disconnect directly
       if (message.action === "connectWebSocket") {
+        console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+        console.log(`[ServiceWorker] 📥 RECEIVED: connectWebSocket message`);
+        console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+
         // ✅ CRITICAL FIX: Wrap trong async IIFE để đảm bảo response được gửi đúng
         (async () => {
           try {
+            console.log(`[ServiceWorker] 🔄 Calling wsManager.connect()...`);
             const result = await wsManager.connect();
+            console.log(
+              `[ServiceWorker] 📊 wsManager.connect() result:`,
+              result
+            );
+
             // Validate result structure
             if (!result || typeof result.success !== "boolean") {
               console.error(
                 `[ServiceWorker] ❌ Invalid result structure:`,
                 result
               );
+              console.error(`[ServiceWorker] 🔍 Result type: ${typeof result}`);
               sendResponse({ success: false, error: "Invalid connect result" });
               return;
             }
 
             // Send response immediately
+            console.log(
+              `[ServiceWorker] 📤 Sending response back to caller:`,
+              result
+            );
             sendResponse(result);
+
+            console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
+            console.log(
+              `[ServiceWorker] ✅ connectWebSocket handler completed`
+            );
+            console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
           } catch (error) {
             console.error(`[ServiceWorker] ❌ Connect exception:`, error);
+            console.error(
+              `[ServiceWorker] 🔍 Exception type: ${
+                error instanceof Error ? error.constructor.name : typeof error
+              }`
+            );
             sendResponse({
               success: false,
               error: error instanceof Error ? error.message : String(error),

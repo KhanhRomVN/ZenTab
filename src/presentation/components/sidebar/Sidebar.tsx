@@ -391,9 +391,10 @@ const Sidebar: React.FC = () => {
             <div className="w-16 h-16 rounded-full bg-background flex items-center justify-center mb-4">
               <span className="text-3xl">🌐</span>
             </div>
-            <p className="text-text-secondary text-sm">No DeepSeek tabs open</p>
+            <p className="text-text-secondary text-sm">No AI chat tabs open</p>
             <p className="text-text-secondary/70 text-xs mt-1">
-              Open https://chat.deepseek.com/ to get started!
+              Open https://chat.deepseek.com/ or https://chatgpt.com/ to get
+              started!
             </p>
           </div>
         )}
