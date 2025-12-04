@@ -22,6 +22,13 @@ export class WSConnection {
   public state: WSConnectionState;
 
   constructor(config: WSConnectionConfig) {
+    console.log(`[WSConnection] 🆕 NEW CONNECTION CREATED:`, {
+      id: config.id,
+      url: config.url,
+      port: config.port,
+      timestamp: new Date().toISOString(),
+    });
+
     this.state = {
       id: config.id,
       port: config.port,
@@ -47,10 +54,13 @@ export class WSConnection {
   }
 
   public async connect(): Promise<void> {
+    console.log(`[WSConnection] 🚀 ATTEMPTING CONNECT to: ${this.state.url}`);
+
     if (
       this.state.status === "connected" ||
       this.state.status === "connecting"
     ) {
+      console.log(`[WSConnection] ⚠️ Already ${this.state.status}, skipping`);
       return;
     }
 
@@ -85,26 +95,75 @@ export class WSConnection {
 
         this.ws.onerror = (error) => {
           console.error(
-            `[WSConnection] ❌ WebSocket error on ${this.state.url}`
+            `[WSConnection] ❌ WebSocket ERROR for ${this.state.url}:`,
+            {
+              errorType: error.type,
+              readyState: this.ws?.readyState,
+              connectionId: this.state.id,
+              currentStatus: this.state.status,
+            }
           );
-          console.error(`[WSConnection] 🔍 Error details:`, {
-            type: error.type,
-            target: error.target,
-            readyState: this.ws?.readyState,
-            connectionId: this.state.id,
-          });
-          console.error(`[WSConnection] 💡 Possible causes:`);
-          console.error(`  - Backend server not running on ${this.state.url}`);
-          console.error(`  - Firewall blocking WebSocket connections`);
-          console.error(`  - Incorrect protocol (ws vs wss)`);
-          console.error(`  - Port mismatch or wrong URL format`);
+
+          const wasAttemptingConnection =
+            this.state.status === "connected" ||
+            this.state.status === "connecting";
+
+          if (wasAttemptingConnection) {
+            // 🆕 Gửi disconnect signal ngay cả khi có error
+            console.log(
+              `[WSConnection] 🔴 SENDING DISCONNECT SIGNAL (onerror)`
+            );
+            this.sendDisconnectSignal();
+          }
 
           this.state.status = "error";
           this.notifyStateChange();
         };
 
         this.ws.onclose = () => {
-          if (this.state.status === "connected") {
+          // 🆕 FIX: Gửi disconnect signal cho MỌI trạng thái (kể cả "connecting")
+          const wasAttemptingConnection =
+            this.state.status === "connected" ||
+            this.state.status === "connecting";
+
+          if (wasAttemptingConnection) {
+            console.log(
+              `[WSConnection] 🔴 SENDING DISCONNECT SIGNAL (onclose, status: ${this.state.status})`
+            );
+
+            this.state.status = "disconnected";
+            this.notifyStateChange();
+
+            // 🆕 Gửi EMPTY focusedTabsUpdate để notify Zen về disconnect
+            try {
+              chrome.storage.local.set({
+                wsOutgoingMessage: {
+                  connectionId: this.state.id,
+                  data: {
+                    type: "focusedTabsUpdate",
+                    data: [], // 🆕 EMPTY array = disconnect signal
+                    timestamp: Date.now(),
+                  },
+                  timestamp: Date.now(),
+                },
+              });
+
+              // Cleanup sau 500ms
+              setTimeout(() => {
+                chrome.storage.local.remove(["wsOutgoingMessage"], () => {
+                  console.log(
+                    `[WSConnection] 🧹 Cleaned up disconnect message`
+                  );
+                });
+              }, 500);
+            } catch (error) {
+              console.error(
+                `[WSConnection] ❌ Failed to send disconnect signal:`,
+                error
+              );
+            }
+          } else {
+            // Nếu đã disconnected rồi, vẫn update state
             this.state.status = "disconnected";
             this.notifyStateChange();
           }
@@ -644,5 +703,59 @@ export class WSConnection {
     this.ws?.addEventListener("close", () => {
       clearInterval(checkInterval);
     });
+  }
+
+  /**
+   * 🆕 Helper method để gửi disconnect signal
+   */
+  private sendDisconnectSignal(): void {
+    try {
+      console.log(
+        `[WSConnection] 📤 Sending disconnect signal for ${this.state.id}`
+      );
+
+      chrome.storage.local.set({
+        wsOutgoingMessage: {
+          connectionId: this.state.id,
+          data: {
+            type: "focusedTabsUpdate",
+            data: [],
+            timestamp: Date.now(),
+          },
+          timestamp: Date.now(),
+        },
+      });
+
+      setTimeout(() => {
+        chrome.storage.local.remove(["wsOutgoingMessage"]);
+      }, 500);
+    } catch (error) {
+      console.error(
+        `[WSConnection] ❌ Failed to send disconnect signal:`,
+        error
+      );
+    }
+  }
+
+  /**
+   * 🆕 Force disconnect với disconnect signal
+   */
+  public forceDisconnect(): void {
+    console.log(
+      `[WSConnection] 🔴 FORCE DISCONNECT called for ${this.state.id}`
+    );
+
+    // Gửi disconnect signal trước
+    this.sendDisconnectSignal();
+
+    // Đóng WebSocket nếu có
+    if (this.ws) {
+      this.ws.close();
+      this.ws = undefined;
+    }
+
+    // Update state
+    this.state.status = "disconnected";
+    this.notifyStateChange();
   }
 }

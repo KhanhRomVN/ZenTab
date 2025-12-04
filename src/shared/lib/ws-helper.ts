@@ -19,14 +19,17 @@ export class WSHelper {
 
       // 🔥 STEP 1: CLEAN SLATE - Xóa toàn bộ state cũ trước khi connect
       console.log(
-        `[WSHelper] 🧹 STEP 1: Clearing old storage (wsStates, wsMessages)...`
+        `[WSHelper] 🧹 STEP 1: Clearing old storage (wsStates, wsMessages, wsOutgoingMessage)...`
       );
 
       await new Promise<void>((resolve) => {
-        chrome.storage.local.remove(["wsStates", "wsMessages"], () => {
-          console.log(`[WSHelper] ✅ Storage cleared successfully`);
-          resolve();
-        });
+        chrome.storage.local.remove(
+          ["wsStates", "wsMessages", "wsOutgoingMessage"],
+          () => {
+            console.log(`[WSHelper] ✅ Storage cleared successfully`);
+            resolve();
+          }
+        );
       });
 
       // Small delay để đảm bảo storage đã clear

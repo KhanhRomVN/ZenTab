@@ -290,7 +290,12 @@ const Sidebar: React.FC = () => {
   };
 
   const handleToggleWebSocket = async () => {
+    console.log(
+      `[Sidebar] 🔘 handleToggleWebSocket called, current status: ${wsStatus}`
+    );
+
     if (isTogglingWs) {
+      console.log(`[Sidebar] ⚠️ Already toggling, skipping`);
       return;
     }
 
@@ -298,11 +303,15 @@ const Sidebar: React.FC = () => {
 
     try {
       if (wsStatus === "connected") {
+        console.log(`[Sidebar] 🔴 Disconnecting WebSocket...`);
         const result = await WSHelper.disconnect();
 
         if (result.success) {
+          console.log(`[Sidebar] ✅ Disconnect successful`);
           setWsStatus("disconnected");
           setWsConnection(null);
+        } else {
+          console.error(`[Sidebar] ❌ Disconnect failed:`, result.error);
         }
       } else {
         const result = await WSHelper.connect();
@@ -329,9 +338,11 @@ const Sidebar: React.FC = () => {
         }
       }
     } catch (error) {
+      console.error(`[Sidebar] ❌ Exception in handleToggleWebSocket:`, error);
       setWsStatus("error");
       setWsConnection(null);
     } finally {
+      console.log(`[Sidebar] 🔄 Toggle complete, resetting isTogglingWs`);
       setIsTogglingWs(false);
     }
   };
