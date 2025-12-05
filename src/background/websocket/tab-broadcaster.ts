@@ -244,6 +244,35 @@ export class TabBroadcaster {
       }
     });
 
+    // 🆕 CRITICAL: Handle requestFocusedTabs from backend
+    chrome.storage.onChanged.addListener(async (changes, areaName) => {
+      if (areaName !== "local") return;
+
+      if (changes.wsMessages) {
+        const messages = changes.wsMessages.newValue || {};
+
+        for (const [, msgArray] of Object.entries(messages)) {
+          const msgs = msgArray as Array<{ timestamp: number; data: any }>;
+
+          const recentMsgs = msgs.filter((msg) => {
+            const age = Date.now() - msg.timestamp;
+            return age < 5000; // Only process messages from last 5 seconds
+          });
+
+          if (recentMsgs.length === 0) continue;
+
+          const latestMsg = recentMsgs[recentMsgs.length - 1];
+
+          if (latestMsg.data.type === "requestFocusedTabs") {
+            console.log(
+              `[TabBroadcaster] 📥 Received requestFocusedTabs, broadcasting current tabs...`
+            );
+            await this.broadcastFocusedTabs();
+          }
+        }
+      }
+    });
+
     chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
       if (
         tab.url?.startsWith("https://chat.deepseek.com") &&

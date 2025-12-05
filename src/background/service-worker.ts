@@ -282,6 +282,86 @@ declare const browser: typeof chrome & any;
       }
     }
 
+    // 🆕 HANDLE sendPrompt message từ Zen Extension
+    if (changes.wsMessages) {
+      const messages = changes.wsMessages.newValue || {};
+
+      for (const [connectionId, msgArray] of Object.entries(messages)) {
+        const msgs = msgArray as Array<{ timestamp: number; data: any }>;
+
+        const recentMsgs = msgs.filter((msg) => {
+          const age = Date.now() - msg.timestamp;
+          return age < 180000; // 180 seconds
+        });
+
+        if (recentMsgs.length === 0) continue;
+
+        // Get latest message
+        const latestMsg = recentMsgs[recentMsgs.length - 1];
+
+        // 🆕 CRITICAL: Handle sendPrompt từ Zen
+        if (latestMsg.data.type === "sendPrompt") {
+          const {
+            tabId,
+            systemPrompt,
+            userPrompt,
+            requestId,
+            isNewTask,
+            folderPath,
+          } = latestMsg.data;
+
+          if (!tabId || !userPrompt || !requestId) {
+            console.error(`[ServiceWorker] ❌ Invalid sendPrompt message`);
+            continue;
+          }
+
+          console.log(`[ServiceWorker] 📥 Received sendPrompt from Zen:`, {
+            requestId,
+            tabId,
+            userPromptLength: userPrompt.length,
+          });
+
+          // Forward to DeepSeekController
+          (async () => {
+            try {
+              const success = await DeepSeekController.sendPrompt(
+                tabId,
+                systemPrompt || null,
+                userPrompt,
+                requestId,
+                isNewTask === true
+              );
+
+              if (!success) {
+                console.error(`[ServiceWorker] ❌ Failed to send prompt`);
+
+                // Send error response back to Zen
+                browserAPI.storage.local.set({
+                  wsOutgoingMessage: {
+                    connectionId: connectionId,
+                    data: {
+                      type: "promptResponse",
+                      requestId: requestId,
+                      tabId: tabId,
+                      success: false,
+                      error: "Failed to send prompt to DeepSeek",
+                      timestamp: Date.now(),
+                    },
+                    timestamp: Date.now(),
+                  },
+                });
+              }
+            } catch (error) {
+              console.error(
+                `[ServiceWorker] ❌ Exception sending prompt:`,
+                error
+              );
+            }
+          })();
+        }
+      }
+    }
+
     if (changes.wsIncomingRequest) {
       const request = changes.wsIncomingRequest.newValue;
 
