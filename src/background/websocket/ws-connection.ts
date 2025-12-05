@@ -22,13 +22,6 @@ export class WSConnection {
   public state: WSConnectionState;
 
   constructor(config: WSConnectionConfig) {
-    console.log(`[WSConnection] 🆕 NEW CONNECTION CREATED:`, {
-      id: config.id,
-      url: config.url,
-      port: config.port,
-      timestamp: new Date().toISOString(),
-    });
-
     this.state = {
       id: config.id,
       port: config.port,
@@ -54,13 +47,10 @@ export class WSConnection {
   }
 
   public async connect(): Promise<void> {
-    console.log(`[WSConnection] 🚀 ATTEMPTING CONNECT to: ${this.state.url}`);
-
     if (
       this.state.status === "connected" ||
       this.state.status === "connecting"
     ) {
-      console.log(`[WSConnection] ⚠️ Already ${this.state.status}, skipping`);
       return;
     }
 
@@ -73,17 +63,7 @@ export class WSConnection {
         this.ws.onopen = () => {
           this.state.status = "connected";
           this.state.lastConnected = Date.now();
-          this.lastPingTime = Date.now(); // Initialize ping time
-
-          console.log(
-            `[WSConnection] ✅ WebSocket CONNECTED: ${this.state.id}`
-          );
-          console.log(`[WSConnection] 📊 Connection details:`, {
-            id: this.state.id,
-            url: this.state.url,
-            port: this.state.port,
-            timestamp: new Date().toISOString(),
-          });
+          this.lastPingTime = Date.now();
 
           this.notifyStateChange();
 
@@ -109,10 +89,6 @@ export class WSConnection {
             this.state.status === "connecting";
 
           if (wasAttemptingConnection) {
-            // 🆕 Gửi disconnect signal ngay cả khi có error
-            console.log(
-              `[WSConnection] 🔴 SENDING DISCONNECT SIGNAL (onerror)`
-            );
             this.sendDisconnectSignal();
           }
 
@@ -127,10 +103,6 @@ export class WSConnection {
             this.state.status === "connecting";
 
           if (wasAttemptingConnection) {
-            console.log(
-              `[WSConnection] 🔴 SENDING DISCONNECT SIGNAL (onclose, status: ${this.state.status})`
-            );
-
             this.state.status = "disconnected";
             this.notifyStateChange();
 
@@ -150,11 +122,7 @@ export class WSConnection {
 
               // Cleanup sau 500ms
               setTimeout(() => {
-                chrome.storage.local.remove(["wsOutgoingMessage"], () => {
-                  console.log(
-                    `[WSConnection] 🧹 Cleaned up disconnect message`
-                  );
-                });
+                chrome.storage.local.remove(["wsOutgoingMessage"], () => {});
               }, 500);
             } catch (error) {
               console.error(
@@ -197,9 +165,6 @@ export class WSConnection {
     if (this.ws && this.state.status === "connected") {
       try {
         const messageStr = JSON.stringify(data);
-        console.log(
-          `[WSConnection] 📤 Sending message: type=${data.type}, size=${messageStr.length} bytes`
-        );
         this.ws.send(messageStr);
       } catch (error) {
         console.error(`[WSConnection] ❌ Failed to send message:`, error);
@@ -531,22 +496,8 @@ export class WSConnection {
   }
 
   private notifyStateChange(): void {
-    console.log(`[WSConnection] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    console.log(`[WSConnection] 📢 notifyStateChange() CALLED`);
-    console.log(`[WSConnection] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-    console.log(`[WSConnection] 📊 Current State:`, {
-      id: this.state.id,
-      port: this.state.port,
-      url: this.state.url,
-      status: this.state.status,
-      lastConnected: this.state.lastConnected,
-    });
-
     const updateStorage = async () => {
       try {
-        console.log(
-          `[WSConnection] 🔍 Reading current wsStates from storage...`
-        );
         const result = await new Promise<any>((resolve, reject) => {
           chrome.storage.local.get(["wsStates"], (data: any) => {
             if (chrome.runtime.lastError) {
@@ -558,9 +509,6 @@ export class WSConnection {
         });
 
         const states = result.wsStates || {};
-        console.log(`[WSConnection] 📊 Current wsStates in storage:`, states);
-
-        // 🔥 CRITICAL FIX: Lưu FULL state object thay vì chỉ 2 fields
         const newState = {
           id: this.state.id,
           port: this.state.port,
@@ -569,7 +517,6 @@ export class WSConnection {
           lastConnected: this.state.lastConnected,
         };
 
-        console.log(`[WSConnection] 💾 Saving new state to storage:`, newState);
         states[this.state.id] = newState;
 
         await new Promise<void>((resolve, reject) => {
@@ -583,9 +530,6 @@ export class WSConnection {
               return;
             }
 
-            console.log(
-              `[WSConnection] ✅ State saved successfully to storage`
-            );
             resolve();
           });
         });
@@ -602,16 +546,7 @@ export class WSConnection {
         });
 
         const verifyStates = verifyResult.wsStates || {};
-        console.log(
-          `[WSConnection] ✅ Verification - wsStates after save:`,
-          verifyStates
-        );
-
         if (verifyStates[this.state.id]) {
-          console.log(
-            `[WSConnection] ✅ State verified in storage:`,
-            verifyStates[this.state.id]
-          );
         } else {
           console.error(
             `[WSConnection] ❌ State NOT found in storage after save!`
@@ -638,8 +573,6 @@ export class WSConnection {
     } catch (error) {
       // Ignore message errors
     }
-
-    console.log(`[WSConnection] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
   }
 
   public getState(): WSConnectionState {
@@ -710,10 +643,6 @@ export class WSConnection {
    */
   private sendDisconnectSignal(): void {
     try {
-      console.log(
-        `[WSConnection] 📤 Sending disconnect signal for ${this.state.id}`
-      );
-
       chrome.storage.local.set({
         wsOutgoingMessage: {
           connectionId: this.state.id,
@@ -741,10 +670,6 @@ export class WSConnection {
    * 🆕 Force disconnect với disconnect signal
    */
   public forceDisconnect(): void {
-    console.log(
-      `[WSConnection] 🔴 FORCE DISCONNECT called for ${this.state.id}`
-    );
-
     // Gửi disconnect signal trước
     this.sendDisconnectSignal();
 

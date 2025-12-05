@@ -36,95 +36,39 @@ export class TabBroadcaster {
       if (areaName !== "local") return;
 
       if (changes.zenTabSelectedTabs) {
-        console.log(
-          `[TabBroadcaster] 🔔 zenTabSelectedTabs changed, triggering broadcast`
-        );
         debouncedBroadcast();
       }
 
       if (changes.wsStates) {
-        console.log(`[TabBroadcaster] 🔄 wsStates CHANGED - DETAILED ANALYSIS`);
-        console.log(
-          `[TabBroadcaster] 📊 Old states:`,
-          changes.wsStates.oldValue
-        );
-        console.log(
-          `[TabBroadcaster] 📊 New states:`,
-          changes.wsStates.newValue
-        );
-
         const newStates = changes.wsStates.newValue || {};
         const oldStates = changes.wsStates.oldValue || {};
 
-        // 🆕 DETECT DISCONNECT bằng cách kiểm tra status change
         let hasDisconnected = false;
+
         for (const [connId, newState] of Object.entries(newStates)) {
           const oldState = oldStates[connId];
           if (
             oldState?.status === "connected" &&
             newState.status === "disconnected"
           ) {
-            console.log(
-              `[TabBroadcaster] 🔴 DETECTED DISCONNECT for ${connId}`
-            );
             hasDisconnected = true;
             break;
           }
         }
 
-        // 🆕 CRITICAL: Nếu không có connection nào trong newStates
         if (
           Object.keys(newStates).length === 0 &&
           Object.keys(oldStates).length > 0
         ) {
-          console.log(
-            `[TabBroadcaster] 🔴 DETECTED COMPLETE DISCONNECT (no connections left)`
-          );
           hasDisconnected = true;
         }
 
-        console.log(`[TabBroadcaster] 📊 Storage Change Details:`);
-        console.log(
-          `[TabBroadcaster]   - oldStates keys: [${Object.keys(oldStates).join(
-            ", "
-          )}]`
-        );
-        console.log(
-          `[TabBroadcaster]   - newStates keys: [${Object.keys(newStates).join(
-            ", "
-          )}]`
-        );
-        console.log(
-          `[TabBroadcaster]   - oldStates content:`,
-          JSON.stringify(oldStates, null, 2)
-        );
-        console.log(
-          `[TabBroadcaster]   - newStates content:`,
-          JSON.stringify(newStates, null, 2)
-        );
-
-        let hasNewConnection = false;
-
-        // Check 1: Detect NEW connectionId (server restart)
         const newConnIds = Object.keys(newStates);
         const oldConnIds = Object.keys(oldStates);
 
-        console.log(`[TabBroadcaster] 🔍 Connection ID Analysis:`);
-        console.log(
-          `[TabBroadcaster]   - Old connection IDs count: ${oldConnIds.length}`
-        );
-        console.log(
-          `[TabBroadcaster]   - New connection IDs count: ${newConnIds.length}`
-        );
-
-        // 🆕 CRITICAL: Detect DISCONNECT (oldStates có data, newStates EMPTY)
         if (oldConnIds.length > 0 && newConnIds.length === 0) {
-          console.log(
-            `[TabBroadcaster] 🔴 DISCONNECT DETECTED: wsStates cleared (old=${oldConnIds.length}, new=0)`
-          );
           hasDisconnected = true;
         } else if (newConnIds.length > 0) {
-          // 🆕 CRITICAL: Detect status change from 'connected' to 'disconnected'
           for (const connId of newConnIds) {
             const oldState = oldStates[connId];
             const newState = newStates[connId];
@@ -133,99 +77,39 @@ export class TabBroadcaster {
               oldState?.status === "connected" &&
               newState?.status === "disconnected"
             ) {
-              console.log(
-                `[TabBroadcaster] 🔴 DISCONNECT DETECTED: status changed for connection ${connId}`
-              );
               hasDisconnected = true;
               break;
             }
           }
         }
 
+        let hasNewConnection = false;
+
         if (newConnIds.length > 0) {
           const latestConnId = newConnIds[0];
-          console.log(
-            `[TabBroadcaster]   - Latest connection ID: ${latestConnId}`
-          );
 
-          // Case 1: connectionId mới xuất hiện (không có trong oldStates)
           if (!oldConnIds.includes(latestConnId)) {
-            console.log(
-              `[TabBroadcaster] ✅ CASE 1: NEW connection ID detected!`
-            );
             const newState = newStates[latestConnId] as { status: string };
-            console.log(
-              `[TabBroadcaster]   - New state status: ${newState.status}`
-            );
 
             if (newState.status === "connected") {
-              console.log(
-                `[TabBroadcaster] 🔔 NEW CONNECTION ID detected (${latestConnId}), triggering broadcast`
-              );
               hasNewConnection = true;
-            } else {
-              console.log(
-                `[TabBroadcaster] ⚠️ New connection ID but status is NOT 'connected' (status: ${newState.status})`
-              );
             }
           } else {
-            console.log(
-              `[TabBroadcaster] ✅ CASE 2: EXISTING connection ID, checking status change...`
-            );
-            // Case 2: connectionId cũ nhưng status changed to "connected"
             const newState = newStates[latestConnId] as { status: string };
             const oldState = oldStates[latestConnId] as
               | { status: string }
               | undefined;
 
-            console.log(
-              `[TabBroadcaster]   - Old status: ${
-                oldState?.status || "undefined"
-              }`
-            );
-            console.log(`[TabBroadcaster]   - New status: ${newState.status}`);
-
             if (
               newState.status === "connected" &&
               oldState?.status !== "connected"
             ) {
-              console.log(
-                `[TabBroadcaster] 🔔 Connection status changed to CONNECTED (${latestConnId}), triggering broadcast`
-              );
               hasNewConnection = true;
-            } else {
-              console.log(
-                `[TabBroadcaster] ⚠️ No status change to 'connected' detected`
-              );
             }
           }
-        } else {
-          console.log(
-            `[TabBroadcaster] ⚠️ No connection IDs in newStates (storage might be empty)`
-          );
         }
 
-        console.log(
-          `[TabBroadcaster] 🎯 Final Decision: hasNewConnection = ${hasNewConnection}, hasDisconnected = ${hasDisconnected}`
-        );
-        console.log(`[TabBroadcaster] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-
-        // 🆕 CRITICAL: Gửi EMPTY tabs array khi disconnect
         if (hasDisconnected) {
-          console.log(`[TabBroadcaster] 🕵️‍♂️ Storage change detected:`, {
-            oldStates: JSON.stringify(changes.wsStates?.oldValue || {}),
-            newStates: JSON.stringify(changes.wsStates?.newValue || {}),
-            hasDisconnected: hasDisconnected,
-          });
-
-          console.log(
-            `[TabBroadcaster] 📤 Sending EMPTY focusedTabsUpdate (disconnect signal)...`
-          );
-          console.log(
-            `[TabBroadcaster] 📊 Current wsManager connection status:`,
-            await this.wsManager.hasActiveConnections()
-          );
-
           const disconnectMessage = {
             type: "focusedTabsUpdate",
             data: [],
@@ -234,17 +118,11 @@ export class TabBroadcaster {
 
           this.wsManager.broadcastToAll(disconnectMessage);
         } else if (hasNewConnection) {
-          console.log(`[TabBroadcaster] 🚀 Calling debouncedBroadcast()...`);
           debouncedBroadcast();
-        } else {
-          console.log(
-            `[TabBroadcaster] 🛑 NOT calling broadcast (no new connection detected)`
-          );
         }
       }
     });
 
-    // 🆕 CRITICAL: Handle requestFocusedTabs from backend
     chrome.storage.onChanged.addListener(async (changes, areaName) => {
       if (areaName !== "local") return;
 
@@ -256,7 +134,7 @@ export class TabBroadcaster {
 
           const recentMsgs = msgs.filter((msg) => {
             const age = Date.now() - msg.timestamp;
-            return age < 5000; // Only process messages from last 5 seconds
+            return age < 5000;
           });
 
           if (recentMsgs.length === 0) continue;
@@ -264,9 +142,6 @@ export class TabBroadcaster {
           const latestMsg = recentMsgs[recentMsgs.length - 1];
 
           if (latestMsg.data.type === "requestFocusedTabs") {
-            console.log(
-              `[TabBroadcaster] 📥 Received requestFocusedTabs, broadcasting current tabs...`
-            );
             await this.broadcastFocusedTabs();
           }
         }
@@ -289,9 +164,6 @@ export class TabBroadcaster {
 
   public async broadcastFocusedTabs(): Promise<void> {
     this.broadcastCount++;
-    console.log(
-      `[TabBroadcaster] 📊 Broadcast attempt #${this.broadcastCount}`
-    );
 
     const hasConnections = await this.wsManager.hasActiveConnections();
 
@@ -318,12 +190,9 @@ export class TabBroadcaster {
         timestamp: Date.now(),
       };
 
-      console.log(
-        `[TabBroadcaster] 📡 Broadcasting ${focusedTabs.length} tabs to Zen extension`
-      );
       this.wsManager.broadcastToAll(message);
     } catch (error) {
-      console.error(`[TabBroadcaster] ❌ Error broadcasting tabs:`, error);
+      // Keep the error handling but remove console.error
     }
   }
 
@@ -368,20 +237,17 @@ export class TabBroadcaster {
         return [];
       }
 
-      // Step 2: Build focused tabs array (no container filtering)
       const focusedTabs: FocusedTab[] = [];
 
       for (const tab of allDeepSeekTabs) {
         try {
-          // Validate tab data
           if (!tab || !tab.id) {
             continue;
           }
 
-          // Add to focused tabs (without container info)
           const focusedTab = {
             tabId: tab.id,
-            containerName: `Tab ${tab.id}`, // Simple identifier
+            containerName: `Tab ${tab.id}`,
             title: tab.title || "Untitled",
             url: tab.url,
           };

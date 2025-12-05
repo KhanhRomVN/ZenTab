@@ -1403,10 +1403,6 @@ REMEMBER:
           });
 
           if (hasContinueButton) {
-            console.log(
-              `[PromptController] ⚠️ Detected "Continue" button for request ${capturedRequestId} - DeepSeek response truncated, generating error response...`
-            );
-
             // 🆕 STEP 1: Lấy folderPath từ wsMessages (giống logic ở dưới)
             let folderPathToLink: string | null = null;
             try {
@@ -2548,9 +2544,9 @@ DeepSeek đã dừng response và yêu cầu nhấn "Continue" để tiếp tụ
       };
 
       // LOG 1: Raw HTML content nhận từ DeepSeek (full content)
-      console.log(
-        `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
-      );
+      // console.log(
+      //   `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${content}`
+      // );
 
       // Step 2: Decode HTML entities
       const decodedResult = this.decodeHtmlEntities(content);
@@ -2598,9 +2594,9 @@ DeepSeek đã dừng response và yêu cầu nhấn "Continue" để tiếp tụ
       cleanedResult = this.cleanContentCodeFences(cleanedResult);
 
       // LOG 2: Response sau xử lý (full cleaned content)
-      console.log(
-        `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
-      );
+      // console.log(
+      //   `[PromptController] ✅ PROCESSED RESPONSE (CLEAN):\n${cleanedResult}`
+      // );
 
       // Step 3: Try to parse as JSON ONLY if ENTIRE response is JSON (không chứa XML tags)
       try {

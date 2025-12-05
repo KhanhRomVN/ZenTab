@@ -21,10 +21,6 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
       return;
     }
 
-    console.log(
-      `[TabCard] 🔗 Unlinking folder "${tab.folderPath}" from tab ${tab.tabId}...`
-    );
-
     try {
       const response = await chrome.runtime.sendMessage({
         action: "unlinkTabFromFolder",
@@ -32,12 +28,7 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
         folderPath: tab.folderPath,
       });
 
-      console.log(`[TabCard] 📬 Response from ServiceWorker:`, response);
-
       if (response && response.success) {
-        console.log(
-          `[TabCard] ✅ Successfully unlinked folder from tab ${tab.tabId}`
-        );
       } else {
         console.error(`[TabCard] ❌ Failed to unlink folder:`, response);
         alert(`Failed to unlink folder: ${response?.error || "Unknown error"}`);

@@ -151,32 +151,6 @@ declare const browser: typeof chrome & any;
 
           const requestKey = `processed_${requestId}`;
 
-          console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-          console.log(
-            `[ServiceWorker] 📥 RECEIVED SENDPROMPT MESSAGE from Backend`
-          );
-          console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-          console.log(`[ServiceWorker] 📌 Message Data:`);
-          console.log(`[ServiceWorker]   - requestId: ${requestId}`);
-          console.log(`[ServiceWorker]   - tabId: ${tabId}`);
-          console.log(
-            `[ServiceWorker]   - hasSystemPrompt: ${!!systemPrompt} (${
-              systemPrompt ? systemPrompt.length : 0
-            } chars)`
-          );
-          console.log(
-            `[ServiceWorker]   - userPrompt length: ${
-              userPrompt ? userPrompt.length : 0
-            } chars`
-          );
-          console.log(
-            `[ServiceWorker]   - isNewTask: ${isNewTask} (${typeof isNewTask})`
-          );
-          console.log(
-            `[ServiceWorker]   - folderPath: ${folderPath || "null"}`
-          );
-          console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-
           // Wrap in async IIFE to use await
           (async () => {
             try {
@@ -202,26 +176,6 @@ declare const browser: typeof chrome & any;
 
               const isNewTaskBool = isNewTask === true;
 
-              console.log(
-                `[ServiceWorker] 🔄 Forwarding to DeepSeekController.sendPrompt()`
-              );
-              console.log(`[ServiceWorker] 📌 Arguments:`);
-              console.log(`[ServiceWorker]   - tabId: ${tabId}`);
-              console.log(
-                `[ServiceWorker]   - systemPrompt: ${
-                  systemPrompt ? "provided" : "null"
-                }`
-              );
-              console.log(
-                `[ServiceWorker]   - userPrompt length: ${userPrompt.length}`
-              );
-              console.log(`[ServiceWorker]   - requestId: ${requestId}`);
-              console.log(
-                `[ServiceWorker]   - isNewTaskBool: ${isNewTaskBool} (converted from ${isNewTask})`
-              );
-
-              // Gọi sendPrompt với overload signature mới (5 arguments)
-              // Signature: sendPrompt(tabId, systemPrompt, userPrompt, requestId, isNewTask)
               DeepSeekController.sendPrompt(
                 tabId,
                 systemPrompt || null,
@@ -301,25 +255,13 @@ declare const browser: typeof chrome & any;
 
         // 🆕 CRITICAL: Handle sendPrompt từ Zen
         if (latestMsg.data.type === "sendPrompt") {
-          const {
-            tabId,
-            systemPrompt,
-            userPrompt,
-            requestId,
-            isNewTask,
-            folderPath,
-          } = latestMsg.data;
+          const { tabId, systemPrompt, userPrompt, requestId, isNewTask } =
+            latestMsg.data;
 
           if (!tabId || !userPrompt || !requestId) {
             console.error(`[ServiceWorker] ❌ Invalid sendPrompt message`);
             continue;
           }
-
-          console.log(`[ServiceWorker] 📥 Received sendPrompt from Zen:`, {
-            requestId,
-            tabId,
-            userPromptLength: userPrompt.length,
-          });
 
           // Forward to DeepSeekController
           (async () => {
@@ -562,19 +504,9 @@ declare const browser: typeof chrome & any;
     (message: any, _sender: any, sendResponse: any) => {
       // Handle WebSocket connect/disconnect directly
       if (message.action === "connectWebSocket") {
-        console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-        console.log(`[ServiceWorker] 📥 RECEIVED: connectWebSocket message`);
-        console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-
-        // ✅ CRITICAL FIX: Wrap trong async IIFE để đảm bảo response được gửi đúng
         (async () => {
           try {
-            console.log(`[ServiceWorker] 🔄 Calling wsManager.connect()...`);
             const result = await wsManager.connect();
-            console.log(
-              `[ServiceWorker] 📊 wsManager.connect() result:`,
-              result
-            );
 
             // Validate result structure
             if (!result || typeof result.success !== "boolean") {
@@ -586,19 +518,6 @@ declare const browser: typeof chrome & any;
               sendResponse({ success: false, error: "Invalid connect result" });
               return;
             }
-
-            // Send response immediately
-            console.log(
-              `[ServiceWorker] 📤 Sending response back to caller:`,
-              result
-            );
-            sendResponse(result);
-
-            console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-            console.log(
-              `[ServiceWorker] ✅ connectWebSocket handler completed`
-            );
-            console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
           } catch (error) {
             console.error(`[ServiceWorker] ❌ Connect exception:`, error);
             console.error(
@@ -816,15 +735,6 @@ declare const browser: typeof chrome & any;
         case "unlinkTabFromFolder":
           (async () => {
             try {
-              console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-              console.log(`[ServiceWorker] 🔗 UNLINK TAB FROM FOLDER REQUEST`);
-              console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-              console.log(`[ServiceWorker] 📌 Message data:`, {
-                action: message.action,
-                tabId: message.tabId,
-                folderPath: message.folderPath,
-              });
-
               if (!tabStateManager) {
                 console.error(
                   `[ServiceWorker] ❌ TabStateManager not available!`
@@ -839,14 +749,6 @@ declare const browser: typeof chrome & any;
               const success = await tabStateManager.unlinkTabFromFolder(
                 message.tabId
               );
-
-              console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
-              console.log(
-                `[ServiceWorker] ${
-                  success ? "✅ SUCCESS" : "❌ FAILED"
-                }: Unlink result = ${success}`
-              );
-              console.log(`[ServiceWorker] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`);
 
               sendResponse({ success });
             } catch (error) {
