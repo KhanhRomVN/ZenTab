@@ -106,8 +106,10 @@ export class TabStateScanner {
         const actualStatus = isSleepTab ? "sleep" : state.status;
 
         const canAccept = this.canAcceptRequest({
-          ...state,
           status: actualStatus,
+          requestId: "requestId" in state ? state.requestId || null : null,
+          requestCount: state.requestCount || 0,
+          folderPath: state.folderPath || null,
         });
 
         tabStates.push({

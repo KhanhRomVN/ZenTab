@@ -13,7 +13,6 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "postbuild": "tsc src/background/service-worker.ts --outDir dist --esModuleInterop",
     "watchbuild": "node watchbuild.js",
     "toggle-watchbuild": "node toggle-watchbuild.js"
   },

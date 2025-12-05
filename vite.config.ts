@@ -4,6 +4,23 @@ import { resolve } from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import { viteStaticCopy } from "vite-plugin-static-copy";
+import { Plugin } from "vite";
+
+function removeExportsPlugin(): Plugin {
+  return {
+    name: "remove-exports",
+    generateBundle(_options, bundle) {
+      const serviceWorkerFile = bundle["serviceWorker.js"];
+      if (serviceWorkerFile && serviceWorkerFile.type === "chunk") {
+        // Remove export statements from service worker
+        serviceWorkerFile.code = serviceWorkerFile.code.replace(
+          /export\s*\{[^}]*\}\s*;?\s*$/gm,
+          ""
+        );
+      }
+    },
+  };
+}
 
 export default defineConfig({
   build: {
@@ -24,6 +41,8 @@ export default defineConfig({
         },
         chunkFileNames: "[name].js",
         assetFileNames: "[name].[ext]",
+        format: "es",
+        preserveModules: false,
       },
     },
     minify: "esbuild",
@@ -34,6 +53,7 @@ export default defineConfig({
     viteStaticCopy({
       targets: [{ src: "manifest.json", dest: "." }],
     }),
+    removeExportsPlugin(),
   ],
   resolve: {
     alias: {
