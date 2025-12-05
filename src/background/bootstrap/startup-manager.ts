@@ -93,10 +93,11 @@ export class StartupManager {
     console.log("[StartupManager] 🎧 Setting up event listeners...");
 
     try {
-      // Get event handlers từ dependency container
-      const tabEventHandler =
-        this.dependencyContainer.get<any>("TabEventHandler");
-      const storageEventHandler = this.dependencyContainer.get<any>(
+      // Get event handlers từ dependency container (sử dụng getAsync vì có thể là Promise)
+      const tabEventHandler = await this.dependencyContainer.getAsync<any>(
+        "TabEventHandler"
+      );
+      const storageEventHandler = await this.dependencyContainer.getAsync<any>(
         "StorageEventHandler"
       );
 
@@ -105,6 +106,8 @@ export class StartupManager {
         await tabEventHandler.setupListeners();
         this.registerCleanup(() => tabEventHandler.cleanup());
         console.log("[StartupManager] ✅ Tab event listeners setup");
+      } else {
+        console.warn("[StartupManager] ⚠️ TabEventHandler not available");
       }
 
       // Setup storage event listeners
@@ -112,6 +115,8 @@ export class StartupManager {
         await storageEventHandler.setupListeners();
         this.registerCleanup(() => storageEventHandler.cleanup());
         console.log("[StartupManager] ✅ Storage event listeners setup");
+      } else {
+        console.warn("[StartupManager] ⚠️ StorageEventHandler not available");
       }
 
       // Setup runtime message listener
@@ -199,8 +204,9 @@ export class StartupManager {
     console.log("[StartupManager] 🏗️ Initializing core managers...");
 
     // Initialize Tab State Manager
-    const tabStateManager =
-      this.dependencyContainer.get<any>("TabStateManager");
+    const tabStateManager = await this.dependencyContainer.getAsync<any>(
+      "TabStateManager"
+    );
     if (tabStateManager && tabStateManager.initialize) {
       await tabStateManager.initialize();
       this.registerCleanup(() => tabStateManager.cleanup());
@@ -208,22 +214,25 @@ export class StartupManager {
     }
 
     // Initialize Container Manager
-    const containerManager =
-      this.dependencyContainer.get<any>("ContainerManager");
+    const containerManager = await this.dependencyContainer.getAsync<any>(
+      "ContainerManager"
+    );
     if (containerManager && containerManager.initializeContainers) {
       await containerManager.initializeContainers();
       console.log("[StartupManager] ✅ ContainerManager initialized");
     }
 
     // Initialize WebSocket Manager (connect if configured)
-    const wsManager = this.dependencyContainer.get<any>("WSManager");
+    const wsManager = await this.dependencyContainer.getAsync<any>("WSManager");
     if (wsManager) {
       // Note: WebSocket sẽ tự động connect khi cần
       console.log("[StartupManager] ✅ WSManager initialized");
     }
 
     // Initialize Tab Broadcaster
-    const tabBroadcaster = this.dependencyContainer.get<any>("TabBroadcaster");
+    const tabBroadcaster = await this.dependencyContainer.getAsync<any>(
+      "TabBroadcaster"
+    );
     if (tabBroadcaster) {
       console.log("[StartupManager] ✅ TabBroadcaster initialized");
     }
@@ -291,7 +300,9 @@ export class StartupManager {
    * Setup runtime message listener
    */
   private async setupRuntimeMessageListener(): Promise<void> {
-    const messageHandler = this.dependencyContainer.get<any>("MessageHandler");
+    const messageHandler = await this.dependencyContainer.getAsync<any>(
+      "MessageHandler"
+    );
     const browserAPI = this.getBrowserAPI();
 
     if (!messageHandler || !browserAPI.runtime.onMessage) {

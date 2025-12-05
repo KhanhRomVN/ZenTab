@@ -36,25 +36,111 @@ export class DependencyContainer {
   }
 
   /**
-   * Lấy service instance
+   * Lấy service instance (sync) - chỉ dùng cho non-promise factories
    */
   public get<T>(serviceName: string): T | null {
     // Check nếu đã có instance
     if (this.services.has(serviceName)) {
-      return this.services.get(serviceName) as T;
+      const instance = this.services.get(serviceName);
+      // Nếu instance là Promise, trả về null và log warning
+      if (instance && typeof instance.then === "function") {
+        console.warn(
+          `[DependencyContainer] ⚠️ Service ${serviceName} is a Promise. Use getAsync() instead.`
+        );
+        return null;
+      }
+      return instance as T;
     }
 
     // Check nếu có factory, tạo instance mới
     if (this.factories.has(serviceName)) {
       try {
         const factory = this.factories.get(serviceName)!;
-        const instance = factory();
-        this.services.set(serviceName, instance);
+        const instanceOrPromise = factory();
+
+        // Nếu factory trả về Promise, lưu Promise và trả về null
+        if (instanceOrPromise && typeof instanceOrPromise.then === "function") {
+          console.warn(
+            `[DependencyContainer] ⚠️ Factory ${serviceName} returned a Promise. Use getAsync() instead.`
+          );
+          // Lưu Promise để dùng sau
+          this.services.set(serviceName, instanceOrPromise);
+          return null;
+        }
+
+        this.services.set(serviceName, instanceOrPromise);
 
         console.log(
           `[DependencyContainer] 🔧 Created instance from factory: ${serviceName}`
         );
-        return instance as T;
+        return instanceOrPromise as T;
+      } catch (error) {
+        console.error(
+          `[DependencyContainer] ❌ Failed to create instance from factory ${serviceName}:`,
+          error
+        );
+        return null;
+      }
+    }
+
+    console.error(`[DependencyContainer] ❌ Service not found: ${serviceName}`);
+    return null;
+  }
+
+  /**
+   * Lấy service instance async (hỗ trợ Promise factories)
+   */
+  public async getAsync<T>(serviceName: string): Promise<T | null> {
+    // Check nếu đã có instance
+    if (this.services.has(serviceName)) {
+      const instance = this.services.get(serviceName);
+      // Nếu instance là Promise, await nó
+      if (instance && typeof instance.then === "function") {
+        try {
+          const resolved = await instance;
+          // Cache the resolved instance
+          this.services.set(serviceName, resolved);
+          return resolved as T;
+        } catch (error) {
+          console.error(
+            `[DependencyContainer] ❌ Failed to resolve Promise for ${serviceName}:`,
+            error
+          );
+          return null;
+        }
+      }
+      return instance as T;
+    }
+
+    // Check nếu có factory, tạo instance mới
+    if (this.factories.has(serviceName)) {
+      try {
+        const factory = this.factories.get(serviceName)!;
+        const instanceOrPromise = factory();
+
+        // Nếu factory trả về Promise, await nó
+        if (instanceOrPromise && typeof instanceOrPromise.then === "function") {
+          try {
+            const resolved = await instanceOrPromise;
+            this.services.set(serviceName, resolved);
+            console.log(
+              `[DependencyContainer] 🔧 Created instance from async factory: ${serviceName}`
+            );
+            return resolved as T;
+          } catch (error) {
+            console.error(
+              `[DependencyContainer] ❌ Failed to resolve async factory ${serviceName}:`,
+              error
+            );
+            return null;
+          }
+        }
+
+        this.services.set(serviceName, instanceOrPromise);
+        console.log(
+          `[DependencyContainer] 🔧 Created instance from factory: ${serviceName}`
+        );
+        return instanceOrPromise as T;
       } catch (error) {
         console.error(
           `[DependencyContainer] ❌ Failed to create instance from factory ${serviceName}:`,
@@ -85,11 +171,28 @@ export class DependencyContainer {
         }
 
         const factory = this.factories.get(serviceName)!;
-        const instance = factory();
-        this.services.set(serviceName, instance);
-        resolvedCount++;
+        const instanceOrPromise = factory();
 
-        console.log(`[DependencyContainer] ✅ Resolved: ${serviceName}`);
+        // Nếu factory trả về Promise, await nó
+        if (instanceOrPromise && typeof instanceOrPromise.then === "function") {
+          try {
+            const resolved = await instanceOrPromise;
+            this.services.set(serviceName, resolved);
+            resolvedCount++;
+            console.log(
+              `[DependencyContainer] ✅ Resolved async: ${serviceName}`
+            );
+          } catch (error) {
+            console.error(
+              `[DependencyContainer] ❌ Failed to resolve async factory ${serviceName}:`,
+              error
+            );
+          }
+        } else {
+          this.services.set(serviceName, instanceOrPromise);
+          resolvedCount++;
+          console.log(`[DependencyContainer] ✅ Resolved: ${serviceName}`);
+        }
       } catch (error) {
         console.error(
           `[DependencyContainer] ❌ Failed to resolve ${serviceName}:`,
