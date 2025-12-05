@@ -101,9 +101,16 @@ export class TabStateManager {
   private initializationLocks: Map<number, Promise<void>> = new Map();
 
   private constructor() {
+    console.log(
+      `[TabStateManager] 🏗️ Constructor called - Instance ID: ${Date.now()}`
+    );
+    console.log(`[TabStateManager] 📊 Storage key: ${this.STORAGE_KEY}`);
+
     this.enable();
     this.startAutoRecovery();
     this.setupTabListeners();
+
+    console.log(`[TabStateManager] ✅ Initialization complete`);
   }
 
   private setupTabListeners(): void {
@@ -138,7 +145,13 @@ export class TabStateManager {
           const existingState = states[tabId];
 
           if (!existingState) {
-            this.initializeNewTab(tabId);
+            // Initialize tab và broadcast update ngay lập tức
+            this.initializeNewTab(tabId).then(() => {
+              // Notify UI về tab mới sau khi init xong
+              setTimeout(() => {
+                this.notifyUIUpdate();
+              }, 200);
+            });
           }
         });
       }
@@ -197,12 +210,60 @@ export class TabStateManager {
   }
 
   private async initializeNewTab(tabId: number): Promise<void> {
+    console.log(
+      `[TabStateManager] 🏗️ initializeNewTab() called for tab ${tabId}`
+    );
+    console.log(`[TabStateManager] ⏱️ Init timestamp: ${Date.now()}`);
+
     // 🔒 CRITICAL: Deduplicate initialization requests
     const existingLock = this.initializationLocks.get(tabId);
     if (existingLock) {
-      await existingLock;
-      return;
+      console.log(
+        `[TabStateManager] ⏳ Existing lock found for tab ${tabId}, waiting...`
+      );
+      const lockWaitStart = Date.now();
+
+      try {
+        await existingLock;
+        const lockWaitDuration = Date.now() - lockWaitStart;
+        console.log(
+          `[TabStateManager] 🔓 Lock released after ${lockWaitDuration}ms for tab ${tabId}`
+        );
+      } catch (lockError) {
+        console.error(
+          `[TabStateManager] ❌ Lock wait error for tab ${tabId}:`,
+          lockError
+        );
+      }
+
+      // 🆕 CRITICAL: Check if state was initialized by the lock we waited for
+      const stateCheck = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const checkStates = (stateCheck && stateCheck[this.STORAGE_KEY]) || {};
+      if (checkStates[tabId]) {
+        console.log(
+          `[TabStateManager] ✅ State already initialized by previous lock for tab ${tabId}:`,
+          checkStates[tabId]
+        );
+        return;
+      } else {
+        console.warn(
+          `[TabStateManager] ⚠️ Lock released but state NOT found for tab ${tabId}, continuing init...`
+        );
+      }
     }
+
+    console.log(
+      `[TabStateManager] 🔐 Creating new initialization lock for tab ${tabId}`
+    );
 
     // Create new lock promise
     let resolveLock: () => void;
@@ -211,6 +272,7 @@ export class TabStateManager {
     });
     this.initializationLocks.set(tabId, lockPromise);
 
+    // 🆕 CRITICAL: Auto-cleanup lock sau 10 giây (timeout protection)
     // 🆕 CRITICAL: Auto-cleanup lock sau 10 giây (timeout protection)
     const timeoutId = setTimeout(() => {
       const lock = this.initializationLocks.get(tabId);
@@ -223,20 +285,40 @@ export class TabStateManager {
     }, 10000);
 
     try {
+      console.log(
+        `[TabStateManager] 🔍 Checking if tab ${tabId} still exists...`
+      );
+
       // Check if tab still exists
       const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
         chrome.tabs.get(tabId, (result) => {
           if (chrome.runtime.lastError) {
+            console.error(
+              `[TabStateManager] ❌ Tab ${tabId} not found:`,
+              chrome.runtime.lastError.message
+            );
             resolve(null);
             return;
           }
+          console.log(`[TabStateManager] ✅ Tab ${tabId} exists:`, {
+            url: result?.url,
+            title: result?.title,
+            status: result?.status,
+          });
           resolve(result);
         });
       });
 
       if (!tab) {
+        console.warn(
+          `[TabStateManager] ⚠️ Tab ${tabId} not found, aborting initialization`
+        );
         return;
       }
+
+      console.log(
+        `[TabStateManager] 🔍 Checking if state already exists for tab ${tabId}...`
+      );
 
       // 🔒 CRITICAL: Check if state already exists (race condition protection)
       const existingStateCheck = await new Promise<any>((resolve, reject) => {
@@ -252,17 +334,46 @@ export class TabStateManager {
       const existingStates =
         (existingStateCheck && existingStateCheck[this.STORAGE_KEY]) || {};
       if (existingStates[tabId]) {
+        console.log(
+          `[TabStateManager] ⚠️ State ALREADY exists for tab ${tabId}, skipping init:`,
+          existingStates[tabId]
+        );
+        console.log(`[TabStateManager] 🔍 Existing state details:`, {
+          status: existingStates[tabId].status,
+          requestId: existingStates[tabId].requestId,
+          folderPath: existingStates[tabId].folderPath,
+        });
+
+        // 🔥 CRITICAL FIX: Cache state trước khi return để getTabState() tìm thấy
+        this.setCachedState(tabId, existingStates[tabId]);
+        console.log(
+          `[TabStateManager] ✅ Cached existing state before early return`
+        );
         return;
       }
 
+      console.log(
+        `[TabStateManager] 🔍 Determining initial status for tab ${tabId}...`
+      );
+
       // Kiểm tra sleep state trước
       const isSleepTab = this.isSleepTab(tab);
+      console.log(`[TabStateManager] 🔍 Sleep check for tab ${tabId}:`, {
+        isSleep: isSleepTab,
+        discarded: tab.discarded,
+        title: tab.title,
+      });
 
       let initialStatus: "free" | "busy" | "sleep" = "free";
 
       if (isSleepTab) {
         initialStatus = "sleep";
+        console.log(`[TabStateManager] 💤 Tab ${tabId} is SLEEP`);
       } else {
+        console.log(
+          `[TabStateManager] 🔍 Checking button state for tab ${tabId}...`
+        );
+
         // Check button state to determine initial status
         let abortController: AbortController | null = null;
         let timeoutId: NodeJS.Timeout | null = null;
@@ -294,7 +405,18 @@ export class TabStateManager {
           }
 
           initialStatus = buttonState.isBusy ? "busy" : "free";
+          console.log(
+            `[TabStateManager] 🎯 Button check result for tab ${tabId}:`,
+            {
+              isBusy: buttonState.isBusy,
+              initialStatus: initialStatus,
+            }
+          );
         } catch (error) {
+          console.error(
+            `[TabStateManager] ❌ Button check error for tab ${tabId}:`,
+            error
+          );
           initialStatus = "free";
         } finally {
           if (timeoutId) {
@@ -303,6 +425,10 @@ export class TabStateManager {
           abortController = null;
         }
       }
+
+      console.log(
+        `[TabStateManager] 📝 Reading current states from storage for tab ${tabId}...`
+      );
 
       // Get current states
       const result = await new Promise<any>((resolve, reject) => {
@@ -316,25 +442,50 @@ export class TabStateManager {
       });
 
       const states = (result && result[this.STORAGE_KEY]) || {};
+      console.log(
+        `[TabStateManager] 📊 Current states count:`,
+        Object.keys(states).length
+      );
 
       // Add new tab state
-      states[tabId] = {
+      const newState = {
         status: initialStatus,
         requestId: null,
         requestCount: 0,
         folderPath: null,
       };
 
+      states[tabId] = newState;
+      console.log(
+        `[TabStateManager] ✏️ Adding new state for tab ${tabId}:`,
+        newState
+      );
+
+      console.log(
+        `[TabStateManager] 💾 Saving state to storage.session for tab ${tabId}...`
+      );
+
       // Save updated states
       await new Promise<void>((resolve, reject) => {
         chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
           if (chrome.runtime.lastError) {
+            console.error(
+              `[TabStateManager] ❌ Failed to save state for tab ${tabId}:`,
+              chrome.runtime.lastError
+            );
             reject(chrome.runtime.lastError);
             return;
           }
+          console.log(
+            `[TabStateManager] ✅ State saved successfully for tab ${tabId}`
+          );
           resolve();
         });
       });
+
+      console.log(
+        `[TabStateManager] 🔍 Verifying state was saved for tab ${tabId}...`
+      );
 
       // Verification
       const verifyResult = await new Promise<any>((resolve, reject) => {
@@ -349,12 +500,27 @@ export class TabStateManager {
 
       const verifyStates =
         (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
-      verifyStates[tabId];
+      const verifiedState = verifyStates[tabId];
+
+      if (verifiedState) {
+        console.log(
+          `[TabStateManager] ✅ VERIFICATION SUCCESS for tab ${tabId}:`,
+          verifiedState
+        );
+      } else {
+        console.error(
+          `[TabStateManager] ❌ VERIFICATION FAILED for tab ${tabId} - state not found in storage!`
+        );
+      }
 
       // Invalidate cache to force UI refresh
       this.invalidateCache(tabId);
+      console.log(`[TabStateManager] 🗑️ Cache invalidated for tab ${tabId}`);
 
       // Notify UI about state change
+      console.log(
+        `[TabStateManager] 📢 Notifying UI about state change for tab ${tabId}...`
+      );
       setTimeout(() => {
         this.notifyUIUpdate();
 
@@ -362,13 +528,26 @@ export class TabStateManager {
           this.notifyUIUpdate();
         }, 2000);
       }, 100);
+
+      console.log(
+        `[TabStateManager] 🎉 Initialization COMPLETE for tab ${tabId}`
+      );
     } catch (error) {
-      // Silent error handling
+      console.error(
+        `[TabStateManager] ❌ Exception in initializeNewTab for tab ${tabId}:`,
+        error
+      );
+      console.error(
+        `[TabStateManager] 🔍 Error stack:`,
+        error instanceof Error ? error.stack : "No stack trace"
+      );
     } finally {
       // 🔓 CRITICAL: Release lock và cleanup timeout
+      console.log(`[TabStateManager] 🔓 Releasing lock for tab ${tabId}...`);
       clearTimeout(timeoutId);
       this.initializationLocks.delete(tabId);
       resolveLock!();
+      console.log(`[TabStateManager] ✅ Lock released for tab ${tabId}`);
     }
   }
 
@@ -388,8 +567,10 @@ export class TabStateManager {
   }
 
   private async scanAndInitializeAllTabs(): Promise<void> {
+    console.log(`[TabStateManager] 🔍 scanAndInitializeAllTabs() called`);
     let tabs: chrome.tabs.Tab[] = [];
     try {
+      console.log(`[TabStateManager] 📋 Querying tabs with AI chat URLs...`);
       const result = await new Promise<chrome.tabs.Tab[]>((resolve, reject) => {
         chrome.tabs.query(
           {
@@ -409,6 +590,12 @@ export class TabStateManager {
               reject(chrome.runtime.lastError);
               return;
             }
+
+            console.log(
+              `[TabStateManager] 📊 Query result: ${
+                queriedTabs?.length || 0
+              } tabs found`
+            );
             resolve(queriedTabs || []);
           }
         );
@@ -416,14 +603,28 @@ export class TabStateManager {
 
       tabs = Array.isArray(result) ? result : [];
 
+      console.log(`[TabStateManager] 📋 AI chat tabs found: ${tabs.length}`);
+
       if (tabs.length === 0) {
+        console.log(
+          `[TabStateManager] ⚠️ No AI chat tabs found via URL pattern, trying broader query...`
+        );
         const allTabs = await new Promise<chrome.tabs.Tab[]>(
           (resolve, reject) => {
             chrome.tabs.query({}, (queriedTabs) => {
               if (chrome.runtime.lastError) {
+                console.error(
+                  `[TabStateManager] ❌ Broader query error:`,
+                  chrome.runtime.lastError
+                );
                 reject(chrome.runtime.lastError);
                 return;
               }
+              console.log(
+                `[TabStateManager] 📊 All tabs count: ${
+                  queriedTabs?.length || 0
+                }`
+              );
               resolve(queriedTabs || []);
             });
           }
@@ -440,8 +641,11 @@ export class TabStateManager {
                 tab.title?.includes("ChatGPT")
             )
           : [];
+
+        console.log(`[TabStateManager] 📋 Filtered tabs: ${tabs.length}`);
       }
     } catch (error) {
+      console.error(`[TabStateManager] ❌ Exception in scan query:`, error);
       try {
         const allTabs = await new Promise<chrome.tabs.Tab[]>(
           (resolve, reject) => {
@@ -1267,7 +1471,79 @@ export class TabStateManager {
       }
     } catch (error) {
       console.error(
-        `[TabStateManager] ❌ Exception in markTabSleep for tab ${tabId}:`,
+        `[TabStateManager] ❌ Exception in linkTabToFolder for tab ${tabId}:`,
+        error
+      );
+      return false;
+    }
+  }
+
+  public async unlinkTabFromFolder(tabId: number): Promise<boolean> {
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const states = (result && result[this.STORAGE_KEY]) || {};
+      const currentState = states[tabId];
+
+      if (!currentState) {
+        console.warn(
+          `[TabStateManager] ⚠️ Tab ${tabId} state not found, cannot unlink folder`
+        );
+        return false;
+      }
+
+      // Remove folderPath
+      states[tabId] = {
+        ...currentState,
+        folderPath: null,
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        chrome.storage.session.set({ [this.STORAGE_KEY]: states }, () => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve();
+        });
+      });
+
+      // Verify
+      const verifyResult = await new Promise<any>((resolve, reject) => {
+        chrome.storage.session.get([this.STORAGE_KEY], (data: any) => {
+          if (chrome.runtime.lastError) {
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(data || {});
+        });
+      });
+
+      const verifyStates =
+        (verifyResult && verifyResult[this.STORAGE_KEY]) || {};
+      const verifyState = verifyStates[tabId];
+
+      if (verifyState && verifyState.folderPath === null) {
+        this.invalidateCache(tabId);
+        this.notifyUIUpdate();
+        return true;
+      } else {
+        console.error(
+          `[TabStateManager] ❌ Failed to verify folder unlink for tab ${tabId}`
+        );
+        return false;
+      }
+    } catch (error) {
+      console.error(
+        `[TabStateManager] ❌ Exception in unlinkTabFromFolder for tab ${tabId}:`,
         error
       );
       return false;
@@ -1331,60 +1607,395 @@ export class TabStateManager {
   }
 
   public async getTabState(tabId: number): Promise<TabStateData | null> {
+    const callTimestamp = Date.now();
+    console.log(`[TabStateManager] ========== GET TAB STATE START ==========`);
+    console.log(`[TabStateManager] 🔍 getTabState CALLED - tabId: ${tabId}`);
+    console.log(`[TabStateManager] ⏱️ Call timestamp: ${callTimestamp}`);
+    console.log(
+      `[TabStateManager] 📊 TabStateManager instance: ${this.constructor.name}`
+    );
+    console.log(`[TabStateManager] 🏷️ Storage key: ${this.STORAGE_KEY}`);
+
+    // Check cache first
+    console.log(`[TabStateManager] 🔍 Checking cache for tab ${tabId}...`);
     const cachedState = this.getCachedState(tabId);
+
     if (cachedState) {
-      return cachedState;
-    }
-
-    const result = await chrome.storage.session.get([this.STORAGE_KEY]);
-    const states = (result && result[this.STORAGE_KEY]) || {};
-    const state = states[tabId] || null;
-
-    if (state) {
-      this.setCachedState(tabId, state);
-      return state;
-    }
-
-    // Kiểm tra xem tab có phải DeepSeek tab không TRƯỚC KHI warn
-    try {
-      const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
-        chrome.tabs.get(tabId, (result) => {
-          if (chrome.runtime.lastError) {
-            resolve(null);
-            return;
-          }
-          resolve(result);
-        });
+      const cacheAge =
+        Date.now() - (this.tabStateCache.get(tabId)?.timestamp || 0);
+      console.log(`[TabStateManager] ✅ FOUND IN CACHE - tabId: ${tabId}`, {
+        status: cachedState.status,
+        requestId: cachedState.requestId,
+        folderPath: cachedState.folderPath,
+        requestCount: cachedState.requestCount,
+        cacheAge: `${cacheAge}ms`,
+        cacheTTL: this.CACHE_TTL,
+        isValid: cacheAge < this.CACHE_TTL,
       });
 
-      // Nếu KHÔNG PHẢI DeepSeek hoặc ChatGPT tab → return null ngay (không warn)
-      if (
-        !tab ||
-        !(
-          tab.url?.includes("deepseek.com") ||
-          tab.url?.includes("chatgpt.com") ||
-          tab.url?.includes("openai.com")
-        )
-      ) {
+      if (cacheAge < this.CACHE_TTL) {
+        console.log(
+          `[TabStateManager] ✅ Returning cached state (age: ${cacheAge}ms)`
+        );
+        console.log(
+          `[TabStateManager] ========== GET TAB STATE END (CACHE) ==========`
+        );
+        return cachedState;
+      } else {
+        console.log(
+          `[TabStateManager] ⚠️ Cache expired (age: ${cacheAge}ms > TTL: ${this.CACHE_TTL}ms)`
+        );
+        this.tabStateCache.delete(tabId);
+      }
+    } else {
+      console.log(`[TabStateManager] ⚠️ Cache MISS for tab ${tabId}`);
+      console.log(
+        `[TabStateManager] 📊 Cache keys:`,
+        Array.from(this.tabStateCache.keys())
+      );
+    }
+
+    console.log(`[TabStateManager] 📦 READING FROM STORAGE.SESSION...`);
+    console.log(`[TabStateManager] ⏱️ Storage read start: ${Date.now()}`);
+
+    try {
+      const result = await chrome.storage.session.get([this.STORAGE_KEY]);
+
+      // 🔥 CRITICAL FIX: Handle undefined result từ Firefox extension API
+      if (!result || typeof result !== "object") {
+        console.error(
+          `[TabStateManager] ❌ Invalid storage.session.get() result:`,
+          {
+            resultType: typeof result,
+            resultValue: result,
+            isNull: result === null,
+            isUndefined: result === undefined,
+            storageKey: this.STORAGE_KEY,
+          }
+        );
+
+        // Try fallback initialization if tab exists
+        console.warn(
+          `[TabStateManager] ⚠️ Invalid storage result - attempting EMERGENCY initialization...`
+        );
+        console.warn(`[TabStateManager] 🔍 Storage diagnostic:`, {
+          resultType: typeof result,
+          resultValue: result,
+          hasStorageKey: result && result[this.STORAGE_KEY],
+          storageKey: this.STORAGE_KEY,
+        });
+
+        // Check if tab still exists
+        console.log(
+          `[TabStateManager] 📞 Checking if tab ${tabId} exists via tabs.get()...`
+        );
+        const tabCheckStart = Date.now();
+
+        const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
+          chrome.tabs.get(tabId, (result) => {
+            const callbackTime = Date.now();
+            const duration = callbackTime - tabCheckStart;
+
+            if (chrome.runtime.lastError) {
+              console.error(
+                `[TabStateManager] ❌ Tab ${tabId} NOT FOUND (${duration}ms):`,
+                chrome.runtime.lastError
+              );
+              resolve(null);
+              return;
+            }
+
+            console.log(
+              `[TabStateManager] ✅ Tab ${tabId} EXISTS (${duration}ms):`,
+              {
+                url: result?.url,
+                title: result?.title,
+                status: result?.status,
+                discarded: result?.discarded,
+              }
+            );
+            resolve(result);
+          });
+        });
+
+        if (
+          tab &&
+          (tab.url?.includes("deepseek.com") ||
+            tab.url?.includes("chatgpt.com") ||
+            tab.url?.includes("openai.com"))
+        ) {
+          console.log(`[TabStateManager] 🚨 EMERGENCY INIT for tab ${tabId}`);
+          console.log(`[TabStateManager] 📊 Tab info:`, {
+            tabId,
+            url: tab.url,
+            title: tab.title,
+            status: tab.status,
+          });
+
+          // Emergency init
+          console.log(
+            `[TabStateManager] 🔧 Calling initializeNewTab(${tabId})...`
+          );
+          await this.initializeNewTab(tabId);
+          console.log(`[TabStateManager] ✅ Emergency init completed`);
+
+          // Retry read
+          const retryResult = await chrome.storage.session.get([
+            this.STORAGE_KEY,
+          ]);
+          if (
+            retryResult &&
+            typeof retryResult === "object" &&
+            retryResult[this.STORAGE_KEY]
+          ) {
+            const retryStates = retryResult[this.STORAGE_KEY] || {};
+            const retryState = retryStates[tabId] || null;
+
+            if (retryState) {
+              console.log(
+                `[TabStateManager] ✅ Emergency init successful:`,
+                retryState
+              );
+              this.setCachedState(tabId, retryState);
+              return retryState;
+            }
+          }
+        }
+
         return null;
       }
 
-      await this.initializeNewTab(tabId);
+      console.log(`[TabStateManager] 📊 Storage get result:`, {
+        hasStorageKey: !!result[this.STORAGE_KEY],
+        keysCount: result[this.STORAGE_KEY]
+          ? Object.keys(result[this.STORAGE_KEY]).length
+          : 0,
+        allKeys: result[this.STORAGE_KEY]
+          ? Object.keys(result[this.STORAGE_KEY])
+          : [],
+      });
 
-      // Retry đọc state sau khi init
-      const retryResult = await chrome.storage.session.get([this.STORAGE_KEY]);
-      const retryStates = (retryResult && retryResult[this.STORAGE_KEY]) || {};
-      const retryState = retryStates[tabId] || null;
+      const states = result[this.STORAGE_KEY] || {};
+      const state = states[tabId] || null;
 
-      if (retryState) {
-        this.setCachedState(tabId, retryState);
-        return retryState;
+      if (state) {
+        console.log(`[TabStateManager] ✅ Found in storage:`, {
+          tabId,
+          status: state.status,
+          requestId: state.requestId,
+          folderPath: state.folderPath,
+          requestCount: state.requestCount,
+        });
+
+        this.setCachedState(tabId, state);
+        return state;
       }
-    } catch (error) {
-      // Silent error handling
-    }
 
-    return null;
+      console.log(
+        `[TabStateManager] ⚠️ State NOT found in storage for tabId: ${tabId}`
+      );
+      console.log(
+        `[TabStateManager] 📊 Available tab IDs in storage:`,
+        Object.keys(states)
+      );
+
+      // 🆕 AGGRESSIVE FALLBACK: Always try to initialize if tab exists
+      const fallbackStartTime = Date.now();
+      console.log(
+        `[TabStateManager] ========== AGGRESSIVE FALLBACK START ==========`
+      );
+      console.log(`[TabStateManager] 🔄 AGGRESSIVE FALLBACK for tab ${tabId}`);
+      console.log(
+        `[TabStateManager] ⏱️ Fallback start time: ${fallbackStartTime}`
+      );
+      console.log(`[TabStateManager] 🔍 Checking initialization locks...`);
+      console.log(
+        `[TabStateManager] 📊 Current locks:`,
+        Array.from(this.initializationLocks.keys())
+      );
+
+      // Check if initialization lock already exists
+      if (this.initializationLocks.has(tabId)) {
+        console.log(
+          `[TabStateManager] ⏳ WAITING for existing initialization lock for tab ${tabId}...`
+        );
+        const lockWaitStart = Date.now();
+
+        try {
+          await this.initializationLocks.get(tabId);
+          const lockWaitDuration = Date.now() - lockWaitStart;
+          console.log(
+            `[TabStateManager] 🔓 Initialization lock RELEASED after ${lockWaitDuration}ms`
+          );
+          console.log(
+            `[TabStateManager] 🔍 Lock released, checking state again...`
+          );
+        } catch (lockError) {
+          console.error(`[TabStateManager] ❌ Lock wait error:`, lockError);
+        }
+      }
+
+      try {
+        console.log(
+          `[TabStateManager] 📞 Calling chrome.tabs.get(${tabId})...`
+        );
+        const tabGetStartTime = Date.now();
+
+        const tab = await new Promise<chrome.tabs.Tab | null>((resolve) => {
+          console.log(
+            `[TabStateManager] 🟡 tabs.get Promise created at: ${Date.now()}`
+          );
+
+          chrome.tabs.get(tabId, (result) => {
+            const callbackTime = Date.now();
+            const duration = callbackTime - tabGetStartTime;
+
+            if (chrome.runtime.lastError) {
+              console.error(
+                `[TabStateManager] ❌ TAB ${tabId} NOT FOUND via tabs.get:`,
+                {
+                  error: chrome.runtime.lastError.message,
+                  duration: `${duration}ms`,
+                  callbackTime: callbackTime,
+                  startTime: tabGetStartTime,
+                }
+              );
+              console.error(
+                `[TabStateManager] 🔍 LastError details:`,
+                chrome.runtime.lastError
+              );
+              resolve(null);
+              return;
+            }
+
+            console.log(
+              `[TabStateManager] ✅ TAB ${tabId} FOUND via tabs.get:`,
+              {
+                exists: !!result,
+                tabId: result?.id,
+                url: result?.url,
+                urlShort: result?.url?.substring(0, 100),
+                title: result?.title,
+                status: result?.status,
+                discarded: result?.discarded,
+                duration: `${duration}ms`,
+              }
+            );
+
+            if (result) {
+              console.log(`[TabStateManager] 🔍 Tab ${tabId} properties:`, {
+                windowId: result.windowId,
+                active: result.active,
+                highlighted: result.highlighted,
+                pinned: result.pinned,
+                incognito: result.incognito,
+                audible: result.audible,
+                mutedInfo: result.mutedInfo,
+              });
+
+              // Check if it's a DeepSeek tab
+              const isDeepSeek = result.url?.includes("deepseek.com");
+              const isChatGPT =
+                result.url?.includes("chatgpt.com") ||
+                result.url?.includes("openai.com");
+              console.log(`[TabStateManager] 🔍 Tab ${tabId} type check:`, {
+                isDeepSeek: isDeepSeek,
+                isChatGPT: isChatGPT,
+                isValidAI: isDeepSeek || isChatGPT,
+              });
+            }
+
+            resolve(result);
+          });
+        });
+
+        console.log(`[TabStateManager] 🔍 Tab ${tabId} info:`, {
+          exists: !!tab,
+          url: tab?.url,
+          title: tab?.title,
+          status: tab?.status,
+          discarded: tab?.discarded,
+        });
+
+        if (
+          tab &&
+          (tab.url?.includes("deepseek.com") ||
+            tab.url?.includes("chatgpt.com") ||
+            tab.url?.includes("openai.com"))
+        ) {
+          console.log(
+            `[TabStateManager] ✅ Tab ${tabId} is valid AI chat tab, forcing initialization...`
+          );
+
+          // Check if initialization lock already exists
+          if (this.initializationLocks.has(tabId)) {
+            console.log(
+              `[TabStateManager] ⏳ Waiting for existing initialization lock for tab ${tabId}...`
+            );
+            await this.initializationLocks.get(tabId);
+            console.log(
+              `[TabStateManager] 🔓 Initialization lock released for tab ${tabId}`
+            );
+          }
+
+          // Force initialize
+          await this.initializeNewTab(tabId);
+          console.log(
+            `[TabStateManager] ✅ Force initialization completed for tab ${tabId}`
+          );
+
+          // Read again
+          const retryResult = await chrome.storage.session.get([
+            this.STORAGE_KEY,
+          ]);
+          const retryStates =
+            (retryResult && retryResult[this.STORAGE_KEY]) || {};
+          const retryState = retryStates[tabId] || null;
+
+          console.log(`[TabStateManager] 🔍 Re-check after initialization:`, {
+            hasState: !!retryState,
+            state: retryState,
+          });
+
+          if (retryState) {
+            console.log(
+              `[TabStateManager] 🎉 Successfully retrieved state after aggressive fallback:`,
+              {
+                tabId,
+                status: retryState.status,
+                requestId: retryState.requestId,
+                folderPath: retryState.folderPath,
+              }
+            );
+
+            this.setCachedState(tabId, retryState);
+            return retryState;
+          } else {
+            console.error(
+              `[TabStateManager] ❌ Still no state after aggressive initialization for tab ${tabId}`
+            );
+            console.error(
+              `[TabStateManager] 📊 Storage contents after initialization:`,
+              retryStates
+            );
+          }
+        } else {
+          console.warn(
+            `[TabStateManager] ⚠️ Tab ${tabId} is NOT a valid AI chat tab or doesn't exist`
+          );
+        }
+      } catch (fallbackError) {
+        console.error(
+          `[TabStateManager] ❌ Aggressive fallback failed:`,
+          fallbackError
+        );
+      }
+
+      return null;
+    } catch (error) {
+      console.error(`[TabStateManager] ❌ Exception in getTabState:`, error);
+      return null;
+    }
   }
 
   public getEnabled(): boolean {

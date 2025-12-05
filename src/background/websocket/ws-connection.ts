@@ -138,6 +138,11 @@ export class WSConnection {
         };
 
         this.ws.onmessage = (event) => {
+          console.log(`[WSConnection] 📨 Message received from Zen:`, {
+            connectionId: this.state.id,
+            dataLength: event.data?.length || 0,
+            timestamp: Date.now(),
+          });
           this.handleMessage(event.data);
         };
       } catch (error) {
@@ -179,11 +184,63 @@ export class WSConnection {
   }
 
   private async handleMessage(data: string): Promise<void> {
+    const receiveTime = Date.now();
+    console.log(`[WSConnection] ========== HANDLE MESSAGE START ==========`);
+    console.log(`[WSConnection] 📥 RAW MESSAGE RECEIVED:`, {
+      connectionId: this.state.id,
+      connectionStatus: this.state.status,
+      wsReadyState: this.ws?.readyState,
+      dataLength: data.length,
+      dataPreview: data.substring(0, 500),
+      timestamp: receiveTime,
+    });
+
     try {
+      const parseStart = Date.now();
       const message = JSON.parse(data);
+      const parseTime = Date.now() - parseStart;
+
+      console.log(`[WSConnection] ✅ JSON PARSED in ${parseTime}ms`);
+      console.log(`[WSConnection] 🔍 PARSED MESSAGE STRUCTURE:`, {
+        type: message.type,
+        hasTabId: !!message.tabId,
+        tabId: message.tabId,
+        hasRequestId: !!message.requestId,
+        requestId: message.requestId,
+        timestamp: message.timestamp,
+        messageAge: message.timestamp ? receiveTime - message.timestamp : "N/A",
+        allKeys: Object.keys(message),
+      });
+
+      console.log(`[WSConnection] 📊 MESSAGE TYPE: ${message.type}`);
+
+      if (message.type === "sendPrompt") {
+        console.log(`[WSConnection] 🎯 SEND PROMPT MESSAGE DETAILS:`, {
+          tabId: message.tabId,
+          requestId: message.requestId,
+          userPromptLength: message.userPrompt?.length || 0,
+          userPreview: message.userPrompt?.substring(0, 100),
+          systemPromptLength: message.systemPrompt?.length || 0,
+          isNewTask: message.isNewTask,
+          folderPath: message.folderPath,
+          hasFolderPath: !!message.folderPath,
+        });
+      }
+
+      if (!message.timestamp) {
+        const newTimestamp = Date.now();
+        message.timestamp = newTimestamp;
+        console.log(
+          `[WSConnection] ⚠️ Message missing timestamp, added: ${newTimestamp}`
+        );
+      }
 
       if (!message.timestamp) {
         message.timestamp = Date.now();
+        console.log(
+          `[WSConnection] ⚠️ Message missing timestamp, added:`,
+          message.timestamp
+        );
       }
 
       // CRITICAL: Handle ping messages - reply with pong
@@ -443,27 +500,85 @@ export class WSConnection {
       }
 
       const messageTimestamp = message.timestamp || 0;
+      const messageAge =
+        messageTimestamp > 0 ? Date.now() - messageTimestamp : 0;
+
+      console.log(`[WSConnection] ⏱️ Message timestamp check:`, {
+        messageTimestamp,
+        currentTime: Date.now(),
+        messageAge,
+        maxAge: 60000,
+        willSkip: messageAge > 60000,
+      });
+
       if (messageTimestamp === 0) {
+        console.log(
+          `[WSConnection] ⚠️ Message has no timestamp, will process anyway`
+        );
       } else {
-        const messageAge = Date.now() - messageTimestamp;
         if (messageAge > 60000) {
+          console.error(
+            `[WSConnection] ❌ Message too old (${messageAge}ms), skipping!`
+          );
           return;
         }
       }
 
+      console.log(`[WSConnection] 💾 Saving message to storage:`, {
+        connectionId: this.state.id,
+        messageType: message.type,
+        requestId: message.requestId,
+      });
+
       chrome.storage.local.get(["wsMessages"], (result) => {
         const messages = result.wsMessages || {};
+        console.log(`[WSConnection] 📊 Current wsMessages:`, {
+          connectionCount: Object.keys(messages).length,
+          hasThisConnection: !!messages[this.state.id],
+          thisConnectionMessageCount: messages[this.state.id]?.length || 0,
+        });
+
         if (!messages[this.state.id]) {
           messages[this.state.id] = [];
+          console.log(
+            `[WSConnection] 🆕 Created new message array for connection ${this.state.id}`
+          );
         }
 
-        const isDuplicate = messages[this.state.id].some(
-          (existing: any) => existing.data.requestId === message.requestId
-        );
+        console.log(`[WSConnection] 🔍 Checking for duplicates:`, {
+          requestId: message.requestId,
+          existingRequestIds: messages[this.state.id].map(
+            (m: any) => m.data.requestId
+          ),
+        });
+
+        // 🆕 CRITICAL FIX: Chỉ check duplicate cho messages CÓ requestId
+        // Messages như focusedTabsUpdate, ping, pong KHÔNG có requestId → skip duplicate check
+        const isDuplicate = message.requestId
+          ? messages[this.state.id].some(
+              (existing: any) => existing.data.requestId === message.requestId
+            )
+          : false;
 
         if (isDuplicate) {
+          console.error(
+            `[WSConnection] ❌ DUPLICATE MESSAGE DETECTED, SKIPPING:`,
+            {
+              requestId: message.requestId,
+              messageType: message.type,
+              existingCount: messages[this.state.id].length,
+            }
+          );
           return;
         }
+
+        // 🆕 LOG: Confirm message will be saved
+        console.log(`[WSConnection] ✅ Message passed duplicate check:`, {
+          type: message.type,
+          requestId: message.requestId || "no-request-id",
+          hasRequestId: !!message.requestId,
+          willSave: true,
+        });
 
         let sanitizedMessage = message;
         if (message.type === "promptResponse" && message.response) {
@@ -490,9 +605,40 @@ export class WSConnection {
           messages[this.state.id] = messages[this.state.id].slice(-50);
         }
 
-        chrome.storage.local.set({ wsMessages: messages });
+        chrome.storage.local.set({ wsMessages: messages }, () => {
+          console.log(`[WSConnection] ✅ Message saved to storage:`, {
+            requestId: message.requestId,
+            type: message.type,
+            connectionId: this.state.id,
+            totalMessages: messages[this.state.id].length,
+          });
+
+          // Verify save
+          chrome.storage.local.get(["wsMessages"], (verifyResult) => {
+            const verifyMessages = verifyResult.wsMessages || {};
+            const saved = verifyMessages[this.state.id]?.find(
+              (m: any) => m.data.requestId === message.requestId
+            );
+
+            if (saved) {
+              console.log(
+                `[WSConnection] ✅ VERIFIED: Message saved successfully`
+              );
+            } else {
+              console.error(
+                `[WSConnection] ❌ VERIFICATION FAILED: Message NOT found in storage!`
+              );
+            }
+          });
+        });
       });
-    } catch (error) {}
+    } catch (error) {
+      console.error(`[WSConnection] ❌ Exception in handleMessage:`, {
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+        messagePreview: data.substring(0, 200),
+      });
+    }
   }
 
   private notifyStateChange(): void {

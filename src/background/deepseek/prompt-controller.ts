@@ -878,48 +878,216 @@ REMEMBER:
   private static async validateTab(
     tabId: number
   ): Promise<{ isValid: boolean; error?: string }> {
+    console.log(`[PromptController] 🔍 VALIDATE TAB START - tabId: ${tabId}`);
+    console.log(`[PromptController] ⏱️ Validation timestamp: ${Date.now()}`);
+
     try {
       const browserAPI = getBrowserAPI();
 
+      console.log(
+        `[PromptController] 📌 STEP 1: Calling browserAPI.tabs.get(${tabId})...`
+      );
+      console.log(`[PromptController] 💡 Current time: ${Date.now()}`);
+
       const tab = await new Promise<chrome.tabs.Tab>((resolve, reject) => {
+        const startTime = Date.now();
+        console.log(
+          `[PromptController] 🟡 Promise started at: ${startTime}, tabId: ${tabId}`
+        );
+
         browserAPI.tabs.get(tabId, (result: chrome.tabs.Tab) => {
+          const endTime = Date.now();
+          const duration = endTime - startTime;
+          console.log(
+            `[PromptController] 🔵 tabs.get callback called after ${duration}ms`
+          );
+
           if (browserAPI.runtime.lastError) {
+            console.error(
+              `[PromptController] ❌ TAB ${tabId} GET ERROR:`,
+              browserAPI.runtime.lastError
+            );
+            console.error(
+              `[PromptController] 📍 Error details:`,
+              JSON.stringify(browserAPI.runtime.lastError, null, 2)
+            );
             reject(new Error(`Invalid tab ID: ${tabId}`));
             return;
           }
+
           if (!result) {
+            console.error(`[PromptController] ❌ Tab ${tabId} not found`);
+            console.error(
+              `[PromptController] 🔍 Callback result:`,
+              typeof result,
+              result
+            );
             reject(new Error(`Tab not found: ${tabId}`));
             return;
           }
+
+          console.log(`[PromptController] ✅ TAB ${tabId} INFO RETRIEVED:`, {
+            tabId: result.id,
+            url: result.url,
+            urlShort: result.url?.substring(0, 100),
+            title: result.title,
+            titleShort: result.title?.substring(0, 50),
+            status: result.status,
+            active: result.active,
+            discarded: result.discarded,
+            loading: result.status === "loading",
+            windowId: result.windowId,
+            pinned: result.pinned,
+            highlighted: result.highlighted,
+            incognito: result.incognito,
+          });
+
+          console.log(
+            `[PromptController] 🔍 Tab ${tabId} URL check:`,
+            result.url?.startsWith("https://chat.deepseek.com")
+              ? "✅ DeepSeek URL"
+              : "❌ Not DeepSeek"
+          );
+
           resolve(result);
         });
       });
 
+      console.log(`[PromptController] ✅ STEP 1 COMPLETE - Got tab ${tabId}`);
+      console.log(
+        `[PromptController] ⏱️ Step 1 duration: ${
+          Date.now() - (Date.now() - 100)
+        }ms`
+      );
+
       if (!tab.url?.startsWith("https://chat.deepseek.com")) {
+        console.error(`[PromptController] ❌ Tab is not DeepSeek page:`, {
+          tabId,
+          url: tab.url,
+        });
         return {
           isValid: false,
           error: `Tab is not DeepSeek page: ${tab.url}`,
         };
       }
 
+      console.log(
+        `[PromptController] 📌 Step 2: Getting tab state from TabStateManager...`
+      );
+
       const tabState = await this.tabStateManager.getTabState(tabId);
 
+      console.log(`[PromptController] 📊 Tab state retrieved:`, {
+        tabId,
+        hasState: !!tabState,
+        status: tabState?.status,
+        requestId: tabState?.requestId,
+        requestCount: tabState?.requestCount,
+        folderPath: tabState?.folderPath,
+      });
+
+      // 🆕 AGGRESSIVE FALLBACK: Nếu không có state, thử initialize ngay
       if (!tabState) {
-        return {
-          isValid: false,
-          error: `Tab ${tabId} state not found in TabStateManager after fallback attempts`,
-        };
+        console.warn(
+          `[PromptController] ⚠️ Tab state not found, attempting fallback initialization...`
+        );
+
+        try {
+          console.log(
+            `[PromptController] 🔄 Force initializing tab ${tabId} in TabStateManager...`
+          );
+
+          await (this.tabStateManager as any).initializeNewTab(tabId);
+
+          console.log(
+            `[PromptController] 🔄 Retrying getTabState after initialization...`
+          );
+          const retryTabState = await this.tabStateManager.getTabState(tabId);
+
+          if (retryTabState) {
+            console.log(
+              `[PromptController] ✅ Fallback successful! Tab state now:`,
+              {
+                tabId,
+                status: retryTabState.status,
+                requestId: retryTabState.requestId,
+                requestCount: retryTabState.requestCount,
+              }
+            );
+
+            // Check status
+            if (retryTabState.status !== "free") {
+              console.error(
+                `[PromptController] ❌ Tab status is not 'free' after fallback:`,
+                {
+                  tabId,
+                  status: retryTabState.status,
+                }
+              );
+              return {
+                isValid: false,
+                error: `Tab ${tabId} is currently ${retryTabState.status} (after fallback init)`,
+              };
+            }
+
+            console.log(
+              `[PromptController] ✅ Tab validation PASSED after fallback:`,
+              {
+                tabId,
+                status: retryTabState.status,
+                isValid: true,
+              }
+            );
+
+            return { isValid: true };
+          } else {
+            console.error(
+              `[PromptController] ❌ Fallback initialization failed, still no state for tab ${tabId}`
+            );
+            return {
+              isValid: false,
+              error: `Tab ${tabId} state not found even after fallback initialization`,
+            };
+          }
+        } catch (fallbackError) {
+          console.error(
+            `[PromptController] ❌ Fallback initialization error:`,
+            fallbackError
+          );
+          return {
+            isValid: false,
+            error: `Failed to initialize tab ${tabId}: ${
+              fallbackError instanceof Error
+                ? fallbackError.message
+                : String(fallbackError)
+            }`,
+          };
+        }
       }
 
+      console.log(`[PromptController] 📌 Step 3: Checking tab status...`);
+
       if (tabState.status !== "free") {
+        console.error(`[PromptController] ❌ Tab status is not 'free':`, {
+          tabId,
+          status: tabState.status,
+          canAcceptRequest: false,
+        });
         return {
           isValid: false,
           error: `Tab ${tabId} is currently ${tabState.status}`,
         };
       }
 
+      console.log(`[PromptController] ✅ Tab validation PASSED:`, {
+        tabId,
+        status: tabState.status,
+        isValid: true,
+      });
+
       return { isValid: true };
     } catch (error) {
+      console.error(`[PromptController] ❌ Validation exception:`, error);
       return {
         isValid: false,
         error:
@@ -966,34 +1134,138 @@ REMEMBER:
     requestIdOrIsNewTask?: string | boolean,
     isNewTask?: boolean
   ): Promise<boolean> {
+    console.log(
+      `[PromptController] 🚀 ========== SEND PROMPT START ==========`
+    );
+    console.log(`[PromptController] 📍 Entry timestamp: ${Date.now()}`);
+    console.log(`[PromptController] 📊 Raw arguments:`, {
+      tabId,
+      promptOrSystemPrompt_type: typeof promptOrSystemPrompt,
+      promptOrSystemPrompt_length: promptOrSystemPrompt?.length || 0,
+      promptOrSystemPrompt_preview: promptOrSystemPrompt?.substring(0, 100),
+      userPromptOrRequestId_type: typeof userPromptOrRequestId,
+      userPromptOrRequestId_value: userPromptOrRequestId?.substring(0, 100),
+      requestIdOrIsNewTask_type: typeof requestIdOrIsNewTask,
+      requestIdOrIsNewTask_value: requestIdOrIsNewTask,
+      isNewTask_type: typeof isNewTask,
+      isNewTask_value: isNewTask,
+    });
+
     let finalPrompt: string = "";
     let requestId: string = "unknown";
     let isNewTaskFlag: boolean = false;
 
     try {
+      console.log(`[PromptController] 🔍 Determining overload type...`);
+
       if (typeof requestIdOrIsNewTask === "string") {
+        console.log(
+          `[PromptController] 🔀 OVERLOAD 2: systemPrompt + userPrompt`
+        );
         const systemPrompt = promptOrSystemPrompt;
         const userPrompt = userPromptOrRequestId;
         requestId = requestIdOrIsNewTask;
         isNewTaskFlag = isNewTask === true;
 
+        console.log(`[PromptController] 📝 Parsed values:`, {
+          systemPrompt_length: systemPrompt?.length || 0,
+          systemPrompt_preview: systemPrompt?.substring(0, 100),
+          userPrompt_length: userPrompt?.length || 0,
+          userPrompt_preview: userPrompt?.substring(0, 100),
+          requestId,
+          isNewTaskFlag,
+        });
+
+        console.log(`[PromptController] 🔧 Building final prompt...`);
         finalPrompt = this.buildFinalPrompt(systemPrompt, userPrompt);
+        console.log(
+          `[PromptController] ✅ Final prompt built: ${finalPrompt.length} chars`
+        );
       } else {
-        // Overload 1: (tabId, prompt, requestId, isNewTask?)
+        console.log(`[PromptController] 🔀 OVERLOAD 1: single prompt`);
         finalPrompt = promptOrSystemPrompt;
         requestId = userPromptOrRequestId;
         isNewTaskFlag = requestIdOrIsNewTask === true;
+
+        console.log(`[PromptController] 📝 Parsed values:`, {
+          finalPrompt_length: finalPrompt?.length || 0,
+          finalPrompt_preview: finalPrompt?.substring(0, 100),
+          requestId,
+          isNewTaskFlag,
+        });
       }
 
+      console.log(`[PromptController] ✅ Argument parsing complete`);
+      console.log(`[PromptController] 📊 Final values:`, {
+        tabId,
+        requestId,
+        finalPrompt_length: finalPrompt.length,
+        isNewTaskFlag,
+      });
+
+      console.log(`[PromptController] 🔍 STEP 1: Validating tab ${tabId}...`);
+      console.log(`[PromptController] ⏱️ Validation start time: ${Date.now()}`);
+
       const validation = await this.validateTab(tabId);
+
+      console.log(`[PromptController] 📊 Validation result:`, {
+        isValid: validation.isValid,
+        error: validation.error,
+        tabId,
+        timestamp: Date.now(),
+      });
+
       if (!validation.isValid) {
-        console.error(
-          `[PromptController] ❌ Tab validation failed: ${validation.error}`
-        );
+        console.error(`[PromptController] ❌ Tab validation FAILED`);
+        console.error(`[PromptController] 📍 Error details:`, {
+          tabId,
+          error: validation.error,
+          requestId,
+        });
+        console.error(`[PromptController] 💡 This means:`);
+        console.error(`  - Tab không tồn tại HOẶC`);
+        console.error(`  - Tab không phải DeepSeek page HOẶC`);
+        console.error(`  - Tab state không hợp lệ (status !== 'free')`);
 
         const browserAPI = getBrowserAPI();
         try {
-          // Gửi validation error qua WSManager
+          // Đọc connectionId từ wsMessages để biết gửi cho connection nào
+          const messagesResult = await new Promise<any>((resolve, reject) => {
+            browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+              if (browserAPI.runtime.lastError) {
+                reject(browserAPI.runtime.lastError);
+                return;
+              }
+              resolve(data || {});
+            });
+          });
+
+          const wsMessages = messagesResult?.wsMessages || {};
+          let targetConnectionId: string | null = null;
+
+          // Tìm connectionId từ original sendPrompt message
+          for (const [connId, msgArray] of Object.entries(wsMessages)) {
+            const msgs = msgArray as Array<{ timestamp: number; data: any }>;
+            const matchingMsg = msgs.find(
+              (msg) =>
+                msg.data?.requestId === requestId &&
+                msg.data?.type === "sendPrompt"
+            );
+            if (matchingMsg) {
+              targetConnectionId = connId;
+              break;
+            }
+          }
+
+          if (!targetConnectionId) {
+            console.error(
+              "[PromptController] ❌ Cannot find connectionId for request:",
+              requestId
+            );
+            return false;
+          }
+
+          // Gửi validation error qua wsOutgoingMessage
           const validationErrorData = {
             type: "promptResponse",
             requestId: requestId,
@@ -1004,22 +1276,28 @@ REMEMBER:
             timestamp: Date.now(),
           };
 
-          const sendMessagePromise = browserAPI.runtime.sendMessage({
-            action: "ws.sendResponse",
-            requestId: requestId,
-            data: validationErrorData,
+          await new Promise<void>((resolve, reject) => {
+            browserAPI.storage.local.set(
+              {
+                wsOutgoingMessage: {
+                  connectionId: targetConnectionId,
+                  data: validationErrorData,
+                  timestamp: Date.now(),
+                },
+              },
+              () => {
+                if (browserAPI.runtime.lastError) {
+                  reject(browserAPI.runtime.lastError);
+                  return;
+                }
+                resolve();
+              }
+            );
           });
 
-          if (
-            sendMessagePromise &&
-            typeof sendMessagePromise.catch === "function"
-          ) {
-            sendMessagePromise.catch(() => {
-              console.error(
-                "[PromptController] ❌ Failed to send validation error"
-              );
-            });
-          }
+          console.log(
+            `[PromptController] ✅ Validation error sent to connection ${targetConnectionId}`
+          );
         } catch (notifyError) {
           console.error(
             `[PromptController] ❌ Failed to notify Backend:`,
@@ -1140,6 +1418,9 @@ REMEMBER:
         ) as HTMLButtonElement;
 
         if (!sendButton) {
+          console.error(
+            `[PromptController/Script] ❌ Send button NOT FOUND in DeepSeek page`
+          );
           return {
             success: false,
             reason: "button_not_found",
@@ -1152,6 +1433,10 @@ REMEMBER:
             },
           };
         }
+
+        console.log(
+          `[PromptController/Script] ✅ Send button FOUND, checking state...`
+        );
 
         const isDisabled = sendButton.classList.contains(
           "ds-icon-button--disabled"
@@ -1242,6 +1527,12 @@ REMEMBER:
       });
 
       if (clickResult && clickResult.success) {
+        console.log(`[PromptController] ✅ Button click SUCCESS:`, {
+          tabId,
+          requestId,
+          clickReason: clickResult.reason || "clicked",
+          timestamp: Date.now(),
+        });
         const clickTimestamp = Date.now();
         this.monitorButtonStateUntilComplete(tabId, requestId, clickTimestamp);
       } else {
@@ -1252,11 +1543,29 @@ REMEMBER:
         console.error(
           `[PromptController] 💡 Hint: Button may be disabled due to DeepSeek UI validation or tab is currently processing another request.`
         );
+
+        // 🔥 CRITICAL FIX: Mark tab FREE VÀ cleanup active polling
+        this.activePollingTasks.delete(tabId);
         await this.tabStateManager.markTabFree(tabId);
+
+        console.log(
+          `[PromptController] 🧹 Cleaned up polling task and marked tab FREE:`,
+          {
+            tabId,
+            requestId,
+            activePollingCount: this.activePollingTasks.size,
+          }
+        );
+
         return false;
       }
 
       this.activePollingTasks.set(tabId, requestId);
+      console.log(`[PromptController] 🔄 Starting response polling:`, {
+        tabId,
+        requestId,
+        activePollingCount: this.activePollingTasks.size,
+      });
       this.startResponsePolling(tabId, requestId, finalPrompt);
 
       return true;

@@ -73,24 +73,74 @@ export class DeepSeekController {
     requestIdOrIsNewTask?: string | boolean,
     isNewTask?: boolean
   ): Promise<boolean> {
+    console.log(`[DeepSeekController] 🎯 sendPrompt() ENTRY POINT`);
+    console.log(`[DeepSeekController] 📊 Raw arguments:`, {
+      tabId,
+      promptOrSystemPrompt_type: typeof promptOrSystemPrompt,
+      promptOrSystemPrompt_length: promptOrSystemPrompt?.length || 0,
+      userPromptOrRequestId_type: typeof userPromptOrRequestId,
+      userPromptOrRequestId_value: userPromptOrRequestId?.substring(0, 50),
+      requestIdOrIsNewTask_type: typeof requestIdOrIsNewTask,
+      requestIdOrIsNewTask_value: requestIdOrIsNewTask,
+      isNewTask_type: typeof isNewTask,
+      isNewTask_value: isNewTask,
+    });
+
     // Delegate to PromptController với đúng arguments
     if (typeof requestIdOrIsNewTask === "string") {
       // Overload 2: (tabId, systemPrompt, userPrompt, requestId, isNewTask?)
-      return PromptController.sendPrompt(
+      console.log(
+        `[DeepSeekController] 🔀 Using Overload 2 (systemPrompt + userPrompt)`
+      );
+      console.log(`[DeepSeekController] 🔍 Parsed arguments:`, {
+        tabId,
+        systemPrompt: promptOrSystemPrompt
+          ? `${promptOrSystemPrompt.length} chars`
+          : "null",
+        userPrompt: userPromptOrRequestId?.substring(0, 50),
+        requestId: requestIdOrIsNewTask,
+        isNewTask,
+      });
+
+      console.log(
+        `[DeepSeekController] 📞 Calling PromptController.sendPrompt()...`
+      );
+      const result = await PromptController.sendPrompt(
         tabId,
         promptOrSystemPrompt,
         userPromptOrRequestId,
         requestIdOrIsNewTask,
         isNewTask
       );
+      console.log(
+        `[DeepSeekController] ✅ PromptController.sendPrompt() returned:`,
+        result
+      );
+      return result;
     } else {
       // Overload 1: (tabId, prompt, requestId, isNewTask?)
-      return PromptController.sendPrompt(
+      console.log(`[DeepSeekController] 🔀 Using Overload 1 (single prompt)`);
+      console.log(`[DeepSeekController] 🔍 Parsed arguments:`, {
+        tabId,
+        prompt: (promptOrSystemPrompt || "").substring(0, 50),
+        requestId: userPromptOrRequestId,
+        isNewTask: requestIdOrIsNewTask,
+      });
+
+      console.log(
+        `[DeepSeekController] 📞 Calling PromptController.sendPrompt()...`
+      );
+      const result = await PromptController.sendPrompt(
         tabId,
         promptOrSystemPrompt || "",
         userPromptOrRequestId,
         requestIdOrIsNewTask
       );
+      console.log(
+        `[DeepSeekController] ✅ PromptController.sendPrompt() returned:`,
+        result
+      );
+      return result;
     }
   }
 
