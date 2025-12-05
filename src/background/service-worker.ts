@@ -409,39 +409,18 @@ declare const browser: typeof chrome & any;
                       success,
                       requestId,
                       tabId,
-                      timestamp: Date.now(),
                     }
                   );
 
                   if (success) {
-                    console.log(
-                      `[ServiceWorker] ✅ Prompt sent successfully, polling will handle response:`,
-                      {
-                        requestId,
-                        tabId,
-                        willRemoveProcessedKeyIn: "120 seconds",
-                      }
-                    );
                     setTimeout(() => {
                       browserAPI.storage.local.remove([requestKey]);
                     }, 120000);
                   } else {
                     console.error(
-                      `[ServiceWorker] ❌ Failed to send prompt at sendPrompt() level:`,
-                      {
-                        requestId,
-                        tabId,
-                        reason:
-                          "Button click failed or textarea fill failed or validation failed",
-                      }
-                    );
-                    console.error(
-                      `[ServiceWorker] 📤 Notifying frontend about failure...`
+                      `[ServiceWorker] ❌ Failed to send prompt, notifying backend...`
                     );
 
-                    // 🔥 CRITICAL FIX: Chỉ gửi error response nếu sendPrompt() THỰC SỰ fail
-                    // (button click fail, textarea fill fail, validation fail)
-                    // KHÔNG gửi error nếu response polling đang chạy
                     browserAPI.storage.local.set({
                       wsOutgoingMessage: {
                         connectionId: connectionId,
@@ -457,17 +436,11 @@ declare const browser: typeof chrome & any;
                             userPromptLength: userPrompt.length,
                             hasSystemPrompt: !!systemPrompt,
                             timestamp: Date.now(),
-                            reason:
-                              "sendPrompt() returned false - button click or textarea fill failed",
                           },
                         },
                         timestamp: Date.now(),
                       },
                     });
-
-                    console.log(
-                      `[ServiceWorker] ✅ Error response sent to frontend`
-                    );
 
                     browserAPI.storage.local.remove([requestKey]);
                   }
@@ -485,74 +458,6 @@ declare const browser: typeof chrome & any;
                 error
               );
               browserAPI.storage.local.remove([requestKey]);
-            }
-          })();
-        }
-      }
-    }
-
-    // 🆕 HANDLE sendPrompt message từ Zen Extension
-    if (changes.wsMessages) {
-      const messages = changes.wsMessages.newValue || {};
-
-      for (const [connectionId, msgArray] of Object.entries(messages)) {
-        const msgs = msgArray as Array<{ timestamp: number; data: any }>;
-
-        const recentMsgs = msgs.filter((msg) => {
-          const age = Date.now() - msg.timestamp;
-          return age < 180000; // 180 seconds
-        });
-
-        if (recentMsgs.length === 0) continue;
-
-        // Get latest message
-        const latestMsg = recentMsgs[recentMsgs.length - 1];
-
-        // 🆕 CRITICAL: Handle sendPrompt từ Zen
-        if (latestMsg.data.type === "sendPrompt") {
-          const { tabId, systemPrompt, userPrompt, requestId, isNewTask } =
-            latestMsg.data;
-
-          if (!tabId || !userPrompt || !requestId) {
-            console.error(`[ServiceWorker] ❌ Invalid sendPrompt message`);
-            continue;
-          }
-
-          // Forward to DeepSeekController
-          (async () => {
-            try {
-              const success = await DeepSeekController.sendPrompt(
-                tabId,
-                systemPrompt || null,
-                userPrompt,
-                requestId,
-                isNewTask === true
-              );
-
-              if (!success) {
-                console.error(`[ServiceWorker] ❌ Failed to send prompt`);
-
-                // Send error response back to Zen
-                browserAPI.storage.local.set({
-                  wsOutgoingMessage: {
-                    connectionId: connectionId,
-                    data: {
-                      type: "promptResponse",
-                      requestId: requestId,
-                      tabId: tabId,
-                      success: false,
-                      error: "Failed to send prompt to DeepSeek",
-                      timestamp: Date.now(),
-                    },
-                    timestamp: Date.now(),
-                  },
-                });
-              }
-            } catch (error) {
-              console.error(
-                `[ServiceWorker] ❌ Exception sending prompt:`,
-                error
-              );
             }
           })();
         }
