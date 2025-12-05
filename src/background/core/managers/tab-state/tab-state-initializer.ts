@@ -139,6 +139,9 @@ export class TabStateInitializer {
       clearTimeout(timeoutId);
       this.initializationLocks.delete(tabId);
       resolveLock!();
+
+      // Notify UI về tab mới
+      await this.notifyUIUpdate();
     }
   }
 
@@ -278,6 +281,33 @@ export class TabStateInitializer {
       return buttonState.isBusy;
     } catch (error) {
       return false;
+    }
+  }
+
+  /**
+   * Notify UI về tab state changes
+   */
+  private async notifyUIUpdate(): Promise<void> {
+    try {
+      const browserAPI = this.getBrowserAPI();
+
+      const messagePayload = {
+        action: "tabsUpdated",
+        timestamp: Date.now(),
+      };
+
+      await new Promise<void>((resolve) => {
+        browserAPI.runtime.sendMessage(messagePayload, () => {
+          if (browserAPI.runtime.lastError) {
+            // Ignore no receivers error
+            resolve();
+            return;
+          }
+          resolve();
+        });
+      });
+    } catch (error) {
+      // Silent error handling
     }
   }
 

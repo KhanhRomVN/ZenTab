@@ -45,6 +45,10 @@ export class StartupManager {
       this.setupStorageCleanup();
 
       this.isInitialized = true;
+
+      // Step 5: Notify UI về initial state
+      await this.notifyUIInitialState();
+
       console.log("[StartupManager] ✅ System startup completed");
     } catch (error) {
       console.error("[StartupManager] ❌ System startup failed:", error);
@@ -312,11 +316,62 @@ export class StartupManager {
     // Unified Message Listener
     browserAPI.runtime.onMessage.addListener(
       (message: any, sender: any, sendResponse: any) => {
-        return messageHandler.handleMessage(message, sender, sendResponse);
+        // Wrap async handler và return true ngay lập tức để giữ channel mở
+        (async () => {
+          try {
+            await messageHandler.handleMessage(message, sender, sendResponse);
+          } catch (error) {
+            console.error("[StartupManager] ❌ Message handler error:", error);
+            sendResponse({
+              success: false,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        })();
+        return true; // CRITICAL: Return true để giữ message channel mở cho async response
       }
     );
 
     console.log("[StartupManager] ✅ Runtime message listener setup");
+  }
+
+  /**
+   * Notify UI về initial state sau khi startup
+   */
+  private async notifyUIInitialState(): Promise<void> {
+    try {
+      const browserAPI = this.getBrowserAPI();
+
+      const messagePayload = {
+        action: "tabsUpdated",
+        timestamp: Date.now(),
+      };
+
+      // Delay một chút để đảm bảo UI đã sẵn sàng
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      await new Promise<void>((resolve) => {
+        browserAPI.runtime.sendMessage(messagePayload, () => {
+          if (browserAPI.runtime.lastError) {
+            // Ignore no receivers error
+            console.log(
+              "[StartupManager] ⚠️ UI not ready to receive initial state"
+            );
+            resolve();
+            return;
+          }
+          console.log(
+            "[StartupManager] ✅ Initial state notification sent to UI"
+          );
+          resolve();
+        });
+      });
+    } catch (error) {
+      console.error(
+        "[StartupManager] ❌ Error notifying UI initial state:",
+        error
+      );
+    }
   }
 
   /**

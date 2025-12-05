@@ -74,6 +74,9 @@ export class TabStateScanner {
       // Save all states
       await this.saveAllStates(states);
 
+      // Notify UI về tab states
+      await this.notifyUIUpdate();
+
       console.log("[TabStateScanner] ✅ Tab scanning completed");
     } catch (error) {
       console.error("[TabStateScanner] ❌ Error scanning tabs:", error);
@@ -321,5 +324,32 @@ export class TabStateScanner {
       return chrome;
     }
     throw new Error("No browser API available");
+  }
+
+  /**
+   * Notify UI về tab state changes
+   */
+  private async notifyUIUpdate(): Promise<void> {
+    try {
+      const browserAPI = this.getBrowserAPI();
+
+      const messagePayload = {
+        action: "tabsUpdated",
+        timestamp: Date.now(),
+      };
+
+      await new Promise<void>((resolve, reject) => {
+        browserAPI.runtime.sendMessage(messagePayload, () => {
+          if (browserAPI.runtime.lastError) {
+            // Ignore no receivers error
+            resolve();
+            return;
+          }
+          resolve();
+        });
+      });
+    } catch (error) {
+      // Silent error handling
+    }
   }
 }
