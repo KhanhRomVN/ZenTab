@@ -97,56 +97,15 @@ declare const browser: typeof chrome & any;
   browserAPI.storage.onChanged.addListener((changes: any, areaName: string) => {
     if (areaName !== "local") return;
 
-    console.log(`[ServiceWorker] 📦 Storage changed:`, {
-      area: areaName,
-      hasWsMessages: !!changes.wsMessages,
-      hasWsIncomingRequest: !!changes.wsIncomingRequest,
-      changeKeys: Object.keys(changes),
-    });
-
     // Process incoming WebSocket messages
     if (changes.wsMessages) {
       const messages = changes.wsMessages.newValue || {};
-      const oldMessages = changes.wsMessages.oldValue || {};
-
-      console.log(
-        `[ServiceWorker] ==================== WS MESSAGES CHANGED ====================`
-      );
-      console.log(
-        `[ServiceWorker] 📨 New messages count: ${Object.values(
-          messages
-        ).reduce((acc, arr: any) => acc + arr.length, 0)}`
-      );
-      console.log(
-        `[ServiceWorker] 📨 Old messages count: ${Object.values(
-          oldMessages
-        ).reduce((acc, arr: any) => acc + arr.length, 0)}`
-      );
-      console.log(`[ServiceWorker] 📨 Connections:`, Object.keys(messages));
-
-      // Log chi tiết từng connection
-      for (const [connId, msgArray] of Object.entries(messages)) {
-        const msgs = msgArray as Array<{ timestamp: number; data: any }>;
-        console.log(
-          `[ServiceWorker] 📨 Connection ${connId}: ${msgs.length} messages`
-        );
-
-        msgs.forEach((msg, idx) => {
-          console.log(
-            `[ServiceWorker]   [${idx}] ${msg.data.type} - ${
-              msg.data.requestId || "no-request-id"
-            } - ${new Date(msg.timestamp).toISOString()}`
-          );
-        });
-      }
 
       if (Object.keys(messages).length === 0) {
-        console.log(`[ServiceWorker] ⚠️ wsMessages is empty, skipping`);
         return;
       }
 
       if (Object.keys(messages).length === 0) {
-        console.log(`[ServiceWorker] ⚠️ wsMessages is empty, skipping`);
         return;
       }
 
@@ -154,89 +113,20 @@ declare const browser: typeof chrome & any;
       for (const [connectionId, msgArray] of Object.entries(messages)) {
         const msgs = msgArray as Array<{ timestamp: number; data: any }>;
 
-        console.log(
-          `[ServiceWorker] 🔍 Processing connection ${connectionId}:`,
-          {
-            totalMessages: msgs.length,
-            messageTypes: msgs.map((m) => m.data.type),
-            requestIds: msgs.map((m) => m.data.requestId).filter(Boolean),
-          }
-        );
-
         const now = Date.now();
         const recentMsgs = msgs.filter((msg) => {
           const age = now - msg.timestamp;
           return age < 180000; // 180 seconds (3 minutes)
         });
 
-        console.log(`[ServiceWorker] ⏱️ Recent messages filter:`, {
-          totalMessages: msgs.length,
-          recentMessages: recentMsgs.length,
-          filteredOut: msgs.length - recentMsgs.length,
-          oldestAge:
-            msgs.length > 0
-              ? now - Math.min(...msgs.map((m) => m.timestamp))
-              : 0,
-        });
-
         if (recentMsgs.length === 0) {
-          console.log(
-            `[ServiceWorker] ⚠️ No recent messages for connection ${connectionId}, skipping`
-          );
           continue;
         }
 
         // Get latest message
         const latestMsg = recentMsgs[recentMsgs.length - 1];
 
-        console.log(`[ServiceWorker] 📬 Latest message:`, {
-          type: latestMsg.data.type,
-          requestId: latestMsg.data.requestId,
-          age: now - latestMsg.timestamp,
-          hasTabId: !!latestMsg.data.tabId,
-          hasUserPrompt: !!latestMsg.data.userPrompt,
-        });
-
         if (latestMsg.data.type === "sendPrompt") {
-          const detectionTime = Date.now();
-          console.log(
-            `[ServiceWorker] ====================================================`
-          );
-          console.log(
-            `[ServiceWorker] ========== SEND PROMPT DETECTED ==========`
-          );
-          console.log(`[ServiceWorker] ⏱️ Detection time: ${detectionTime}`);
-          console.log(`[ServiceWorker] 🔍 MESSAGE DETAILS:`, {
-            connectionId: connectionId,
-            messageIndex: recentMsgs.length - 1,
-            totalRecentMessages: recentMsgs.length,
-            messageAge: detectionTime - latestMsg.timestamp,
-          });
-
-          console.log(`[ServiceWorker] 🎯 MESSAGE PAYLOAD:`, {
-            requestId: latestMsg.data.requestId,
-            tabId: latestMsg.data.tabId,
-            hasUserPrompt: !!latestMsg.data.userPrompt,
-            userPromptLength: latestMsg.data.userPrompt?.length || 0,
-            userPromptPreview: latestMsg.data.userPrompt?.substring(0, 200),
-            hasSystemPrompt: !!latestMsg.data.systemPrompt,
-            systemPromptLength: latestMsg.data.systemPrompt?.length || 0,
-            systemPromptPreview: latestMsg.data.systemPrompt?.substring(0, 100),
-            isNewTask: latestMsg.data.isNewTask,
-            folderPath: latestMsg.data.folderPath,
-            timestamp: latestMsg.timestamp,
-            age: detectionTime - latestMsg.timestamp,
-            messageType: latestMsg.data.type,
-            rawMessage: JSON.stringify(latestMsg.data).substring(0, 500),
-          });
-
-          console.log(`[ServiceWorker] 📊 CONNECTION INFO:`, {
-            connectionId: connectionId,
-            totalConnections: Object.keys(messages).length,
-            allConnectionIds: Object.keys(messages),
-            thisConnectionMessageCount: msgs.length,
-          });
-
           const {
             tabId,
             systemPrompt,
@@ -245,48 +135,6 @@ declare const browser: typeof chrome & any;
             isNewTask,
             folderPath,
           } = latestMsg.data;
-
-          console.log(`[ServiceWorker] 🔍 PARSED FIELDS:`, {
-            tabId: tabId,
-            requestId: requestId,
-            userPromptLength: userPrompt?.length || 0,
-            systemPromptLength: systemPrompt?.length || 0,
-            isNewTask: isNewTask,
-            folderPath: folderPath,
-            hasAllRequiredFields: !!(tabId && userPrompt && requestId),
-            missingFields: {
-              tabId: !tabId,
-              userPrompt: !userPrompt,
-              requestId: !requestId,
-            },
-          });
-          console.log(
-            `[ServiceWorker] 🔍 User prompt preview: "${latestMsg.data.userPrompt?.substring(
-              0,
-              100
-            )}"`
-          );
-
-          console.log(`[ServiceWorker] 🔍 Parsed fields:`, {
-            tabId,
-            requestId,
-            userPromptLength: userPrompt?.length || 0,
-            systemPromptLength: systemPrompt?.length || 0,
-            isNewTask,
-            folderPath,
-          });
-
-          console.log(`[ServiceWorker] 🔍 sendPrompt validation:`, {
-            hasTabId: !!tabId,
-            tabIdValue: tabId,
-            hasUserPrompt: !!userPrompt,
-            userPromptLength: userPrompt?.length || 0,
-            hasRequestId: !!requestId,
-            requestIdValue: requestId,
-            hasSystemPrompt: !!systemPrompt,
-            hasFolderPath: !!folderPath,
-            isNewTask,
-          });
 
           if (!tabId || !userPrompt || !requestId) {
             console.error(
@@ -303,23 +151,10 @@ declare const browser: typeof chrome & any;
             continue;
           }
 
-          console.log(
-            `[ServiceWorker] ✅ sendPrompt validation passed, processing...`
-          );
-
           const requestKey = `processed_${requestId}`;
 
-          // Wrap in async IIFE to use await
           (async () => {
             try {
-              console.log(
-                `[ServiceWorker] 🔍 Checking if request already processed:`,
-                {
-                  requestKey,
-                  requestId,
-                }
-              );
-
               const result = await new Promise<any>((resolve) => {
                 browserAPI.storage.local.get([requestKey], (data: any) => {
                   resolve(data || {});
@@ -338,49 +173,17 @@ declare const browser: typeof chrome & any;
                 return;
               }
 
-              console.log(
-                `[ServiceWorker] ✅ Request not processed yet, marking as processed`
-              );
-
               // Mark as processed
               await new Promise<void>((resolve) => {
                 browserAPI.storage.local.set(
                   { [requestKey]: Date.now() },
                   () => {
-                    console.log(
-                      `[ServiceWorker] ✅ Request marked as processed:`,
-                      requestKey
-                    );
                     resolve();
                   }
                 );
               });
 
               const isNewTaskBool = isNewTask === true;
-
-              console.log(
-                `[ServiceWorker] 🚀 Calling DeepSeekController.sendPrompt:`,
-                {
-                  tabId,
-                  requestId,
-                  hasSystemPrompt: !!systemPrompt,
-                  userPromptLength: userPrompt.length,
-                  isNewTask: isNewTaskBool,
-                }
-              );
-
-              console.log(
-                `[ServiceWorker] 📞 BEFORE DeepSeekController.sendPrompt() call`
-              );
-              console.log(`[ServiceWorker] 🔍 Call arguments:`, {
-                arg1_tabId: tabId,
-                arg2_systemPrompt: systemPrompt
-                  ? `${systemPrompt.length} chars`
-                  : "null",
-                arg3_userPrompt: `${userPrompt.substring(0, 50)}...`,
-                arg4_requestId: requestId,
-                arg5_isNewTask: isNewTaskBool,
-              });
 
               const sendPromptPromise = DeepSeekController.sendPrompt(
                 tabId,
@@ -390,28 +193,8 @@ declare const browser: typeof chrome & any;
                 isNewTaskBool
               );
 
-              console.log(
-                `[ServiceWorker] 📞 AFTER DeepSeekController.sendPrompt() call`
-              );
-              console.log(`[ServiceWorker] 🔍 Promise created:`, {
-                hasPromise: !!sendPromptPromise,
-                promiseType: typeof sendPromptPromise,
-                timestamp: Date.now(),
-              });
-
               sendPromptPromise
                 .then((success: boolean) => {
-                  console.log(
-                    `[ServiceWorker] ${
-                      success ? "✅" : "❌"
-                    } DeepSeekController.sendPrompt result:`,
-                    {
-                      success,
-                      requestId,
-                      tabId,
-                    }
-                  );
-
                   if (success) {
                     setTimeout(() => {
                       browserAPI.storage.local.remove([requestKey]);
