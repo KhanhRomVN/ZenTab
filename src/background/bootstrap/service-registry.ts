@@ -5,6 +5,9 @@ import { TabStateManager } from "../core/managers/tab-state";
 import { WSManager } from "../core/managers/websocket";
 import { ContainerManager } from "../core/managers/container/container-manager";
 import { StorageManager } from "../core/storage/storage-manager";
+import { DeepSeekController } from "../ai-services/deepseek/controller";
+import { TabEventHandler } from "../events/tab-events/tab-event-handler";
+import { StorageChangeHandler } from "../events/storage-events/storage-change-handler";
 import { MessageHandler } from "../core/messaging/message-handler";
 import { TabBroadcaster } from "../core/managers/websocket/ws-broadcaster";
 
@@ -123,10 +126,7 @@ export class ServiceRegistry {
 
     // DeepSeek Controller (lazy loaded)
     this.dependencyContainer.registerFactory("DeepSeekController", () => {
-      // Dynamic import để tránh circular dependencies
-      return import("../ai-services/deepseek/controller").then((module) => {
-        return module.DeepSeekController;
-      });
+      return DeepSeekController;
     });
 
     // ChatGPT Controller (lazy loaded) - Commented out until implemented
@@ -177,9 +177,7 @@ export class ServiceRegistry {
         throw new Error("TabStateManager not available for TabEventHandler");
       }
 
-      return import("../events/tab-events/tab-event-handler").then((module) => {
-        return new module.TabEventHandler(tabStateManager);
-      });
+      return new TabEventHandler(tabStateManager);
     });
 
     // Storage Event Handler
@@ -194,11 +192,7 @@ export class ServiceRegistry {
         );
       }
 
-      return import("../events/storage-events/storage-change-handler").then(
-        (module) => {
-          return new module.StorageChangeHandler(tabStateManager, wsManager);
-        }
-      );
+      return new StorageChangeHandler(tabStateManager, wsManager);
     });
   }
 
