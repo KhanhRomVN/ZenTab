@@ -1,731 +1,247 @@
-import { ContainerManager } from "./container-manager";
-import { MessageHandler } from "./message-handler";
-import { WSManagerNew } from "./websocket/ws-manager-new";
-import { TabBroadcaster } from "./websocket/tab-broadcaster";
-import { DeepSeekController } from "./deepseek-controller";
-import { TabStateManager } from "./utils/tab-state-manager";
+// src/background/service-worker.ts - Simplified version without module exports
 
-declare const browser: typeof chrome & any;
-
-(function () {
+/**
+ * Service Worker Main Entry Point
+ */
+(async () => {
   "use strict";
 
-  const browserAPI = (function (): typeof chrome & any {
-    if (typeof browser !== "undefined") return browser as any;
-    if (typeof chrome !== "undefined") return chrome as any;
-    throw new Error("No browser API available");
-  })();
+  console.log("[ServiceWorker] 🚀 Starting ZenTab extension...");
 
-  browserAPI.storage.local.remove([
-    "wsStates",
-    "wsMessages",
-    "wsOutgoingMessage",
-    "wsIncomingRequest",
-  ]);
+  try {
+    // Minimal initialization without bootstrap import
+    await initializeMinimalSystem();
 
-  // 🔥 CRITICAL: Cleanup legacy storage data from old versions
-  (async () => {
+    console.log("[ServiceWorker] ✅ Extension started successfully");
+
+    // Handle extension lifecycle events
+    setupLifecycleListeners();
+  } catch (error) {
+    console.error("[ServiceWorker] ❌ Failed to start extension:", error);
+
+    // Try graceful degradation
     try {
-      const allData = await new Promise<any>((resolve) => {
-        browserAPI.storage.local.get(null, (data: any) => {
-          resolve(data || {});
-        });
-      });
-
-      const keysToRemove: string[] = [];
-
-      // Check for legacy API Provider URLs (containing old domains)
-      if (allData.apiProvider) {
-        const legacyDomains = ["localhost:3030", "127.0.0.1:3030"];
-
-        const currentProvider = String(allData.apiProvider || "").toLowerCase();
-        const isLegacy = legacyDomains.some((domain) =>
-          currentProvider.includes(domain.toLowerCase())
-        );
-
-        if (isLegacy) {
-          keysToRemove.push("apiProvider");
-        }
-      }
-
-      // Remove legacy connection states
-      const legacyKeys = [
-        "wsConnection",
-        "wsConnectionId",
-        "wsPort",
-        "wsUrl",
-        "lastConnected",
-      ];
-
-      for (const key of legacyKeys) {
-        if (allData[key] !== undefined) {
-          keysToRemove.push(key);
-        }
-      }
-
-      if (keysToRemove.length > 0) {
-        await new Promise<void>((resolve) => {
-          browserAPI.storage.local.remove(keysToRemove, () => {
-            resolve();
-          });
-        });
-      }
-    } catch (error) {
-      console.error(`[ServiceWorker] ❌ Legacy cleanup failed:`, error);
+      await fallbackInitialization();
+    } catch (fallbackError) {
+      console.error(
+        "[ServiceWorker] ❌ Fallback initialization also failed:",
+        fallbackError
+      );
     }
-  })();
+  }
 
-  const wsManager = new WSManagerNew();
-  new TabBroadcaster(wsManager);
+  /**
+   * Minimal system initialization
+   */
+  async function initializeMinimalSystem(): Promise<void> {
+    console.log("[ServiceWorker] 🔧 Initializing minimal system...");
 
-  const tabStateManager = TabStateManager.getInstance();
+    // Cleanup legacy storage
+    await cleanupLegacyData();
 
-  const containerManager = new ContainerManager(browserAPI);
-  const messageHandler = new MessageHandler(containerManager);
+    // Initialize storage
+    await initializeStorage();
 
-  // Setup event listeners
-  if (browserAPI.contextualIdentities) {
-    browserAPI.contextualIdentities.onCreated.addListener(() => {
-      containerManager.initializeContainers();
+    // Setup basic message listener
+    setupBasicMessageListener();
+
+    console.log("[ServiceWorker] ✅ Minimal system initialized");
+  }
+
+  /**
+   * Setup extension lifecycle listeners
+   */
+  function setupLifecycleListeners(): void {
+    // Handle extension installation/update
+    chrome.runtime.onInstalled.addListener((details) => {
+      console.log(
+        "[ServiceWorker] 🔄 Extension installed/updated:",
+        details.reason
+      );
+
+      if (details.reason === "install") {
+        showInstallNotification();
+      } else if (details.reason === "update") {
+        handleExtensionUpdate(details.previousVersion);
+      }
     });
 
-    browserAPI.contextualIdentities.onRemoved.addListener(() => {
-      containerManager.initializeContainers();
+    // Handle extension suspension
+    chrome.runtime.onSuspend.addListener(() => {
+      console.log("[ServiceWorker] ⏸️ Extension suspending...");
+    });
+
+    // Handle extension resume
+    chrome.runtime.onStartup.addListener(() => {
+      console.log("[ServiceWorker] ▶️ Extension resuming...");
     });
   }
 
-  browserAPI.storage.onChanged.addListener((changes: any, areaName: string) => {
-    if (areaName !== "local") return;
-
-    // Process incoming WebSocket messages
-    if (changes.wsMessages) {
-      const messages = changes.wsMessages.newValue || {};
-
-      if (Object.keys(messages).length === 0) {
-        return;
-      }
-
-      if (Object.keys(messages).length === 0) {
-        return;
-      }
-
-      // Process each connection's messages
-      for (const [connectionId, msgArray] of Object.entries(messages)) {
-        const msgs = msgArray as Array<{ timestamp: number; data: any }>;
-
-        const now = Date.now();
-        const recentMsgs = msgs.filter((msg) => {
-          const age = now - msg.timestamp;
-          return age < 180000; // 180 seconds (3 minutes)
-        });
-
-        if (recentMsgs.length === 0) {
-          continue;
-        }
-
-        // Get latest message
-        const latestMsg = recentMsgs[recentMsgs.length - 1];
-
-        if (latestMsg.data.type === "sendPrompt") {
-          const {
-            tabId,
-            systemPrompt,
-            userPrompt,
-            requestId,
-            isNewTask,
-            folderPath,
-          } = latestMsg.data;
-
-          if (!tabId || !userPrompt || !requestId) {
-            console.error(
-              `[ServiceWorker] ❌ Invalid sendPrompt message - missing required fields`
-            );
-            console.error(`[ServiceWorker] 📊 Message data:`, {
-              tabId,
-              hasSystemPrompt: !!systemPrompt,
-              hasUserPrompt: !!userPrompt,
-              requestId,
-              isNewTask,
-              hasFolderPath: !!folderPath,
-            });
-            continue;
-          }
-
-          const requestKey = `processed_${requestId}`;
-
-          (async () => {
-            try {
-              const result = await new Promise<any>((resolve) => {
-                browserAPI.storage.local.get([requestKey], (data: any) => {
-                  resolve(data || {});
-                });
-              });
-
-              if (result[requestKey]) {
-                console.error(
-                  `[ServiceWorker] ⚠️ Request already processed, skipping:`,
-                  {
-                    requestId,
-                    processedAt: result[requestKey],
-                    age: Date.now() - result[requestKey],
-                  }
-                );
-                return;
-              }
-
-              // Mark as processed
-              await new Promise<void>((resolve) => {
-                browserAPI.storage.local.set(
-                  { [requestKey]: Date.now() },
-                  () => {
-                    resolve();
-                  }
-                );
-              });
-
-              const isNewTaskBool = isNewTask === true;
-
-              const sendPromptPromise = DeepSeekController.sendPrompt(
-                tabId,
-                systemPrompt || null,
-                userPrompt,
-                requestId,
-                isNewTaskBool
-              );
-
-              sendPromptPromise
-                .then((success: boolean) => {
-                  if (success) {
-                    setTimeout(() => {
-                      browserAPI.storage.local.remove([requestKey]);
-                    }, 120000);
-                  } else {
-                    console.error(
-                      `[ServiceWorker] ❌ Failed to send prompt, notifying backend...`
-                    );
-
-                    browserAPI.storage.local.set({
-                      wsOutgoingMessage: {
-                        connectionId: connectionId,
-                        data: {
-                          type: "promptResponse",
-                          requestId: requestId,
-                          tabId: tabId,
-                          success: false,
-                          error: "Failed to send prompt to DeepSeek tab",
-                          errorType: "SEND_FAILED",
-                          details: {
-                            tabId: tabId,
-                            userPromptLength: userPrompt.length,
-                            hasSystemPrompt: !!systemPrompt,
-                            timestamp: Date.now(),
-                          },
-                        },
-                        timestamp: Date.now(),
-                      },
-                    });
-
-                    browserAPI.storage.local.remove([requestKey]);
-                  }
-                })
-                .catch((error: any) => {
-                  console.error(
-                    `[ServiceWorker] ❌ Exception in DeepSeekController.sendPrompt:`,
-                    error
-                  );
-                  browserAPI.storage.local.remove([requestKey]);
-                });
-            } catch (error) {
-              console.error(
-                `[ServiceWorker] ❌ Exception in sendPrompt handler:`,
-                error
-              );
-              browserAPI.storage.local.remove([requestKey]);
+  /**
+   * Show installation notification
+   */
+  function showInstallNotification(): void {
+    try {
+      chrome.notifications.create(
+        {
+          type: "basic",
+          iconUrl: "icons/icon-128.png",
+          title: "ZenTab Installed",
+          message: "Thank you for installing ZenTab! Click to open settings.",
+          priority: 2,
+        },
+        (notificationId) => {
+          // Handle notification click
+          chrome.notifications.onClicked.addListener((clickedId) => {
+            if (clickedId === notificationId) {
+              chrome.runtime.openOptionsPage();
+              chrome.notifications.clear(clickedId);
             }
-          })();
+          });
         }
-      }
+      );
+    } catch (error) {
+      console.error(
+        "[ServiceWorker] ❌ Failed to show install notification:",
+        error
+      );
+    }
+  }
+
+  /**
+   * Handle extension update
+   */
+  function handleExtensionUpdate(previousVersion: string | undefined): void {
+    console.log(
+      `[ServiceWorker] 🔄 Updated from version ${previousVersion || "unknown"}`
+    );
+
+    // Perform migration if needed
+    if (previousVersion && isVersionOlder(previousVersion, "1.0.0")) {
+      performMigration(previousVersion);
+    }
+  }
+
+  /**
+   * Check if version is older
+   */
+  function isVersionOlder(version1: string, version2: string): boolean {
+    const v1 = version1.split(".").map(Number);
+    const v2 = version2.split(".").map(Number);
+
+    for (let i = 0; i < Math.max(v1.length, v2.length); i++) {
+      const part1 = v1[i] || 0;
+      const part2 = v2[i] || 0;
+
+      if (part1 < part2) return true;
+      if (part1 > part2) return false;
     }
 
-    if (changes.wsIncomingRequest) {
-      const request = changes.wsIncomingRequest.newValue;
+    return false;
+  }
 
-      if (!request) {
-        return;
+  /**
+   * Perform migration from older versions
+   */
+  function performMigration(previousVersion: string): void {
+    console.log(
+      `[ServiceWorker] 🧹 Performing migration from ${previousVersion}`
+    );
+
+    // Cleanup legacy storage
+    chrome.storage.local.remove(
+      ["wsConnection", "wsConnectionId", "wsPort", "wsUrl", "lastConnected"],
+      () => {
+        console.log("[ServiceWorker] ✅ Legacy storage cleaned up");
       }
+    );
+  }
 
-      if (request.type === "getAvailableTabs") {
-        (async () => {
-          try {
-            const { requestId, connectionId } = request;
+  /**
+   * Fallback initialization
+   */
+  async function fallbackInitialization(): Promise<void> {
+    console.log("[ServiceWorker] 🔄 Attempting fallback initialization...");
 
-            // Sử dụng tabStateManager instance đã tạo ở đầu file
-            if (!tabStateManager) {
-              console.error("[ServiceWorker] TabStateManager not available!");
-              throw new Error("TabStateManager not initialized");
-            }
+    try {
+      // Minimal initialization
+      await initializeEssentialServices();
 
-            const availableTabs = await tabStateManager.getAllTabStates();
-
-            // Send response via wsOutgoingMessage
-            await new Promise<void>((resolve, reject) => {
-              browserAPI.storage.local.set(
-                {
-                  wsOutgoingMessage: {
-                    connectionId: connectionId,
-                    data: {
-                      type: "availableTabs",
-                      requestId: requestId,
-                      tabs: availableTabs,
-                      timestamp: Date.now(),
-                    },
-                    timestamp: Date.now(),
-                  },
-                },
-                () => {
-                  if (browserAPI.runtime.lastError) {
-                    console.error(
-                      "[ServiceWorker] Error sending availableTabs response:",
-                      browserAPI.runtime.lastError
-                    );
-                    reject(browserAPI.runtime.lastError);
-                    return;
-                  }
-                  resolve();
-                }
-              );
-            });
-
-            // Clean up request
-            browserAPI.storage.local.remove(["wsIncomingRequest"]);
-          } catch (error) {
-            console.error(
-              "[ServiceWorker] ❌ Error processing getAvailableTabs:",
-              error
-            );
-
-            // Send error response
-            browserAPI.storage.local.set({
-              wsOutgoingMessage: {
-                connectionId: request.connectionId,
-                data: {
-                  type: "availableTabs",
-                  requestId: request.requestId,
-                  success: false,
-                  error: error instanceof Error ? error.message : String(error),
-                  timestamp: Date.now(),
-                },
-                timestamp: Date.now(),
-              },
-            });
-
-            // Clean up request
-            browserAPI.storage.local.remove(["wsIncomingRequest"]);
-          }
-        })();
-      }
-
-      if (request.type === "cleanupFolderLink") {
-        const folderPath = request.folderPath;
-
-        if (!folderPath) {
-          console.error(
-            "[ServiceWorker] ❌ cleanupFolderLink missing folderPath"
-          );
-          chrome.storage.local.remove(["wsIncomingRequest"]);
-          return;
-        }
-
-        (async () => {
-          try {
-            if (!tabStateManager) {
-              console.error(
-                "[ServiceWorker] ❌ TabStateManager not available for cleanup!"
-              );
-              chrome.storage.local.remove(["wsIncomingRequest"]);
-              return;
-            }
-
-            await tabStateManager.unlinkFolder(folderPath);
-
-            chrome.storage.local.remove(["wsIncomingRequest"]);
-          } catch (error) {
-            console.error(
-              "[ServiceWorker] ❌ Error processing cleanupFolderLink:",
-              error
-            );
-            chrome.storage.local.remove(["wsIncomingRequest"]);
-          }
-        })();
-      }
-
-      if (request.type === "getTabsByFolder") {
-        const folderPath = request.folderPath;
-        const requestId = request.requestId;
-        const connectionId = request.connectionId;
-
-        if (!folderPath || !requestId || !connectionId) {
-          console.error(
-            "[ServiceWorker] ❌ getTabsByFolder missing required fields"
-          );
-          chrome.storage.local.remove(["wsIncomingRequest"]);
-          return;
-        }
-
-        (async () => {
-          try {
-            if (!tabStateManager) {
-              console.error(
-                "[ServiceWorker] ❌ TabStateManager not available!"
-              );
-              throw new Error("TabStateManager not initialized");
-            }
-
-            const matchingTabs = await tabStateManager.getTabsByFolder(
-              folderPath
-            );
-
-            await new Promise<void>((resolve, reject) => {
-              browserAPI.storage.local.set(
-                {
-                  wsOutgoingMessage: {
-                    connectionId: connectionId,
-                    data: {
-                      type: "availableTabs",
-                      requestId: requestId,
-                      tabs: matchingTabs,
-                      timestamp: Date.now(),
-                    },
-                    timestamp: Date.now(),
-                  },
-                },
-                () => {
-                  if (browserAPI.runtime.lastError) {
-                    console.error(
-                      "[ServiceWorker] ❌ Error sending getTabsByFolder response:",
-                      browserAPI.runtime.lastError
-                    );
-                    reject(browserAPI.runtime.lastError);
-                    return;
-                  }
-                  resolve();
-                }
-              );
-            });
-
-            chrome.storage.local.remove(["wsIncomingRequest"]);
-          } catch (error) {
-            console.error(
-              "[ServiceWorker] ❌ Error processing getTabsByFolder:",
-              error
-            );
-
-            browserAPI.storage.local.set({
-              wsOutgoingMessage: {
-                connectionId: request.connectionId,
-                data: {
-                  type: "availableTabs",
-                  requestId: request.requestId,
-                  success: false,
-                  tabs: [],
-                  error: error instanceof Error ? error.message : String(error),
-                  timestamp: Date.now(),
-                },
-                timestamp: Date.now(),
-              },
-            });
-
-            chrome.storage.local.remove(["wsIncomingRequest"]);
-          }
-        })();
-      }
+      console.log("[ServiceWorker] ✅ Fallback initialization completed");
+    } catch (error) {
+      throw new Error(`Fallback initialization failed: ${error}`);
     }
-  });
+  }
 
-  // Unified Message Listener - handles all actions
-  browserAPI.runtime.onMessage.addListener(
-    (message: any, _sender: any, sendResponse: any) => {
-      // Handle WebSocket connect/disconnect directly
-      if (message.action === "connectWebSocket") {
-        (async () => {
-          try {
-            const result = await wsManager.connect();
+  /**
+   * Initialize essential services only
+   */
+  async function initializeEssentialServices(): Promise<void> {
+    // Cleanup legacy data
+    await cleanupLegacyData();
 
-            // Validate result structure
-            if (!result || typeof result.success !== "boolean") {
-              console.error(
-                `[ServiceWorker] ❌ Invalid result structure:`,
-                result
-              );
-              console.error(`[ServiceWorker] 🔍 Result type: ${typeof result}`);
-              sendResponse({ success: false, error: "Invalid connect result" });
-              return;
-            }
-          } catch (error) {
-            console.error(`[ServiceWorker] ❌ Connect exception:`, error);
-            console.error(
-              `[ServiceWorker] 🔍 Exception type: ${
-                error instanceof Error ? error.constructor.name : typeof error
-              }`
-            );
-            sendResponse({
-              success: false,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        })();
+    // Initialize storage
+    await initializeStorage();
 
-        return true; // CRITICAL: Keep channel open for async response
-      }
+    // Setup basic message listener
+    setupBasicMessageListener();
 
-      if (message.action === "disconnectWebSocket") {
-        const result = wsManager.disconnect();
-        sendResponse(result);
-        return true;
-      }
+    console.log("[ServiceWorker] ✅ Essential services initialized");
+  }
 
-      if (message.action === "ws.sendResponse") {
-        const success = wsManager.sendResponse(message.data);
-        sendResponse({ success });
-        return true;
-      }
+  /**
+   * Cleanup legacy data
+   */
+  async function cleanupLegacyData(): Promise<void> {
+    return new Promise((resolve) => {
+      chrome.storage.local.remove(
+        ["wsStates", "wsMessages", "wsOutgoingMessage", "wsIncomingRequest"],
+        () => {
+          resolve();
+        }
+      );
+    });
+  }
 
-      if (message.action === "ws.incomingPrompt") {
-        DeepSeekController.sendPrompt(
-          message.tabId,
-          message.prompt,
-          message.requestId
-        ).then((success: boolean) => {
-          sendResponse({ success });
-        });
-        return true;
-      }
+  /**
+   * Initialize storage
+   */
+  async function initializeStorage(): Promise<void> {
+    return new Promise((resolve) => {
+      chrome.storage.session.set({ zenTabStates: {} }, () => {
+        resolve();
+      });
+    });
+  }
 
-      if (message.action === "ws.incomingPrompt") {
-        DeepSeekController.sendPrompt(
-          message.tabId,
-          message.prompt,
-          message.requestId
-        ).then((success: boolean) => {
-          sendResponse({ success });
-        });
-        return true;
-      }
-
-      if (message.action === "getWSConnectionInfo") {
-        // 🔥 CRITICAL FIX: Sử dụng Promise-based async handler
-        (async () => {
-          try {
-            const result = await new Promise<any>((resolve, reject) => {
-              browserAPI.storage.local.get(["wsStates"], (data: any) => {
-                if (browserAPI.runtime.lastError) {
-                  reject(browserAPI.runtime.lastError);
-                  return;
-                }
-                resolve(data || {});
-              });
-            });
-
-            const states = result?.wsStates || {};
-            const connectionIds = Object.keys(states);
-
-            if (connectionIds.length > 0) {
-              const connectionId = connectionIds[0];
-              const state = states[connectionId];
-
-              // 🔥 CRITICAL: Return FULL state object từ storage
-              sendResponse({
-                success: true,
-                state: {
-                  id: state.id,
-                  port: state.port,
-                  url: state.url,
-                  status: state.status,
-                  lastConnected: state.lastConnected,
-                },
-              });
-            } else {
-              sendResponse({
-                success: false,
-                error: "No WebSocket connection found",
-              });
-            }
-          } catch (error) {
-            console.error(
-              "[ServiceWorker] ❌ Error in getWSConnectionInfo:",
-              error
-            );
-            sendResponse({
-              success: false,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-        })();
-
-        return true; // CRITICAL: Keep channel open for async response
-      }
-
-      // DeepSeek controller handlers
+  /**
+   * Setup basic message listener
+   */
+  function setupBasicMessageListener(): void {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      // Handle essential messages only
       switch (message.action) {
-        case "getTabStates":
-          (async () => {
-            try {
-              const tabStates = await tabStateManager.getAllTabStates();
-              const responseData = { success: true, tabStates };
-              sendResponse(responseData);
-            } catch (error) {
-              console.error("[ServiceWorker] ❌ Error in getTabStates:", error);
-              console.error("[ServiceWorker] 🔍 Error details:", {
-                type:
-                  error instanceof Error
-                    ? error.constructor.name
-                    : typeof error,
-                message: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined,
-              });
+        case "ping":
+          sendResponse({ success: true, message: "pong" });
+          break;
 
-              const responseData = {
-                success: false,
-                error: error instanceof Error ? error.message : String(error),
-              };
-              sendResponse(responseData);
-            }
-          })();
-
-          return true;
-
-        case "deepseek.clickNewChat":
-          DeepSeekController.clickNewChatButton(message.tabId).then(
-            (success: boolean) => {
-              sendResponse({ success });
-            }
-          );
-          return true;
-
-        case "deepseek.isDeepThinkEnabled":
-          DeepSeekController.isDeepThinkEnabled(message.tabId).then(
-            (enabled: any) => {
-              sendResponse({ enabled });
-            }
-          );
-          return true;
-
-        case "deepseek.toggleDeepThink":
-          DeepSeekController.toggleDeepThink(
-            message.tabId,
-            message.enable
-          ).then((success: boolean) => {
-            sendResponse({ success });
+        case "getStatus":
+          sendResponse({
+            success: true,
+            status: "minimal_mode",
+            message: "Running in minimal mode",
           });
-          return true;
-
-        case "deepseek.sendPrompt":
-          DeepSeekController.sendPrompt(
-            message.tabId,
-            message.prompt,
-            message.requestId
-          ).then((success: boolean) => {
-            sendResponse({ success });
-          });
-          return true;
-
-        case "deepseek.stopGeneration":
-          DeepSeekController.stopGeneration(message.tabId).then(
-            (success: boolean) => {
-              sendResponse({ success });
-            }
-          );
-          return true;
-
-        case "deepseek.getLatestResponse":
-          DeepSeekController.getLatestResponse(message.tabId).then(
-            (response: any) => {
-              sendResponse({ response });
-            }
-          );
-          return true;
-
-        case "deepseek.createNewChat":
-          DeepSeekController.createNewChat(message.tabId).then(
-            (success: any) => {
-              sendResponse({ success });
-            }
-          );
-          return true;
-
-        case "deepseek.getChatTitle":
-          DeepSeekController.getChatTitle(message.tabId).then((title: any) => {
-            sendResponse({ title });
-          });
-          return true;
-
-        case "deepseek.isGenerating":
-          DeepSeekController.isGenerating(message.tabId).then(
-            (generating: any) => {
-              sendResponse({ generating });
-            }
-          );
-          return true;
-
-        case "deepseek.getCurrentInput":
-          DeepSeekController.getCurrentInput(message.tabId).then(
-            (input: any) => {
-              sendResponse({ input });
-            }
-          );
-          return true;
-
-        case "unlinkTabFromFolder":
-          (async () => {
-            try {
-              if (!tabStateManager) {
-                console.error(
-                  `[ServiceWorker] ❌ TabStateManager not available!`
-                );
-                sendResponse({
-                  success: false,
-                  error: "TabStateManager not initialized",
-                });
-                return;
-              }
-
-              const success = await tabStateManager.unlinkTabFromFolder(
-                message.tabId
-              );
-
-              sendResponse({ success });
-            } catch (error) {
-              console.error(
-                `[ServiceWorker] ❌ Exception in unlinkTabFromFolder:`,
-                error
-              );
-              console.error(`[ServiceWorker] 🔍 Error details:`, {
-                type:
-                  error instanceof Error
-                    ? error.constructor.name
-                    : typeof error,
-                message: error instanceof Error ? error.message : String(error),
-                stack: error instanceof Error ? error.stack : undefined,
-              });
-
-              sendResponse({
-                success: false,
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          })();
-          return true;
-
-        case "getAvailableTabs":
-          return true;
+          break;
 
         default:
-          messageHandler.handleMessage(message, sendResponse);
-          return true;
+          sendResponse({
+            success: false,
+            error: "Service unavailable in minimal mode",
+          });
+          break;
       }
-    }
-  );
 
-  // Initialize on startup
-  containerManager.initializeContainers();
+      return true;
+    });
+  }
 })();
