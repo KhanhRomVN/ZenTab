@@ -181,8 +181,12 @@ export class TabStateInitializer {
       url.includes("deepseek.com") ||
       url.includes("chatgpt.com") ||
       url.includes("openai.com") ||
+      url.includes("aistudio.google.com/prompts") ||
+      url.includes("grok.com") ||
       title.includes("DeepSeek") ||
-      title.includes("ChatGPT")
+      title.includes("ChatGPT") ||
+      title.includes("Gemini") ||
+      title.includes("Grok")
     );
   }
 

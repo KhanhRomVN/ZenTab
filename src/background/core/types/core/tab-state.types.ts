@@ -21,7 +21,9 @@ export interface TabStateInfo {
   status: "free" | "busy" | "sleep";
   canAccept: boolean;
   requestCount: number;
-  folderPath?: string | null;
+  folderPath: string | null;
+  provider?: "deepseek" | "chatgpt" | "gemini" | "grok";
+  cookieStoreId?: string;
 }
 
 /**

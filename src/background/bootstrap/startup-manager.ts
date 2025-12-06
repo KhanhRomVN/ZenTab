@@ -309,7 +309,7 @@ export class StartupManager {
     );
     const browserAPI = this.getBrowserAPI();
 
-    if (!messageHandler || !browserAPI.runtime.onMessage) {
+    if (!messageHandler || !browserAPI.runtime.onMessage) {re
       return;
     }
 

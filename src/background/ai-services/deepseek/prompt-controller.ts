@@ -720,6 +720,7 @@ CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
   ): Promise<void> {
     try {
       const responseObject = this.buildOpenAIResponse(response, usage);
+      const folderPath = await this.getFolderPathForRequest(requestId);
 
       await browserAPI.setStorageValue("wsOutgoingMessage", {
         connectionId: await this.getConnectionIdForRequest(requestId),
@@ -729,6 +730,7 @@ CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
           tabId: tabId,
           success: true,
           response: JSON.stringify(responseObject),
+          folderPath: folderPath || null, // 🆕 Include folderPath in response
           timestamp: Date.now(),
         },
         timestamp: Date.now(),
@@ -750,6 +752,8 @@ CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
     error: string
   ): Promise<void> {
     try {
+      const folderPath = await this.getFolderPathForRequest(requestId);
+
       await browserAPI.setStorageValue("wsOutgoingMessage", {
         connectionId: await this.getConnectionIdForRequest(requestId),
         data: {
@@ -758,6 +762,7 @@ CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
           tabId: tabId,
           success: false,
           error: error,
+          folderPath: folderPath || null, // 🆕 Include folderPath in error response
           timestamp: Date.now(),
         },
         timestamp: Date.now(),

@@ -115,15 +115,23 @@ export class TabStateScanner {
           folderPath: state.folderPath || null,
         });
 
+        // Get container name from Firefox Multi Account Container
+        const containerName = await this.getContainerName(tab.cookieStoreId);
+
+        // Detect LLM provider
+        const provider = this.detectProvider(tab.url);
+
         tabStates.push({
           tabId: tab.id,
-          containerName: `Tab ${tab.id}`,
+          containerName: containerName || `Tab ${tab.id}`,
           title: tab.title || "Untitled",
           url: tab.url,
           status: actualStatus,
           canAccept: canAccept,
           requestCount: state.requestCount || 0,
           folderPath: state.folderPath || null,
+          provider: provider,
+          cookieStoreId: tab.cookieStoreId,
         });
       }
 
@@ -134,6 +142,68 @@ export class TabStateScanner {
         error
       );
       return [];
+    }
+  }
+
+  /**
+   * Detect LLM provider từ URL
+   */
+  private detectProvider(
+    url?: string
+  ): "deepseek" | "chatgpt" | "gemini" | "grok" | undefined {
+    if (!url) return undefined;
+
+    const urlLower = url.toLowerCase();
+
+    if (urlLower.includes("deepseek.com")) return "deepseek";
+    if (urlLower.includes("chatgpt.com") || urlLower.includes("openai.com"))
+      return "chatgpt";
+    if (urlLower.includes("aistudio.google.com/prompts")) return "gemini";
+    if (urlLower.includes("grok.com")) return "grok";
+
+    return undefined;
+  }
+
+  /**
+   * Get container name từ cookieStoreId (Firefox Multi Account Container)
+   */
+  private async getContainerName(
+    cookieStoreId?: string
+  ): Promise<string | null> {
+    if (!cookieStoreId || cookieStoreId === "firefox-default") {
+      return null;
+    }
+
+    try {
+      const browserAPI = this.getBrowserAPI();
+
+      // Check if contextualIdentities API exists (Firefox only)
+      if (!browserAPI.contextualIdentities) {
+        return null;
+      }
+
+      // Wrap in Promise to handle async properly
+      const container = await new Promise<any>((resolve, reject) => {
+        try {
+          browserAPI.contextualIdentities.get(cookieStoreId, (result: any) => {
+            if (browserAPI.runtime.lastError) {
+              reject(browserAPI.runtime.lastError);
+              return;
+            }
+            resolve(result);
+          });
+        } catch (error) {
+          reject(error);
+        }
+      });
+
+      return container?.name || null;
+    } catch (error) {
+      console.error(
+        `[TabStateScanner] ❌ Error getting container name for ${cookieStoreId}:`,
+        error
+      );
+      return null;
     }
   }
 
@@ -152,6 +222,8 @@ export class TabStateScanner {
         ]),
         this.queryTabs(["https://chatgpt.com/*", "https://*.chatgpt.com/*"]),
         this.queryTabs(["https://*.openai.com/*"]),
+        this.queryTabs(["https://aistudio.google.com/prompts/*"]),
+        this.queryTabs(["https://grok.com/*", "https://*.grok.com/*"]),
       ];
 
       const results = await Promise.allSettled(queryPromises);

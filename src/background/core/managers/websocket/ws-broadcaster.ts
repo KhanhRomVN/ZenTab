@@ -261,4 +261,50 @@ export class TabBroadcaster {
     }
     throw new Error("No browser API available");
   }
+
+  /**
+   * Handle sendPrompt request from VS Code
+   */
+  private async handleSendPromptRequest(message: any): Promise<void> {
+    const {
+      tabId,
+      systemPrompt,
+      userPrompt,
+      requestId,
+      isNewTask,
+      folderPath,
+    } = message;
+
+    if (!tabId || !userPrompt || !requestId) {
+      console.error("[WSConnection] ❌ Invalid sendPrompt request:", message);
+      return;
+    }
+
+    // Store request để deduplication
+    const dedupeKey = `sendPrompt_${requestId}`;
+    const storageManager = this.getStorageManager();
+
+    const existing = await storageManager.get<any>(dedupeKey);
+    if (existing) {
+      console.warn(
+        `[WSConnection] ⚠️ Duplicate sendPrompt request: ${requestId}`
+      );
+      return;
+    }
+
+    await storageManager.set(dedupeKey, Date.now());
+
+    // Schedule cleanup
+    setTimeout(() => {
+      storageManager.remove([dedupeKey]).catch(() => {});
+    }, 5000);
+
+    // Store message với folderPath
+    await this.storeMessage({
+      ...message,
+      type: "sendPrompt",
+      folderPath: folderPath || null, // Ensure folderPath is included
+      timestamp: Date.now(),
+    });
+  }
 }

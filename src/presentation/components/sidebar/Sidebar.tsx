@@ -394,10 +394,23 @@ const Sidebar: React.FC = () => {
               <span className="text-3xl">🌐</span>
             </div>
             <p className="text-text-secondary text-sm">No AI chat tabs open</p>
-            <p className="text-text-secondary/70 text-xs mt-1">
-              Open https://chat.deepseek.com/ or https://chatgpt.com/ to get
-              started!
+            <p className="text-text-secondary/70 text-xs mt-1 px-4">
+              Open DeepSeek, ChatGPT, Gemini, or Grok to get started!
             </p>
+            <div className="flex flex-wrap gap-2 mt-3 justify-center px-4">
+              <span className="text-xs px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded">
+                🤖 DeepSeek
+              </span>
+              <span className="text-xs px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded">
+                💬 ChatGPT
+              </span>
+              <span className="text-xs px-2 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 rounded">
+                ✨ Gemini
+              </span>
+              <span className="text-xs px-2 py-1 bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400 rounded">
+                ⚡ Grok
+              </span>
+            </div>
           </div>
         )}
       </div>
