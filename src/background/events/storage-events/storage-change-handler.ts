@@ -104,17 +104,27 @@ export class StorageChangeHandler {
     message: any,
     connectionId: string
   ): Promise<void> {
-    const {
-      tabId,
-      systemPrompt,
-      userPrompt,
-      requestId,
-      isNewTask,
-      folderPath,
-    } = message;
+    const { tabId, prompt, requestId, isNewTask, folderPath } = message;
 
-    if (!tabId || !userPrompt || !requestId) {
-      console.error("[StorageChangeHandler] ❌ Invalid sendPrompt message");
+    // 🔥 FIX: More lenient validation - only check essential fields
+    if (!tabId) {
+      console.error(
+        "[StorageChangeHandler] ❌ Invalid sendPrompt: missing tabId"
+      );
+      return;
+    }
+
+    if (!requestId) {
+      console.error(
+        "[StorageChangeHandler] ❌ Invalid sendPrompt: missing requestId"
+      );
+      return;
+    }
+
+    if (!prompt || prompt.trim() === "") {
+      console.error(
+        "[StorageChangeHandler] ❌ Invalid sendPrompt: missing or empty prompt"
+      );
       return;
     }
 
@@ -140,6 +150,24 @@ export class StorageChangeHandler {
         });
       });
 
+      // 🆕 CRITICAL: Store folderPath mapping separately to avoid triggering validation
+      // Don't store incomplete sendPrompt messages in wsMessages
+      const folderMappingKey = `folderPath_${requestId}`;
+
+      await new Promise<void>((resolve) => {
+        browserAPI.storage.local.set(
+          { [folderMappingKey]: folderPath || null },
+          () => {
+            resolve();
+          }
+        );
+      });
+
+      // Schedule cleanup after 5 minutes
+      setTimeout(() => {
+        browserAPI.storage.local.remove([folderMappingKey]);
+      }, 300000);
+
       // Dynamic import để tránh circular dependencies
       const { DeepSeekController } = await import(
         "../../ai-services/deepseek/controller"
@@ -147,8 +175,7 @@ export class StorageChangeHandler {
 
       const success = await DeepSeekController.sendPrompt(
         tabId,
-        systemPrompt || null,
-        userPrompt,
+        prompt,
         requestId,
         isNewTask === true
       );

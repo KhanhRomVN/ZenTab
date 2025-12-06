@@ -154,14 +154,6 @@ export class WSConnection {
     try {
       const message = JSON.parse(data);
 
-      // 🆕 LOG: Chỉ log khi type = sendPrompt
-      if (message.type === "sendPrompt") {
-        console.log(
-          `[WSConnection] 📥 RECEIVED REQUEST:`,
-          JSON.stringify(message)
-        );
-      }
-
       // Handle ping messages
       if (message.type === "ping") {
         this.handlePing(message);

@@ -171,20 +171,13 @@ export class WSMessageProcessor {
     response?: any;
     error?: string;
   }> {
-    const {
-      tabId,
-      systemPrompt,
-      userPrompt,
-      requestId,
-      isNewTask,
-      folderPath,
-    } = message;
+    const { tabId, prompt, requestId, isNewTask, folderPath } = message;
 
     // Validate required fields
-    if (!tabId || !userPrompt || !requestId) {
+    if (!tabId || !prompt || !requestId) {
       return {
         success: false,
-        error: "Missing required fields: tabId, userPrompt, or requestId",
+        error: "Missing required fields: tabId, prompt, or requestId",
       };
     }
 
@@ -194,8 +187,7 @@ export class WSMessageProcessor {
         type: "sendPrompt",
         connectionId,
         tabId,
-        systemPrompt,
-        userPrompt,
+        prompt,
         requestId,
         isNewTask: isNewTask === true,
         folderPath,

@@ -25,8 +25,7 @@ export class PromptHandler {
    */
   public static async sendPrompt(
     tabId: number,
-    systemPrompt: string | null,
-    userPrompt: string,
+    prompt: string,
     requestId: string,
     isNewTask?: boolean
   ): Promise<boolean> {
@@ -51,14 +50,8 @@ export class PromptHandler {
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
-      // Build final prompt
-      const finalPrompt = PromptBuilder.buildFinalPrompt(
-        systemPrompt,
-        userPrompt
-      );
-
       // Fill textarea
-      const fillSuccess = await this.fillTextarea(tabId, finalPrompt);
+      const fillSuccess = await this.fillTextarea(tabId, prompt);
       if (!fillSuccess) {
         await this.handleTextareaFillFailure(tabId, requestId);
         return false;
@@ -72,7 +65,7 @@ export class PromptHandler {
       }
 
       // Start response monitoring
-      await ResponseMonitor.startMonitoring(tabId, requestId, finalPrompt);
+      await ResponseMonitor.startMonitoring(tabId, requestId, prompt);
 
       return true;
     } catch (error) {

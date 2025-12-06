@@ -4,7 +4,6 @@ import { TabStateCache } from "./tab-state-cache";
 import { TabStateStorage } from "./tab-state-storage";
 import { TabStateInitializer } from "./tab-state-initializer";
 import { TabStateScanner } from "./tab-state-scanner";
-import { TabStateRecovery } from "./tab-state-recovery";
 import { TabStateData, TabStateInfo } from "../../types/core/tab-state.types";
 
 /**
@@ -15,8 +14,7 @@ export class TabStateCore {
     private cache: TabStateCache,
     private storage: TabStateStorage,
     private initializer: TabStateInitializer,
-    private scanner: TabStateScanner,
-    private recovery: TabStateRecovery
+    private scanner: TabStateScanner
   ) {}
 
   /**

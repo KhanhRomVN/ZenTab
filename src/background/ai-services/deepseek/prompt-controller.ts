@@ -50,22 +50,6 @@ export class PromptController {
   }
 
   /**
-   * Build final prompt - chỉ gửi message gốc từ WS
-   */
-  private static async buildFinalPrompt(
-    systemPrompt: string | null | undefined,
-    userPrompt: string
-  ): Promise<string> {
-    // Chỉ gửi trực tiếp message nhận được từ WS
-    // Không thêm bất kỳ rules nào
-    if (systemPrompt) {
-      return `${systemPrompt}\n\n${userPrompt}`;
-    }
-
-    return userPrompt;
-  }
-
-  /**
    * Validate tab trước khi gửi prompt
    */
   private static async validateTab(
@@ -220,54 +204,15 @@ export class PromptController {
   }
 
   /**
-   * Overload 1: Accept pre-combined prompt
+   * Gửi prompt tới DeepSeek tab
    */
   static async sendPrompt(
     tabId: number,
     prompt: string,
     requestId: string,
     isNewTask?: boolean
-  ): Promise<boolean>;
-
-  /**
-   * Overload 2: Accept systemPrompt + userPrompt separately
-   */
-  static async sendPrompt(
-    tabId: number,
-    systemPrompt: string | null,
-    userPrompt: string,
-    requestId: string,
-    isNewTask?: boolean
-  ): Promise<boolean>;
-
-  /**
-   * Gửi prompt tới DeepSeek tab
-   */
-  static async sendPrompt(
-    tabId: number,
-    promptOrSystemPrompt: string,
-    userPromptOrRequestId: string,
-    requestIdOrIsNewTask?: string | boolean,
-    isNewTask?: boolean
   ): Promise<boolean> {
-    let finalPrompt: string = "";
-    let requestId: string = "unknown";
-    let isNewTaskFlag: boolean = false;
-
     try {
-      // Parse arguments
-      if (typeof requestIdOrIsNewTask === "string") {
-        const systemPrompt = promptOrSystemPrompt;
-        const userPrompt = userPromptOrRequestId;
-        requestId = requestIdOrIsNewTask;
-        isNewTaskFlag = isNewTask === true;
-        finalPrompt = await this.buildFinalPrompt(systemPrompt, userPrompt);
-      } else {
-        finalPrompt = promptOrSystemPrompt;
-        requestId = userPromptOrRequestId;
-        isNewTaskFlag = requestIdOrIsNewTask === true;
-      }
-
       // Validate tab
       const validation = await this.validateTab(tabId);
       if (!validation.isValid) {
@@ -287,13 +232,13 @@ export class PromptController {
       await this.tabStateManager.markTabBusy(tabId, requestId);
 
       // Create new chat nếu cần
-      if (isNewTaskFlag) {
+      if (isNewTask === true) {
         await ChatController.clickNewChatButton(tabId);
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
 
       // Fill textarea
-      const fillSuccess = await this.fillTextarea(tabId, finalPrompt);
+      const fillSuccess = await this.fillTextarea(tabId, prompt);
       if (!fillSuccess) {
         await this.tabStateManager.markTabFree(tabId);
         return false;
@@ -308,7 +253,7 @@ export class PromptController {
 
       // Start response polling
       this.activePollingTasks.set(tabId, requestId);
-      this.startResponsePolling(tabId, requestId, finalPrompt);
+      this.startResponsePolling(tabId, requestId, prompt);
 
       return true;
     } catch (error) {
@@ -603,10 +548,10 @@ export class PromptController {
         total_tokens: totalTokens,
       });
 
-      console.log(
-        `[PromptController] 🔧 BUILT JSON OBJECT for tab ${tabId}:`,
-        responseObject
-      );
+      // console.log(
+      //   `[PromptController] 🔧 BUILT JSON OBJECT for tab ${tabId}:`,
+      //   responseObject
+      // );
 
       // STEP 7: Convert JSON to string
       const responseString = JSON.stringify(responseObject);
@@ -622,7 +567,7 @@ export class PromptController {
           tabId: tabId,
           success: true,
           response: responseString,
-          folderPath: folderPath || null,
+          folderPath: folderPath || null, // 🔥 CRITICAL: Must not be undefined
           timestamp: Date.now(),
         },
         timestamp: Date.now(),
@@ -1182,22 +1127,71 @@ export class PromptController {
     requestId: string
   ): Promise<string | null> {
     try {
-      const messages = await browserAPI.getStorageValue<any>("wsMessages");
-      if (!messages) return null;
+      // 🔥 PRIORITY 1: Check dedicated folderPath storage
+      const folderMappingKey = `folderPath_${requestId}`;
+      const browserAPI = this.getBrowserAPI();
+
+      const folderResult = await new Promise<any>((resolve) => {
+        browserAPI.storage.local.get([folderMappingKey], (data: any) => {
+          resolve(data || {});
+        });
+      });
+
+      const folderPath = folderResult[folderMappingKey] || null;
+
+      if (folderPath !== null) {
+        return folderPath;
+      }
+
+      // 🔥 FALLBACK: Try to get from wsMessages if not in dedicated storage
+      console.log(
+        `[PromptController] ⚠️ No folderPath in dedicated storage, checking wsMessages...`
+      );
+
+      const messagesResult = await new Promise<any>((resolve) => {
+        browserAPI.storage.local.get(["wsMessages"], (data: any) => {
+          resolve(data || {});
+        });
+      });
+
+      const messages = messagesResult.wsMessages || {};
 
       for (const [, msgArray] of Object.entries(messages)) {
         const msgs = msgArray as Array<{ timestamp: number; data: any }>;
         const matchingMsg = msgs.find(
-          (msg) => msg.data?.requestId === requestId
+          (msg) =>
+            msg.data?.requestId === requestId && msg.data?.type === "sendPrompt"
         );
 
         if (matchingMsg?.data?.folderPath) {
-          return matchingMsg.data.folderPath;
+          const fallbackPath = matchingMsg.data.folderPath;
+          console.log(
+            `[PromptController] ✅ FOLDER PATH from wsMessages:`,
+            JSON.stringify({
+              requestId: requestId,
+              folderPath: fallbackPath,
+              source: "wsMessages_fallback",
+            })
+          );
+          return fallbackPath;
         }
       }
 
+      console.log(
+        `[PromptController] ❌ FOLDER PATH NOT FOUND:`,
+        JSON.stringify({
+          requestId: requestId,
+          checkedSources: ["folderPath_storage", "wsMessages"],
+          result: "null",
+        })
+      );
+
       return null;
     } catch (error) {
+      console.error(
+        `[PromptController] ❌ Error in getFolderPathForRequest:`,
+        error
+      );
       return null;
     }
   }
@@ -1379,5 +1373,18 @@ export class PromptController {
     } catch (error) {
       console.error(`[PromptController] ❌ Error clearing tokens:`, error);
     }
+  }
+
+  /**
+   * Helper để lấy browser API
+   */
+  private static getBrowserAPI(): any {
+    if (typeof (globalThis as any).browser !== "undefined") {
+      return (globalThis as any).browser;
+    }
+    if (typeof chrome !== "undefined") {
+      return chrome;
+    }
+    throw new Error("No browser API available");
   }
 }
