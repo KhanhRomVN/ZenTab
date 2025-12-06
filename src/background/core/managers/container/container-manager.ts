@@ -23,15 +23,8 @@ export class ContainerManager {
         this.containers = await this.browserAPI.contextualIdentities.query({});
         await this.saveContainers();
 
-        // Notify UI about containers update
-        try {
-          this.browserAPI.runtime.sendMessage({
-            action: "containersUpdated",
-            containers: this.containers,
-          });
-        } catch (error) {
-          // Ignore errors if no receivers
-        }
+        // Note: Không sendMessage ở đây vì message listener có thể chưa ready
+        // UI sẽ tự load containers khi cần thông qua getContainers()
       } else {
         this.containers = [];
       }

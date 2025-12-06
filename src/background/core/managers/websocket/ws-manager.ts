@@ -219,8 +219,6 @@ export class WSManager {
         const oldApiProvider = changes.apiProvider.oldValue;
 
         if (newApiProvider !== oldApiProvider) {
-          console.log("[WSManager] 🔄 API Provider changed, reconnecting...");
-
           if (this.connection) {
             this.connection.disconnect();
             this.connection = null;

@@ -25,8 +25,6 @@ export class ServiceRegistry {
    * Đăng ký tất cả services
    */
   public async registerAll(): Promise<void> {
-    console.log("[ServiceRegistry] 📝 Registering all services...");
-
     // Core Storage Services
     this.registerStorageServices();
 
@@ -41,23 +39,12 @@ export class ServiceRegistry {
 
     // Event Handlers
     this.registerEventHandlers();
-
-    console.log("[ServiceRegistry] ✅ All services registered");
-
-    // Log registered services
-    const serviceNames = this.dependencyContainer.getServiceNames();
-    console.log("[ServiceRegistry] 📊 Registered services:", {
-      services: serviceNames.services,
-      factories: serviceNames.factories,
-    });
   }
 
   /**
    * Đăng ký storage services
    */
   private registerStorageServices(): void {
-    console.log("[ServiceRegistry] 💾 Registering storage services...");
-
     // Storage Manager (singleton)
     this.dependencyContainer.registerFactory("StorageManager", () => {
       return new StorageManager();
@@ -68,8 +55,6 @@ export class ServiceRegistry {
    * Đăng ký core managers
    */
   private registerCoreManagers(): void {
-    console.log("[ServiceRegistry] 🏗️ Registering core managers...");
-
     // Tab State Manager (singleton)
     this.dependencyContainer.registerFactory("TabStateManager", () => {
       return TabStateManager.getInstance();
@@ -122,8 +107,6 @@ export class ServiceRegistry {
    * Đăng ký AI services (lazy loaded)
    */
   private registerAIServices(): void {
-    console.log("[ServiceRegistry] 🤖 Registering AI services (lazy)...");
-
     // DeepSeek Controller (lazy loaded)
     this.dependencyContainer.registerFactory("DeepSeekController", () => {
       return DeepSeekController;
@@ -142,8 +125,6 @@ export class ServiceRegistry {
    * Đăng ký utility services
    */
   private registerUtilityServices(): void {
-    console.log("[ServiceRegistry] 🛠️ Registering utility services...");
-
     // Browser API Helper (factory)
     this.dependencyContainer.registerFactory("BrowserAPI", () => {
       return this.getBrowserAPI();
@@ -167,8 +148,6 @@ export class ServiceRegistry {
    * Đăng ký event handlers
    */
   private registerEventHandlers(): void {
-    console.log("[ServiceRegistry] 🎯 Registering event handlers...");
-
     // Tab Event Handler
     this.dependencyContainer.registerFactory("TabEventHandler", () => {
       const tabStateManager =

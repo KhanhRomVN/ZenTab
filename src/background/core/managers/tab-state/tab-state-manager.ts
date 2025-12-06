@@ -61,8 +61,6 @@ export class TabStateManager {
       return;
     }
 
-    console.log("[TabStateManager] 🚀 Initializing...");
-
     try {
       // Initialize storage
       await this.storage.initialize();
@@ -77,7 +75,6 @@ export class TabStateManager {
       await this.recovery.startAutoRecovery();
 
       this.isInitialized = true;
-      console.log("[TabStateManager] ✅ Initialization completed");
     } catch (error) {
       console.error("[TabStateManager] ❌ Initialization failed:", error);
       throw error;
@@ -88,13 +85,10 @@ export class TabStateManager {
    * Cleanup resources
    */
   public async cleanup(): Promise<void> {
-    console.log("[TabStateManager] 🧹 Cleaning up...");
-
     await this.recovery.stopAutoRecovery();
     this.cache.clear();
 
     this.isInitialized = false;
-    console.log("[TabStateManager] ✅ Cleanup completed");
   }
 
   /**

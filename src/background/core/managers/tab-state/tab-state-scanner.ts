@@ -19,17 +19,12 @@ export class TabStateScanner {
    * Scan và initialize tất cả AI chat tabs
    */
   public async scanAndInitializeAllTabs(): Promise<void> {
-    console.log("[TabStateScanner] 🔍 Scanning for AI chat tabs...");
-
     try {
       const tabs = await this.getAllAIChatTabs();
 
       if (tabs.length === 0) {
-        console.log("[TabStateScanner] ⚠️ No AI chat tabs found");
         return;
       }
-
-      console.log(`[TabStateScanner] 📊 Found ${tabs.length} AI chat tabs`);
 
       const states: Record<number, TabStateData> = {};
 
@@ -76,8 +71,6 @@ export class TabStateScanner {
 
       // Notify UI về tab states
       await this.notifyUIUpdate();
-
-      console.log("[TabStateScanner] ✅ Tab scanning completed");
     } catch (error) {
       console.error("[TabStateScanner] ❌ Error scanning tabs:", error);
     }
@@ -115,11 +108,23 @@ export class TabStateScanner {
           folderPath: state.folderPath || null,
         });
 
+        // Log tab info for debugging
+        console.log(`[TabStateScanner] 📋 Processing tab ${tab.id}:`, {
+          title: tab.title,
+          url: tab.url,
+          cookieStoreId: tab.cookieStoreId,
+          status: actualStatus,
+        });
+
         // Get container name from Firefox Multi Account Container
         const containerName = await this.getContainerName(tab.cookieStoreId);
 
         // Detect LLM provider
         const provider = this.detectProvider(tab.url);
+
+        console.log(
+          `[TabStateScanner] 📊 Tab ${tab.id} processed - Container: ${containerName}, Provider: ${provider}`
+        );
 
         tabStates.push({
           tabId: tab.id,
@@ -150,7 +155,7 @@ export class TabStateScanner {
    */
   private detectProvider(
     url?: string
-  ): "deepseek" | "chatgpt" | "gemini" | "grok" | undefined {
+  ): "deepseek" | "chatgpt" | "gemini" | "grok" | "claude" | undefined {
     if (!url) return undefined;
 
     const urlLower = url.toLowerCase();
@@ -160,6 +165,7 @@ export class TabStateScanner {
       return "chatgpt";
     if (urlLower.includes("aistudio.google.com/prompts")) return "gemini";
     if (urlLower.includes("grok.com")) return "grok";
+    if (urlLower.includes("claude.ai")) return "claude";
 
     return undefined;
   }
@@ -167,37 +173,84 @@ export class TabStateScanner {
   /**
    * Get container name từ cookieStoreId (Firefox Multi Account Container)
    */
+  /**
+   * Get container name từ cookieStoreId (Firefox Multi Account Container)
+   */
   private async getContainerName(
     cookieStoreId?: string
   ): Promise<string | null> {
-    if (!cookieStoreId || cookieStoreId === "firefox-default") {
+    console.log(
+      `[TabStateScanner] 🔍 getContainerName called with cookieStoreId:`,
+      cookieStoreId
+    );
+
+    if (!cookieStoreId) {
+      console.log(`[TabStateScanner] ⚠️ cookieStoreId is undefined/null`);
+      return null;
+    }
+
+    if (cookieStoreId === "firefox-default") {
+      console.log(
+        `[TabStateScanner] ⚠️ cookieStoreId is firefox-default, skipping`
+      );
       return null;
     }
 
     try {
-      const browserAPI = this.getBrowserAPI();
+      // 🔥 FIX: Check global browser object correctly
+      const isFirefox = typeof (globalThis as any).browser !== "undefined";
 
-      // Check if contextualIdentities API exists (Firefox only)
-      if (!browserAPI.contextualIdentities) {
+      console.log(
+        `[TabStateScanner] 🔍 Browser type:`,
+        isFirefox ? "Firefox" : "Chrome-based"
+      );
+
+      if (!isFirefox) {
+        console.log(
+          `[TabStateScanner] ⚠️ Not Firefox - contextualIdentities not available`
+        );
         return null;
       }
 
-      // Wrap in Promise to handle async properly
-      const container = await new Promise<any>((resolve, reject) => {
-        try {
-          browserAPI.contextualIdentities.get(cookieStoreId, (result: any) => {
-            if (browserAPI.runtime.lastError) {
-              reject(browserAPI.runtime.lastError);
-              return;
-            }
-            resolve(result);
-          });
-        } catch (error) {
-          reject(error);
-        }
-      });
+      const browserAPI = (globalThis as any).browser;
 
-      return container?.name || null;
+      // Check if contextualIdentities API exists
+      if (!browserAPI.contextualIdentities) {
+        console.log(
+          `[TabStateScanner] ⚠️ contextualIdentities API not available - check manifest permissions`
+        );
+        return null;
+      }
+
+      console.log(
+        `[TabStateScanner] ✅ contextualIdentities API available, fetching container...`
+      );
+
+      // 🔥 FIX: Use Promise-based API (Firefox WebExtensions standard)
+      try {
+        const container = await browserAPI.contextualIdentities.get(
+          cookieStoreId
+        );
+
+        console.log(
+          `[TabStateScanner] 📦 Container fetched:`,
+          JSON.stringify(container, null, 2)
+        );
+
+        const containerName = container?.name || null;
+        console.log(
+          `[TabStateScanner] ✅ Final container name for ${cookieStoreId}:`,
+          containerName
+        );
+
+        return containerName;
+      } catch (apiError) {
+        console.error(
+          `[TabStateScanner] ❌ contextualIdentities.get failed:`,
+          apiError
+        );
+        return null;
+      }
     } catch (error) {
       console.error(
         `[TabStateScanner] ❌ Error getting container name for ${cookieStoreId}:`,
@@ -224,6 +277,7 @@ export class TabStateScanner {
         this.queryTabs(["https://*.openai.com/*"]),
         this.queryTabs(["https://aistudio.google.com/prompts/*"]),
         this.queryTabs(["https://grok.com/*", "https://*.grok.com/*"]),
+        this.queryTabs(["https://claude.ai/*", "https://*.claude.ai/*"]),
       ];
 
       const results = await Promise.allSettled(queryPromises);

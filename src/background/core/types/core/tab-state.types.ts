@@ -22,7 +22,7 @@ export interface TabStateInfo {
   canAccept: boolean;
   requestCount: number;
   folderPath: string | null;
-  provider?: "deepseek" | "chatgpt" | "gemini" | "grok";
+  provider?: "deepseek" | "chatgpt" | "gemini" | "grok" | "claude";
   cookieStoreId?: string;
 }
 

@@ -33,8 +33,6 @@ export class Bootstrap {
    * Khởi động toàn bộ hệ thống
    */
   public async initialize(): Promise<void> {
-    console.log("[Bootstrap] 🚀 Initializing system...");
-
     try {
       // Step 1: Register tất cả dependencies
       await this.serviceRegistry.registerAll();
@@ -44,10 +42,6 @@ export class Bootstrap {
 
       // Step 3: Setup event listeners
       await this.setupEventListeners();
-
-      console.log(
-        "[Bootstrap] ✅ System initialization completed successfully"
-      );
     } catch (error) {
       console.error("[Bootstrap] ❌ System initialization failed:", error);
       throw error;
@@ -58,13 +52,9 @@ export class Bootstrap {
    * Cleanup khi extension bị disable/uninstall
    */
   public async cleanup(): Promise<void> {
-    console.log("[Bootstrap] 🧹 Starting cleanup...");
-
     try {
       await this.startupManager.shutdown();
       this.dependencyContainer.clear();
-
-      console.log("[Bootstrap] ✅ Cleanup completed successfully");
     } catch (error) {
       console.error("[Bootstrap] ❌ Cleanup failed:", error);
     }

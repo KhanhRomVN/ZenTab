@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Activity, X } from "lucide-react";
+import { BackgroundHealth } from "@/shared/lib/background-health";
 
 interface TabCardProps {
   tab: {
@@ -25,29 +26,44 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
     }
 
     try {
-      const response = await chrome.runtime.sendMessage({
-        action: "unlinkTabFromFolder",
-        tabId: tab.tabId,
-        folderPath: tab.folderPath,
-      });
+      const response = await BackgroundHealth.sendMessage<any>(
+        {
+          action: "unlinkTabFromFolder",
+          tabId: tab.tabId,
+          folderPath: tab.folderPath,
+        },
+        {
+          maxRetries: 3,
+          timeout: 5000,
+          waitForReady: true,
+        }
+      );
 
       if (response && response.success) {
+        console.log(
+          `[TabCard] ✅ Successfully unlinked folder for tab ${tab.tabId}`
+        );
       } else {
         console.error(`[TabCard] ❌ Failed to unlink folder:`, response);
         alert(`Failed to unlink folder: ${response?.error || "Unknown error"}`);
       }
     } catch (error) {
       console.error(`[TabCard] ❌ Exception while unlinking folder:`, error);
-      alert(
-        `Error unlinking folder: ${
-          error instanceof Error ? error.message : String(error)
-        }`
-      );
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
+
+      if (errorMessage.includes("Background script not ready")) {
+        alert("Extension is starting up. Please wait a moment and try again.");
+      } else if (errorMessage.includes("timeout")) {
+        alert("Request timed out. Please try again.");
+      } else {
+        alert(`Error unlinking folder: ${errorMessage}`);
+      }
     }
   };
 
   const getProviderInfo = (
-    provider?: "deepseek" | "chatgpt" | "gemini" | "grok"
+    provider?: "deepseek" | "chatgpt" | "gemini" | "grok" | "claude"
   ): { name: string; color: string; bgColor: string } => {
     switch (provider) {
       case "deepseek":
@@ -61,6 +77,12 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
           name: "ChatGPT",
           color: "text-emerald-600 dark:text-emerald-400",
           bgColor: "bg-emerald-50 dark:bg-emerald-900/20",
+        };
+      case "claude":
+        return {
+          name: "Claude",
+          color: "text-amber-600 dark:text-amber-400",
+          bgColor: "bg-amber-50 dark:bg-amber-900/20",
         };
       case "gemini":
         return {

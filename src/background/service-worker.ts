@@ -7,12 +7,8 @@ declare const browser: typeof chrome & any;
   "use strict";
 
   try {
-    console.log("[ServiceWorker] 🚀 Starting initialization...");
-
     // Initialize the entire system via Bootstrap
     await bootstrap.initialize();
-
-    console.log("[ServiceWorker] ✅ System initialized successfully");
   } catch (error) {
     console.error("[ServiceWorker] ❌ Initialization failed:", error);
 
@@ -41,7 +37,6 @@ declare const browser: typeof chrome & any;
 if (typeof chrome !== "undefined" && chrome.runtime) {
   // Handle extension suspend/unload
   chrome.runtime.onSuspend.addListener(() => {
-    console.log("[ServiceWorker] 🛑 Extension suspending, cleaning up...");
     bootstrap.cleanup().catch((error) => {
       console.error("[ServiceWorker] ❌ Cleanup failed:", error);
     });
@@ -49,7 +44,6 @@ if (typeof chrome !== "undefined" && chrome.runtime) {
 
   // Handle extension restart
   chrome.runtime.onStartup.addListener(() => {
-    console.log("[ServiceWorker] 🔄 Extension restarting...");
     bootstrap.initialize().catch((error) => {
       console.error("[ServiceWorker] ❌ Restart initialization failed:", error);
     });

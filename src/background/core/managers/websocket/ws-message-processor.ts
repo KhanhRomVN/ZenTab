@@ -25,11 +25,6 @@ export class WSMessageProcessor {
     message: any
   ): Promise<{ success: boolean; response?: any; error?: string }> {
     try {
-      console.log(
-        `[WSMessageProcessor] 📨 Processing message from ${connectionId}:`,
-        message
-      );
-
       // Validate message structure
       const validation = this.validateMessage(message);
       if (!validation.isValid) {

@@ -2,7 +2,6 @@
 
 import { TabStateCache } from "./tab-state-cache";
 import { TabStateStorage } from "./tab-state-storage";
-import { TabStateInitializer } from "./tab-state-initializer";
 
 /**
  * Auto-recovery system cho stuck tabs
@@ -12,11 +11,7 @@ export class TabStateRecovery {
   private readonly RECOVERY_INTERVAL = 10000; // 10 seconds
   private isRunning = false;
 
-  constructor(
-    private cache: TabStateCache,
-    private storage: TabStateStorage,
-    private initializer: TabStateInitializer
-  ) {}
+  constructor(private cache: TabStateCache, private storage: TabStateStorage) {}
 
   /**
    * Start auto recovery system
@@ -26,8 +21,6 @@ export class TabStateRecovery {
       console.warn("[TabStateRecovery] ⚠️ Auto recovery already running");
       return;
     }
-
-    console.log("[TabStateRecovery] 🚀 Starting auto recovery system...");
 
     this.isRunning = true;
 
@@ -40,8 +33,6 @@ export class TabStateRecovery {
         console.error("[TabStateRecovery] ❌ Auto recovery error:", error);
       });
     }, this.RECOVERY_INTERVAL);
-
-    console.log("[TabStateRecovery] ✅ Auto recovery system started");
   }
 
   /**
@@ -52,15 +43,12 @@ export class TabStateRecovery {
       return;
     }
 
-    console.log("[TabStateRecovery] 🛑 Stopping auto recovery system...");
-
     if (this.recoveryInterval) {
       clearInterval(this.recoveryInterval);
       this.recoveryInterval = null;
     }
 
     this.isRunning = false;
-    console.log("[TabStateRecovery] ✅ Auto recovery system stopped");
   }
 
   /**
@@ -99,10 +87,6 @@ export class TabStateRecovery {
       }
 
       if (recoveredCount > 0) {
-        console.log(
-          `[TabStateRecovery] 🔄 Recovered ${recoveredCount} stuck tabs`
-        );
-
         // Notify UI về changes
         await this.notifyUIUpdate();
       }

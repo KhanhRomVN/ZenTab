@@ -39,8 +39,6 @@ export class TabEventHandler {
     browserAPI.tabs.onActivated.addListener((activeInfo: any) => {
       this.handleTabActivated(activeInfo);
     });
-
-    console.log("[TabEventHandler] ✅ Tab event listeners setup");
   }
 
   /**
@@ -49,7 +47,6 @@ export class TabEventHandler {
   public async cleanup(): Promise<void> {
     // Note: Chrome API doesn't provide a way to remove these listeners
     // They will be automatically cleaned up when extension is unloaded
-    console.log("[TabEventHandler] 🧹 Tab event listeners cleanup");
   }
 
   /**
@@ -60,8 +57,6 @@ export class TabEventHandler {
       return;
     }
 
-    console.log(`[TabEventHandler] 📝 Tab created: ${tab.id} - ${tab.url}`);
-
     // Wait for tab to load
     setTimeout(async () => {
       try {
@@ -70,7 +65,6 @@ export class TabEventHandler {
         if (!existingState) {
           // Tab mới, chưa có state → initialize
           // Note: TabStateManager sẽ tự động handle việc này
-          console.log(`[TabEventHandler] 🔄 Initializing new tab ${tab.id}`);
         }
       } catch (error) {
         console.error(
@@ -95,18 +89,12 @@ export class TabEventHandler {
 
     // Only handle when tab is fully loaded
     if (changeInfo.status === "complete") {
-      console.log(`[TabEventHandler] 📝 Tab updated: ${tabId} - ${tab.url}`);
-
       try {
         // Kiểm tra nếu tab đã có state
         const existingState = await this.tabStateManager.getTabState(tabId);
 
         if (!existingState) {
           // Tab mới được navigate tới AI chat site → initialize
-          console.log(
-            `[TabEventHandler] 🔄 Initializing navigated tab ${tabId}`
-          );
-
           // Notify UI về tab mới
           setTimeout(async () => {
             await this.tabStateManager.notifyUIUpdate();
@@ -124,9 +112,7 @@ export class TabEventHandler {
   /**
    * Handle tab removed event
    */
-  private async handleTabRemoved(tabId: number): Promise<void> {
-    console.log(`[TabEventHandler] 🗑️ Tab removed: ${tabId}`);
-
+  private async handleTabRemoved(_tabId: number): Promise<void> {
     // TabStateManager sẽ tự động handle cleanup thông qua storage listener
     // Chúng ta chỉ cần log sự kiện này
   }
@@ -138,7 +124,6 @@ export class TabEventHandler {
     const { tabId } = activeInfo;
 
     // Log activated tab (có thể dùng cho analytics sau này)
-    console.log(`[TabEventHandler] 👆 Tab activated: ${tabId}`);
   }
 
   /**

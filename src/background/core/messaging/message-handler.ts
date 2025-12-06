@@ -30,28 +30,60 @@ export class MessageHandler {
     sender: any,
     sendResponse: (response: any) => void
   ): Promise<boolean> {
-    // Handle WebSocket actions
-    if (this.handleWebSocketActions(message, sendResponse)) {
-      return true;
-    }
+    try {
+      // 🔥 FIX: Validate message structure first
+      if (!message || typeof message !== "object") {
+        console.error("[MessageHandler] ❌ Invalid message:", message);
+        sendResponse({
+          success: false,
+          error: "Invalid message format",
+        });
+        return false;
+      }
 
-    // Handle DeepSeek actions
-    if (await this.handleDeepSeekActions(message, sendResponse)) {
-      return true;
-    }
+      if (!message.action || typeof message.action !== "string") {
+        console.error(
+          "[MessageHandler] ❌ Missing or invalid action:",
+          message
+        );
+        sendResponse({
+          success: false,
+          error: "Missing action field",
+        });
+        return false;
+      }
 
-    // Handle Tab State actions
-    if (await this.handleTabStateActions(message, sendResponse)) {
-      return true;
-    }
+      // Handle WebSocket actions
+      if (this.handleWebSocketActions(message, sendResponse)) {
+        return true;
+      }
 
-    // Handle Container actions
-    if (await this.handleContainerActions(message, sendResponse)) {
-      return true;
-    }
+      // Handle DeepSeek actions
+      if (await this.handleDeepSeekActions(message, sendResponse)) {
+        return true;
+      }
 
-    // Handle other actions
-    return this.handleOtherActions(message, sendResponse);
+      // Handle Tab State actions
+      if (await this.handleTabStateActions(message, sendResponse)) {
+        return true;
+      }
+
+      // Handle Container actions
+      if (await this.handleContainerActions(message, sendResponse)) {
+        return true;
+      }
+
+      // Handle other actions
+      return this.handleOtherActions(message, sendResponse);
+    } catch (error) {
+      // 🔥 FIX: Always respond even on error
+      console.error("[MessageHandler] ❌ Unexpected error:", error);
+      sendResponse({
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return false;
+    }
   }
 
   /**
@@ -242,6 +274,14 @@ export class MessageHandler {
     sendResponse: (response: any) => void
   ): boolean {
     switch (message.action) {
+      case "ping":
+        sendResponse({
+          success: true,
+          timestamp: Date.now(),
+          ready: true,
+        });
+        return true;
+
       case "addToBlacklist":
         sendResponse({
           success: true,

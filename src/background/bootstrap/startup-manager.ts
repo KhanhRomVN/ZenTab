@@ -29,8 +29,6 @@ export class StartupManager {
       return;
     }
 
-    console.log("[StartupManager] 🚀 Starting system...");
-
     try {
       // Step 1: Cleanup legacy data
       await this.cleanupLegacyData();
@@ -44,12 +42,15 @@ export class StartupManager {
       // Step 4: Setup storage cleanup
       this.setupStorageCleanup();
 
+      // Step 5: Mark as initialized BEFORE notifying UI
+      // (listener sẽ được setup sau bởi Bootstrap.setupEventListeners())
       this.isInitialized = true;
 
-      // Step 5: Notify UI về initial state
-      await this.notifyUIInitialState();
-
-      console.log("[StartupManager] ✅ System startup completed");
+      // Step 6: Notify UI về initial state
+      // Delay một chút để đảm bảo listener đã ready
+      setTimeout(async () => {
+        await this.notifyUIInitialState();
+      }, 200);
     } catch (error) {
       console.error("[StartupManager] ❌ System startup failed:", error);
       throw error;
@@ -67,8 +68,6 @@ export class StartupManager {
       return;
     }
 
-    console.log("[StartupManager] 🛑 Shutting down system...");
-
     try {
       // Execute all cleanup callbacks
       for (const cleanup of this.cleanupCallbacks) {
@@ -82,8 +81,6 @@ export class StartupManager {
       // Clear cleanup callbacks
       this.cleanupCallbacks = [];
       this.isInitialized = false;
-
-      console.log("[StartupManager] ✅ System shutdown completed");
     } catch (error) {
       console.error("[StartupManager] ❌ System shutdown failed:", error);
       throw error;
@@ -94,8 +91,6 @@ export class StartupManager {
    * Setup tất cả event listeners
    */
   public async setupListeners(): Promise<void> {
-    console.log("[StartupManager] 🎧 Setting up event listeners...");
-
     try {
       // Get event handlers từ dependency container (sử dụng getAsync vì có thể là Promise)
       const tabEventHandler = await this.dependencyContainer.getAsync<any>(
@@ -109,7 +104,6 @@ export class StartupManager {
       if (tabEventHandler) {
         await tabEventHandler.setupListeners();
         this.registerCleanup(() => tabEventHandler.cleanup());
-        console.log("[StartupManager] ✅ Tab event listeners setup");
       } else {
         console.warn("[StartupManager] ⚠️ TabEventHandler not available");
       }
@@ -118,15 +112,12 @@ export class StartupManager {
       if (storageEventHandler) {
         await storageEventHandler.setupListeners();
         this.registerCleanup(() => storageEventHandler.cleanup());
-        console.log("[StartupManager] ✅ Storage event listeners setup");
       } else {
         console.warn("[StartupManager] ⚠️ StorageEventHandler not available");
       }
 
       // Setup runtime message listener
       await this.setupRuntimeMessageListener();
-
-      console.log("[StartupManager] ✅ All event listeners setup");
     } catch (error) {
       console.error(
         "[StartupManager] ❌ Failed to setup event listeners:",
@@ -147,8 +138,6 @@ export class StartupManager {
    * Cleanup legacy data từ các version cũ
    */
   private async cleanupLegacyData(): Promise<void> {
-    console.log("[StartupManager] 🧹 Cleaning up legacy data...");
-
     try {
       const browserAPI = this.getBrowserAPI();
 
@@ -167,7 +156,6 @@ export class StartupManager {
 
       await new Promise<void>((resolve) => {
         browserAPI.storage.local.remove(legacyKeys, () => {
-          console.log("[StartupManager] ✅ Legacy storage keys cleaned up");
           resolve();
         });
       });
@@ -189,7 +177,6 @@ export class StartupManager {
         if (isLegacy) {
           await new Promise<void>((resolve) => {
             browserAPI.storage.local.remove(["apiProvider"], () => {
-              console.log("[StartupManager] ✅ Legacy API Provider removed");
               resolve();
             });
           });
@@ -205,8 +192,6 @@ export class StartupManager {
    * Initialize core managers
    */
   private async initializeCoreManagers(): Promise<void> {
-    console.log("[StartupManager] 🏗️ Initializing core managers...");
-
     // Initialize Tab State Manager
     const tabStateManager = await this.dependencyContainer.getAsync<any>(
       "TabStateManager"
@@ -214,7 +199,6 @@ export class StartupManager {
     if (tabStateManager && tabStateManager.initialize) {
       await tabStateManager.initialize();
       this.registerCleanup(() => tabStateManager.cleanup());
-      console.log("[StartupManager] ✅ TabStateManager initialized");
     }
 
     // Initialize Container Manager
@@ -223,14 +207,12 @@ export class StartupManager {
     );
     if (containerManager && containerManager.initializeContainers) {
       await containerManager.initializeContainers();
-      console.log("[StartupManager] ✅ ContainerManager initialized");
     }
 
     // Initialize WebSocket Manager (connect if configured)
     const wsManager = await this.dependencyContainer.getAsync<any>("WSManager");
     if (wsManager) {
       // Note: WebSocket sẽ tự động connect khi cần
-      console.log("[StartupManager] ✅ WSManager initialized");
     }
 
     // Initialize Tab Broadcaster
@@ -238,7 +220,6 @@ export class StartupManager {
       "TabBroadcaster"
     );
     if (tabBroadcaster) {
-      console.log("[StartupManager] ✅ TabBroadcaster initialized");
     }
   }
 
@@ -246,8 +227,6 @@ export class StartupManager {
    * Setup storage cleanup interval
    */
   private setupStorageCleanup(): void {
-    console.log("[StartupManager] ⏰ Setting up storage cleanup interval...");
-
     // Cleanup old messages mỗi 5 phút
     const cleanupInterval = setInterval(async () => {
       try {
@@ -280,9 +259,6 @@ export class StartupManager {
         if (cleanedCount > 0) {
           await new Promise<void>((resolve) => {
             browserAPI.storage.local.set({ wsMessages: messages }, () => {
-              console.log(
-                `[StartupManager] 🧹 Cleaned ${cleanedCount} old messages`
-              );
               resolve();
             });
           });
@@ -296,8 +272,6 @@ export class StartupManager {
     this.registerCleanup(async () => {
       clearInterval(cleanupInterval);
     });
-
-    console.log("[StartupManager] ✅ Storage cleanup interval setup");
   }
 
   /**
@@ -309,30 +283,89 @@ export class StartupManager {
     );
     const browserAPI = this.getBrowserAPI();
 
-    if (!messageHandler || !browserAPI.runtime.onMessage) {re
+    if (!messageHandler) {
+      console.error(
+        "[StartupManager] ❌ MessageHandler not available - cannot setup listener"
+      );
       return;
     }
+
+    if (!browserAPI.runtime.onMessage) {
+      console.error(
+        "[StartupManager] ❌ runtime.onMessage not available - incompatible browser"
+      );
+      return;
+    }
+
+    console.log("[StartupManager] ✅ Setting up runtime message listener");
+
+    // 🔥 FIX: Track if listener is ready
+    let listenerReady = false;
 
     // Unified Message Listener
     browserAPI.runtime.onMessage.addListener(
       (message: any, sender: any, sendResponse: any) => {
-        // Wrap async handler và return true ngay lập tức để giữ channel mở
-        (async () => {
+        // 🔥 FIX: Immediately mark as ready and return true
+        if (!listenerReady) {
+          console.log("[StartupManager] 📡 Message listener is now ready");
+          listenerReady = true;
+        }
+
+        try {
+          // Wrap async handler
+          (async () => {
+            try {
+              await messageHandler.handleMessage(message, sender, sendResponse);
+            } catch (error) {
+              console.error(
+                "[StartupManager] ❌ Message handler error:",
+                error
+              );
+
+              try {
+                sendResponse({
+                  success: false,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              } catch (responseError) {
+                console.error(
+                  "[StartupManager] ❌ Failed to send error response:",
+                  responseError
+                );
+              }
+            }
+          })();
+        } catch (syncError) {
+          console.error(
+            "[StartupManager] ❌ Sync error in message listener:",
+            syncError
+          );
+
           try {
-            await messageHandler.handleMessage(message, sender, sendResponse);
-          } catch (error) {
-            console.error("[StartupManager] ❌ Message handler error:", error);
             sendResponse({
               success: false,
-              error: error instanceof Error ? error.message : String(error),
+              error:
+                syncError instanceof Error
+                  ? syncError.message
+                  : String(syncError),
             });
+          } catch (responseError) {
+            console.error(
+              "[StartupManager] ❌ Failed to send sync error response:",
+              responseError
+            );
           }
-        })();
-        return true; // CRITICAL: Return true để giữ message channel mở cho async response
+        }
+
+        // CRITICAL: Always return true để giữ message channel mở
+        return true;
       }
     );
 
-    console.log("[StartupManager] ✅ Runtime message listener setup");
+    // 🔥 FIX: Đợi một chút để đảm bảo listener đã ready
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    console.log("[StartupManager] ✅ Runtime message listener setup complete");
   }
 
   /**
@@ -354,15 +387,9 @@ export class StartupManager {
         browserAPI.runtime.sendMessage(messagePayload, () => {
           if (browserAPI.runtime.lastError) {
             // Ignore no receivers error
-            console.log(
-              "[StartupManager] ⚠️ UI not ready to receive initial state"
-            );
             resolve();
             return;
           }
-          console.log(
-            "[StartupManager] ✅ Initial state notification sent to UI"
-          );
           resolve();
         });
       });

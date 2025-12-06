@@ -43,8 +43,6 @@ export class RuntimeEventHandler {
     browserAPI.runtime.onInstalled.addListener((details: any) => {
       this.handleInstalled(details);
     });
-
-    console.log("[RuntimeEventHandler] ✅ Runtime event listeners setup");
   }
 
   /**
@@ -52,7 +50,6 @@ export class RuntimeEventHandler {
    */
   public async cleanup(): Promise<void> {
     // Note: Chrome API doesn't provide a way to remove these listeners
-    console.log("[RuntimeEventHandler] 🧹 Runtime event listeners cleanup");
   }
 
   /**
@@ -63,14 +60,6 @@ export class RuntimeEventHandler {
     sender: any,
     sendResponse: (response?: any) => void
   ): Promise<boolean | undefined> {
-    // Log message for debugging
-    console.log(
-      "[RuntimeEventHandler] 📨 Received runtime message:",
-      message,
-      "from:",
-      sender
-    );
-
     // Handle message based on type
     switch (message.type) {
       case "ping":
@@ -441,8 +430,6 @@ export class RuntimeEventHandler {
    * Handle alarm events
    */
   private async handleAlarm(alarm: any): Promise<void> {
-    console.log("[RuntimeEventHandler] ⏰ Alarm triggered:", alarm.name);
-
     switch (alarm.name) {
       case "cleanupStorage":
         await this.cleanupStorage();
@@ -450,10 +437,6 @@ export class RuntimeEventHandler {
 
       case "checkWebSocketConnections":
         // Note: checkConnections không tồn tại trong WSManager
-        // Chỉ log để debug
-        console.log(
-          "[RuntimeEventHandler] ⚠️ checkWebSocketConnections alarm triggered (not implemented)"
-        );
         break;
 
       default:
@@ -465,8 +448,6 @@ export class RuntimeEventHandler {
    * Handle startup event
    */
   private async handleStartup(): Promise<void> {
-    console.log("[RuntimeEventHandler] 🚀 Extension started up");
-
     // Setup cleanup alarms
     await this.setupAlarms();
   }
@@ -475,11 +456,6 @@ export class RuntimeEventHandler {
    * Handle installed/updated event
    */
   private async handleInstalled(details: any): Promise<void> {
-    console.log(
-      "[RuntimeEventHandler] 📦 Extension installed/updated:",
-      details
-    );
-
     // Clear old storage data nếu cần
     if (details.reason === "update") {
       await this.cleanupLegacyData();
@@ -504,8 +480,6 @@ export class RuntimeEventHandler {
     browserAPI.alarms.create("checkWebSocketConnections", {
       periodInMinutes: 1,
     });
-
-    console.log("[RuntimeEventHandler] ✅ Cleanup alarms setup");
   }
 
   /**
@@ -528,7 +502,6 @@ export class RuntimeEventHandler {
 
     await new Promise<void>((resolve) => {
       browserAPI.storage.local.remove(legacyKeys, () => {
-        console.log("[RuntimeEventHandler] ✅ Legacy storage keys cleaned up");
         resolve();
       });
     });
@@ -567,9 +540,6 @@ export class RuntimeEventHandler {
     if (cleanedCount > 0) {
       await new Promise<void>((resolve) => {
         browserAPI.storage.local.set({ wsMessages: messages }, () => {
-          console.log(
-            `[RuntimeEventHandler] 🧹 Cleaned ${cleanedCount} old messages`
-          );
           resolve();
         });
       });

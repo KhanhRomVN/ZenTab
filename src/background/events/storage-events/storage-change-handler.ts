@@ -26,8 +26,6 @@ export class StorageChangeHandler {
         this.handleStorageChanges(changes, areaName);
       }
     );
-
-    console.log("[StorageChangeHandler] ✅ Storage change listeners setup");
   }
 
   /**
@@ -35,7 +33,6 @@ export class StorageChangeHandler {
    */
   public async cleanup(): Promise<void> {
     // Note: Chrome API doesn't provide a way to remove these listeners
-    console.log("[StorageChangeHandler] 🧹 Storage change listeners cleanup");
   }
 
   /**
@@ -351,10 +348,6 @@ export class StorageChangeHandler {
     oldValue: string
   ): Promise<void> {
     if (newValue !== oldValue) {
-      console.log(
-        "[StorageChangeHandler] 🔄 API Provider changed, reconnecting WebSocket..."
-      );
-
       // WebSocket sẽ tự động reconnect khi cần
     }
   }

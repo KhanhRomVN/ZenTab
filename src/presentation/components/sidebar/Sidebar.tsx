@@ -5,6 +5,7 @@ import MenuDrawer from "./MenuDrawer";
 import SettingDrawer from "./SettingDrawer";
 import { Settings, Power, PowerOff } from "lucide-react";
 import { WSHelper } from "@/shared/lib/ws-helper";
+import { BackgroundHealth } from "@/shared/lib/background-health";
 
 interface TabStateResponse {
   success: boolean;
@@ -38,6 +39,18 @@ const Sidebar: React.FC = () => {
 
   useEffect(() => {
     const initializeSidebar = async () => {
+      console.log("[Sidebar] 🚀 Waiting for background script...");
+
+      // 🔥 FIX: Dùng BackgroundHealth.waitForReady() thay vì delay cứng
+      const isReady = await BackgroundHealth.waitForReady();
+
+      if (!isReady) {
+        console.error("[Sidebar] ❌ Background script failed to initialize");
+        return;
+      }
+
+      console.log("[Sidebar] ✅ Background script is ready");
+
       const storageResult = await chrome.storage.local.get(["apiProvider"]);
       const storedProvider = storageResult?.apiProvider || "";
 
@@ -46,8 +59,34 @@ const Sidebar: React.FC = () => {
       // Load WebSocket status (chỉ load, không auto-connect)
       await loadWebSocketStatus();
 
-      // Load tabs
-      await loadTabs();
+      // Load tabs với retry
+      let retries = 3;
+      let success = false;
+
+      while (retries > 0 && !success) {
+        try {
+          await loadTabs();
+          success = true;
+          console.log("[Sidebar] ✅ Tabs loaded successfully");
+        } catch (error) {
+          retries--;
+          console.warn(
+            `[Sidebar] ⚠️ Failed to load tabs, retrying... (${retries} attempts left)`,
+            error
+          );
+
+          if (retries > 0) {
+            // Exponential backoff: 1s, 2s
+            await new Promise((resolve) =>
+              setTimeout(resolve, (4 - retries) * 1000)
+            );
+          }
+        }
+      }
+
+      if (!success) {
+        console.error("[Sidebar] ❌ Failed to load tabs after all retries");
+      }
 
       const port = chrome.runtime.connect({ name: "zenTab-sidebar" });
 
@@ -136,68 +175,24 @@ const Sidebar: React.FC = () => {
 
   const loadTabs = async (providedWsState?: { status: string }) => {
     try {
-      let wsState = providedWsState;
-
-      if (!wsState) {
-        const storageResult = await chrome.storage.local.get(["wsStates"]);
-        const states = storageResult?.wsStates || {};
-        const connectionIds = Object.keys(states);
-        if (connectionIds.length > 0) {
-          wsState = states[connectionIds[0]];
+      const response = await BackgroundHealth.sendMessage<TabStateResponse>(
+        { action: "getTabStates" },
+        {
+          maxRetries: 3,
+          timeout: 5000,
+          waitForReady: true,
         }
-      }
-
-      let response: TabStateResponse | null = null;
-      let attempts = 0;
-      const maxAttempts = 3;
-      const timeoutMs = 3000;
-
-      while (attempts < maxAttempts && !response) {
-        attempts++;
-        try {
-          const attemptResponse = await Promise.race([
-            new Promise<TabStateResponse | null>((resolve) => {
-              chrome.runtime.sendMessage(
-                { action: "getTabStates" },
-                (response) => {
-                  if (chrome.runtime.lastError) {
-                    resolve(null);
-                    return;
-                  }
-
-                  resolve(response as TabStateResponse);
-                }
-              );
-            }),
-            new Promise<null>((resolve) =>
-              setTimeout(() => {
-                resolve(null);
-              }, timeoutMs)
-            ),
-          ]);
-
-          if (attemptResponse && attemptResponse.success) {
-            response = attemptResponse;
-            break;
-          }
-        } catch (error) {
-          // Silent error handling
-        }
-
-        // Wait before retry (except on last attempt)
-        if (attempts < maxAttempts && !response) {
-          const retryDelay = 1000;
-          await new Promise((resolve) => setTimeout(resolve, retryDelay));
-        }
-      }
+      );
 
       if (!response) {
+        console.warn(`[Sidebar] ⚠️ No response from background`);
         setTabs([]);
         setActiveTabs(new Set());
         return;
       }
 
       if (!response.success) {
+        console.warn(`[Sidebar] ⚠️ getTabStates returned success: false`);
         setTabs([]);
         setActiveTabs(new Set());
         return;
@@ -212,6 +207,7 @@ const Sidebar: React.FC = () => {
 
       setActiveTabs(activeTabIds);
     } catch (error) {
+      console.error(`[Sidebar] ❌ loadTabs exception:`, error);
       setTabs([]);
       setActiveTabs(new Set());
     }
@@ -395,7 +391,7 @@ const Sidebar: React.FC = () => {
             </div>
             <p className="text-text-secondary text-sm">No AI chat tabs open</p>
             <p className="text-text-secondary/70 text-xs mt-1 px-4">
-              Open DeepSeek, ChatGPT, Gemini, or Grok to get started!
+              Open DeepSeek, ChatGPT, Claude, Gemini, or Grok to get started!
             </p>
             <div className="flex flex-wrap gap-2 mt-3 justify-center px-4">
               <span className="text-xs px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded">
@@ -403,6 +399,9 @@ const Sidebar: React.FC = () => {
               </span>
               <span className="text-xs px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 rounded">
                 💬 ChatGPT
+              </span>
+              <span className="text-xs px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded">
+                🧠 Claude
               </span>
               <span className="text-xs px-2 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 rounded">
                 ✨ Gemini

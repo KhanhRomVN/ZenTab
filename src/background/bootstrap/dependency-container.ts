@@ -18,7 +18,6 @@ export class DependencyContainer {
     }
 
     this.services.set(serviceName, instance);
-    console.log(`[DependencyContainer] ✅ Registered service: ${serviceName}`);
   }
 
   /**
@@ -32,7 +31,6 @@ export class DependencyContainer {
     }
 
     this.factories.set(serviceName, factory);
-    console.log(`[DependencyContainer] ✅ Registered factory: ${serviceName}`);
   }
 
   /**
@@ -69,10 +67,6 @@ export class DependencyContainer {
         }
 
         this.services.set(serviceName, instanceOrPromise);
-
-        console.log(
-          `[DependencyContainer] 🔧 Created instance from factory: ${serviceName}`
-        );
         return instanceOrPromise as T;
       } catch (error) {
         console.error(
@@ -123,9 +117,6 @@ export class DependencyContainer {
           try {
             const resolved = await instanceOrPromise;
             this.services.set(serviceName, resolved);
-            console.log(
-              `[DependencyContainer] 🔧 Created instance from async factory: ${serviceName}`
-            );
             return resolved as T;
           } catch (error) {
             console.error(
@@ -137,9 +128,6 @@ export class DependencyContainer {
         }
 
         this.services.set(serviceName, instanceOrPromise);
-        console.log(
-          `[DependencyContainer] 🔧 Created instance from factory: ${serviceName}`
-        );
         return instanceOrPromise as T;
       } catch (error) {
         console.error(
@@ -158,8 +146,6 @@ export class DependencyContainer {
    * Resolve tất cả dependencies (tạo instances từ tất cả factories)
    */
   public async resolveAll(): Promise<void> {
-    console.log(`[DependencyContainer] 🔧 Resolving all dependencies...`);
-
     const factoryNames = Array.from(this.factories.keys());
     let resolvedCount = 0;
 
@@ -179,9 +165,6 @@ export class DependencyContainer {
             const resolved = await instanceOrPromise;
             this.services.set(serviceName, resolved);
             resolvedCount++;
-            console.log(
-              `[DependencyContainer] ✅ Resolved async: ${serviceName}`
-            );
           } catch (error) {
             console.error(
               `[DependencyContainer] ❌ Failed to resolve async factory ${serviceName}:`,
@@ -191,7 +174,6 @@ export class DependencyContainer {
         } else {
           this.services.set(serviceName, instanceOrPromise);
           resolvedCount++;
-          console.log(`[DependencyContainer] ✅ Resolved: ${serviceName}`);
         }
       } catch (error) {
         console.error(
@@ -200,10 +182,6 @@ export class DependencyContainer {
         );
       }
     }
-
-    console.log(
-      `[DependencyContainer] ✅ Resolved ${resolvedCount}/${factoryNames.length} dependencies`
-    );
   }
 
   /**
@@ -231,11 +209,6 @@ export class DependencyContainer {
   public remove(serviceName: string): boolean {
     const hadService = this.services.delete(serviceName);
     const hadFactory = this.factories.delete(serviceName);
-
-    if (hadService || hadFactory) {
-      console.log(`[DependencyContainer] 🗑️ Removed service: ${serviceName}`);
-    }
-
     return hadService || hadFactory;
   }
 
@@ -243,15 +216,8 @@ export class DependencyContainer {
    * Xóa tất cả services
    */
   public clear(): void {
-    const serviceCount = this.services.size;
-    const factoryCount = this.factories.size;
-
     this.services.clear();
     this.factories.clear();
-
-    console.log(
-      `[DependencyContainer] 🧹 Cleared all services (${serviceCount} services, ${factoryCount} factories)`
-    );
   }
 
   /**
