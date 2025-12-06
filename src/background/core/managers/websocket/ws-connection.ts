@@ -56,6 +56,11 @@ export class WSConnection {
           this.notifyStateChange();
           this.startHealthMonitor();
 
+          // 🆕 Broadcast tabs sau khi connect (delay 500ms để đảm bảo client ready)
+          setTimeout(() => {
+            this.broadcastCurrentTabs();
+          }, 500);
+
           resolve();
         };
 
@@ -197,7 +202,7 @@ export class WSConnection {
   /**
    * Handle ping message
    */
-  private handlePing(message: any): void {
+  private handlePing(_message: any): void {
     this.lastPingTime = Date.now();
 
     if (this.ws && this.state.status === "connected") {
@@ -552,6 +557,127 @@ export class WSConnection {
         "[WSConnection] ❌ Error sending disconnect signal:",
         error
       );
+    }
+  }
+
+  /**
+   * 🆕 Broadcast current tabs after connection established
+   */
+  private async broadcastCurrentTabs(): Promise<void> {
+    try {
+      const browserAPI = this.getBrowserAPI();
+
+      // Get all AI chat tabs
+      const urlPatterns = [
+        "https://chat.deepseek.com/*",
+        "https://chatgpt.com/*",
+        "https://*.openai.com/*",
+        "https://claude.ai/*",
+        "https://aistudio.google.com/prompts/*",
+        "https://grok.com/*",
+      ];
+
+      const tabs = await new Promise<chrome.tabs.Tab[]>((resolve, reject) => {
+        browserAPI.tabs.query(
+          { url: urlPatterns },
+          (tabs: chrome.tabs.Tab[]) => {
+            if (browserAPI.runtime.lastError) {
+              reject(browserAPI.runtime.lastError);
+              return;
+            }
+            resolve(tabs || []);
+          }
+        );
+      });
+
+      const focusedTabs = await Promise.all(
+        tabs
+          .filter((tab) => tab && tab.id)
+          .map(async (tab) => {
+            const provider = this.detectProviderFromUrl(tab.url);
+
+            // 🆕 FIX: Get cookieStoreId và container name
+            const cookieStoreId = (tab as any).cookieStoreId || undefined;
+            const containerName = await this.getContainerName(cookieStoreId);
+
+            // 🆕 DEBUG: Log container name resolution
+            console.log(
+              `[WSConnection] 🔍 Tab ${tab.id}: cookieStoreId=${cookieStoreId}, containerName=${containerName}`
+            );
+
+            return {
+              tabId: tab.id!,
+              containerName: containerName,
+              title: tab.title || "Untitled",
+              url: tab.url,
+              provider: provider,
+              cookieStoreId: cookieStoreId,
+            };
+          })
+      );
+
+      // Send focusedTabsUpdate
+      if (this.ws && this.state.status === "connected") {
+        this.ws.send(
+          JSON.stringify({
+            type: "focusedTabsUpdate",
+            data: focusedTabs,
+            timestamp: Date.now(),
+          })
+        );
+
+        console.log(
+          `[WSConnection] 📤 Broadcasted ${focusedTabs.length} tabs after connection`
+        );
+      }
+    } catch (error) {
+      console.error(`[WSConnection] ❌ Error broadcasting tabs:`, error);
+    }
+  }
+
+  /**
+   * 🆕 Helper to detect provider from URL
+   */
+  private detectProviderFromUrl(
+    url?: string
+  ): "deepseek" | "chatgpt" | "gemini" | "grok" | "claude" | undefined {
+    if (!url) return undefined;
+
+    const urlLower = url.toLowerCase();
+
+    if (urlLower.includes("deepseek.com")) return "deepseek";
+    if (urlLower.includes("chatgpt.com") || urlLower.includes("openai.com"))
+      return "chatgpt";
+    if (urlLower.includes("aistudio.google.com/prompts")) return "gemini";
+    if (urlLower.includes("grok.com")) return "grok";
+    if (urlLower.includes("claude.ai")) return "claude";
+
+    return undefined;
+  }
+
+  /**
+   * 🆕 Get container name from cookieStoreId
+   */
+  private async getContainerName(
+    cookieStoreId?: string
+  ): Promise<string | null> {
+    if (!cookieStoreId || cookieStoreId === "firefox-default") {
+      return null;
+    }
+
+    try {
+      const isFirefox = typeof (globalThis as any).browser !== "undefined";
+      if (!isFirefox) return null;
+
+      const browserAPI = (globalThis as any).browser;
+      if (!browserAPI.contextualIdentities) return null;
+
+      const container = await browserAPI.contextualIdentities.get(
+        cookieStoreId
+      );
+      return container?.name || null;
+    } catch (error) {
+      return null;
     }
   }
 

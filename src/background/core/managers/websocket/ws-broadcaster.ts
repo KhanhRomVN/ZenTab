@@ -7,6 +7,8 @@ interface FocusedTab {
   containerName: string;
   title: string;
   url?: string;
+  provider?: "deepseek" | "chatgpt" | "gemini" | "grok" | "claude";
+  cookieStoreId?: string;
 }
 
 /**
@@ -68,11 +70,23 @@ export class TabBroadcaster {
 
     // Tab events
     browserAPI.tabs.onUpdated.addListener(
-      (changeInfo: { title: any; url: any }, tab: { url: string }) => {
-        if (
-          tab.url?.startsWith("https://chat.deepseek.com") &&
-          (changeInfo.title || changeInfo.url)
-        ) {
+      (
+        _tabId: number,
+        changeInfo: { title?: string; url?: string },
+        tab: chrome.tabs.Tab
+      ) => {
+        // 🆕 Check tất cả AI chat URLs (không chỉ DeepSeek)
+        if (!tab.url) return;
+
+        const isAIChatTab =
+          tab.url.includes("deepseek.com") ||
+          tab.url.includes("chatgpt.com") ||
+          tab.url.includes("openai.com") ||
+          tab.url.includes("claude.ai") ||
+          tab.url.includes("aistudio.google.com/prompts") ||
+          tab.url.includes("grok.com");
+
+        if (isAIChatTab && (changeInfo.title || changeInfo.url)) {
           debouncedBroadcast();
         }
       }
@@ -217,9 +231,19 @@ export class TabBroadcaster {
     try {
       const browserAPI = this.getBrowserAPI();
 
+      // 🆕 Query tất cả AI chat tabs (không chỉ DeepSeek)
+      const urlPatterns = [
+        "https://chat.deepseek.com/*",
+        "https://chatgpt.com/*",
+        "https://*.openai.com/*",
+        "https://claude.ai/*",
+        "https://aistudio.google.com/prompts/*",
+        "https://grok.com/*",
+      ];
+
       const tabs = await new Promise<chrome.tabs.Tab[]>((resolve, reject) => {
         browserAPI.tabs.query(
-          { url: "https://chat.deepseek.com/*" },
+          { url: urlPatterns },
           (tabs: chrome.tabs.Tab[]) => {
             if (browserAPI.runtime.lastError) {
               reject(browserAPI.runtime.lastError);
@@ -237,11 +261,20 @@ export class TabBroadcaster {
           continue;
         }
 
+        // 🆕 Detect provider from URL
+        const provider = this.detectProvider(tab.url);
+
+        // 🆕 FIX: Get cookieStoreId và container name
+        const cookieStoreId = (tab as any).cookieStoreId || undefined;
+        const containerName = await this.getContainerName(cookieStoreId);
+
         focusedTabs.push({
           tabId: tab.id,
-          containerName: `Tab ${tab.id}`,
+          containerName: containerName || `Tab ${tab.id}`,
           title: tab.title || "Untitled",
           url: tab.url,
+          provider: provider,
+          cookieStoreId: cookieStoreId,
         });
       }
 
@@ -249,6 +282,52 @@ export class TabBroadcaster {
     } catch (error) {
       console.error("[TabBroadcaster] ❌ Error getting focused tabs:", error);
       return [];
+    }
+  }
+
+  /**
+   * 🆕 Detect provider from URL
+   */
+  private detectProvider(
+    url?: string
+  ): "deepseek" | "chatgpt" | "gemini" | "grok" | "claude" | undefined {
+    if (!url) return undefined;
+
+    const urlLower = url.toLowerCase();
+
+    if (urlLower.includes("deepseek.com")) return "deepseek";
+    if (urlLower.includes("chatgpt.com") || urlLower.includes("openai.com"))
+      return "chatgpt";
+    if (urlLower.includes("aistudio.google.com/prompts")) return "gemini";
+    if (urlLower.includes("grok.com")) return "grok";
+    if (urlLower.includes("claude.ai")) return "claude";
+
+    return undefined;
+  }
+
+  /**
+   * 🆕 Get container name from cookieStoreId
+   */
+  private async getContainerName(
+    cookieStoreId?: string
+  ): Promise<string | null> {
+    if (!cookieStoreId || cookieStoreId === "firefox-default") {
+      return null;
+    }
+
+    try {
+      const isFirefox = typeof (globalThis as any).browser !== "undefined";
+      if (!isFirefox) return null;
+
+      const browserAPI = (globalThis as any).browser;
+      if (!browserAPI.contextualIdentities) return null;
+
+      const container = await browserAPI.contextualIdentities.get(
+        cookieStoreId
+      );
+      return container?.name || null;
+    } catch (error) {
+      return null;
     }
   }
 
@@ -260,51 +339,5 @@ export class TabBroadcaster {
       return chrome;
     }
     throw new Error("No browser API available");
-  }
-
-  /**
-   * Handle sendPrompt request from VS Code
-   */
-  private async handleSendPromptRequest(message: any): Promise<void> {
-    const {
-      tabId,
-      systemPrompt,
-      userPrompt,
-      requestId,
-      isNewTask,
-      folderPath,
-    } = message;
-
-    if (!tabId || !userPrompt || !requestId) {
-      console.error("[WSConnection] ❌ Invalid sendPrompt request:", message);
-      return;
-    }
-
-    // Store request để deduplication
-    const dedupeKey = `sendPrompt_${requestId}`;
-    const storageManager = this.getStorageManager();
-
-    const existing = await storageManager.get<any>(dedupeKey);
-    if (existing) {
-      console.warn(
-        `[WSConnection] ⚠️ Duplicate sendPrompt request: ${requestId}`
-      );
-      return;
-    }
-
-    await storageManager.set(dedupeKey, Date.now());
-
-    // Schedule cleanup
-    setTimeout(() => {
-      storageManager.remove([dedupeKey]).catch(() => {});
-    }, 5000);
-
-    // Store message với folderPath
-    await this.storeMessage({
-      ...message,
-      type: "sendPrompt",
-      folderPath: folderPath || null, // Ensure folderPath is included
-      timestamp: Date.now(),
-    });
   }
 }

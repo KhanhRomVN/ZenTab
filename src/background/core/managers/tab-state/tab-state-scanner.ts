@@ -167,16 +167,18 @@ export class TabStateScanner {
   private async getContainerName(
     cookieStoreId?: string
   ): Promise<string | null> {
+    // 🆕 VALIDATION: Early return if no cookieStoreId
     if (!cookieStoreId) {
       return null;
     }
 
+    // 🆕 VALIDATION: Skip firefox-default
     if (cookieStoreId === "firefox-default") {
       return null;
     }
 
     try {
-      // 🔥 FIX: Check global browser object correctly
+      // 🆕 CHECK: Verify browser API availability
       const isFirefox = typeof (globalThis as any).browser !== "undefined";
 
       if (!isFirefox) {
@@ -185,12 +187,12 @@ export class TabStateScanner {
 
       const browserAPI = (globalThis as any).browser;
 
-      // Check if contextualIdentities API exists
+      // 🆕 CHECK: Verify contextualIdentities API
       if (!browserAPI.contextualIdentities) {
         return null;
       }
 
-      // 🔥 FIX: Use Promise-based API (Firefox WebExtensions standard)
+      // 🆕 FIX: Use Promise-based API with detailed logging
       try {
         const container = await browserAPI.contextualIdentities.get(
           cookieStoreId
@@ -198,10 +200,17 @@ export class TabStateScanner {
 
         const containerName = container?.name || null;
 
+        // 🆕 DEBUG: Log successful container name retrieval
+        if (containerName) {
+          console.log(
+            `[TabStateScanner] ✅ Container name for ${cookieStoreId}: ${containerName}`
+          );
+        }
+
         return containerName;
       } catch (apiError) {
         console.error(
-          `[TabStateScanner] ❌ contextualIdentities.get failed:`,
+          `[TabStateScanner] ❌ contextualIdentities.get failed for ${cookieStoreId}:`,
           apiError
         );
         return null;
