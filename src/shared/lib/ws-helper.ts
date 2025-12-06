@@ -33,12 +33,6 @@ export class WSHelper {
         typeof response !== "object" ||
         typeof response.success !== "boolean"
       ) {
-        console.warn(
-          "[WSHelper] ⚠️ Invalid response structure, verifying via storage..."
-        );
-        console.warn(`[WSHelper] 🔍 Response type: ${typeof response}`);
-        console.warn(`[WSHelper] 🔍 Response value:`, response);
-
         // Đợi backend ghi state vào storage (tối đa 2s)
         const maxWaitTime = 2000;
         const pollInterval = 200;

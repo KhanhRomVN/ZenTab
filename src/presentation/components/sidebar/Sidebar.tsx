@@ -39,8 +39,6 @@ const Sidebar: React.FC = () => {
 
   useEffect(() => {
     const initializeSidebar = async () => {
-      console.log("[Sidebar] 🚀 Waiting for background script...");
-
       // 🔥 FIX: Dùng BackgroundHealth.waitForReady() thay vì delay cứng
       const isReady = await BackgroundHealth.waitForReady();
 
@@ -48,8 +46,6 @@ const Sidebar: React.FC = () => {
         console.error("[Sidebar] ❌ Background script failed to initialize");
         return;
       }
-
-      console.log("[Sidebar] ✅ Background script is ready");
 
       const storageResult = await chrome.storage.local.get(["apiProvider"]);
       const storedProvider = storageResult?.apiProvider || "";
@@ -67,13 +63,8 @@ const Sidebar: React.FC = () => {
         try {
           await loadTabs();
           success = true;
-          console.log("[Sidebar] ✅ Tabs loaded successfully");
         } catch (error) {
           retries--;
-          console.warn(
-            `[Sidebar] ⚠️ Failed to load tabs, retrying... (${retries} attempts left)`,
-            error
-          );
 
           if (retries > 0) {
             // Exponential backoff: 1s, 2s
@@ -185,14 +176,12 @@ const Sidebar: React.FC = () => {
       );
 
       if (!response) {
-        console.warn(`[Sidebar] ⚠️ No response from background`);
         setTabs([]);
         setActiveTabs(new Set());
         return;
       }
 
       if (!response.success) {
-        console.warn(`[Sidebar] ⚠️ getTabStates returned success: false`);
         setTabs([]);
         setActiveTabs(new Set());
         return;

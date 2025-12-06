@@ -91,12 +91,6 @@ export class TimeoutUtils {
           throw error;
         }
 
-        console.warn(
-          `[TimeoutUtils] ⚠️ Attempt ${
-            attempt + 1
-          } timed out, retrying in ${delay}ms`
-        );
-
         await this.delay(delay);
         delay = Math.min(delay * options.backoffFactor, 5000);
       }
@@ -333,13 +327,6 @@ export class TimeoutUtils {
     const result = await fn();
     const executionTime = Date.now() - startTime;
     const wasSlow = executionTime > warningThresholdMs;
-
-    if (wasSlow) {
-      console.warn(
-        `[TimeoutUtils] ⚠️ Operation took ${executionTime}ms (threshold: ${warningThresholdMs}ms)`
-      );
-    }
-
     return { result, executionTime, wasSlow };
   }
 

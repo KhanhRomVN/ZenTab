@@ -101,8 +101,6 @@ export class WSManager {
       this.connection.send(data);
       return true;
     }
-
-    console.warn("[WSManager] ⚠️ Cannot send - WebSocket not connected");
     return false;
   }
 
@@ -116,10 +114,6 @@ export class WSManager {
       } catch (error) {
         console.error("[WSManager] ❌ Failed to broadcast message:", error);
       }
-    } else {
-      console.warn(
-        "[WSManager] ⚠️ Cannot broadcast - connection not available"
-      );
     }
   }
 

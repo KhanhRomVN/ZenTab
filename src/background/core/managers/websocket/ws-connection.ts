@@ -137,8 +137,6 @@ export class WSConnection {
       } catch (error) {
         console.error("[WSConnection] ❌ Failed to send message:", error);
       }
-    } else {
-      console.warn("[WSConnection] ⚠️ Cannot send - WebSocket not ready");
     }
   }
 
@@ -155,6 +153,14 @@ export class WSConnection {
   private async handleMessage(data: string): Promise<void> {
     try {
       const message = JSON.parse(data);
+
+      // 🆕 LOG: Chỉ log khi type = sendPrompt
+      if (message.type === "sendPrompt") {
+        console.log(
+          `[WSConnection] 📥 RECEIVED REQUEST:`,
+          JSON.stringify(message)
+        );
+      }
 
       // Handle ping messages
       if (message.type === "ping") {
@@ -389,7 +395,6 @@ export class WSConnection {
         : false;
 
       if (isDuplicate) {
-        console.warn("[WSConnection] ⚠️ Duplicate message detected, skipping");
         return;
       }
 
@@ -508,10 +513,9 @@ export class WSConnection {
       const timeSinceLastPing = Date.now() - this.lastPingTime;
 
       if (timeSinceLastPing > this.PING_TIMEOUT) {
-        console.warn("[WSConnection] ⚠️ Ping timeout, forcing reconnect");
         this.disconnect();
       }
-    }, 10000); // Check every 10 seconds
+    }, 10000);
   }
 
   /**
@@ -595,15 +599,8 @@ export class WSConnection {
           .filter((tab) => tab && tab.id)
           .map(async (tab) => {
             const provider = this.detectProviderFromUrl(tab.url);
-
-            // 🆕 FIX: Get cookieStoreId và container name
             const cookieStoreId = (tab as any).cookieStoreId || undefined;
             const containerName = await this.getContainerName(cookieStoreId);
-
-            // 🆕 DEBUG: Log container name resolution
-            console.log(
-              `[WSConnection] 🔍 Tab ${tab.id}: cookieStoreId=${cookieStoreId}, containerName=${containerName}`
-            );
 
             return {
               tabId: tab.id!,
@@ -624,10 +621,6 @@ export class WSConnection {
             data: focusedTabs,
             timestamp: Date.now(),
           })
-        );
-
-        console.log(
-          `[WSConnection] 📤 Broadcasted ${focusedTabs.length} tabs after connection`
         );
       }
     } catch (error) {

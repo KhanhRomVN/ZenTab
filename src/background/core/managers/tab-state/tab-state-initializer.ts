@@ -86,9 +86,6 @@ export class TabStateInitializer {
     const timeoutId = setTimeout(() => {
       const lock = this.initializationLocks.get(tabId);
       if (lock === lockPromise) {
-        console.warn(
-          `[TabStateInitializer] ⚠️ Initialization lock timeout for tab ${tabId}`
-        );
         this.initializationLocks.delete(tabId);
       }
     }, this.INIT_TIMEOUT);
@@ -97,9 +94,6 @@ export class TabStateInitializer {
       // Check if tab exists
       const tab = await this.getTabInfo(tabId);
       if (!tab) {
-        console.warn(
-          `[TabStateInitializer] ⚠️ Tab ${tabId} not found, aborting initialization`
-        );
         return;
       }
 

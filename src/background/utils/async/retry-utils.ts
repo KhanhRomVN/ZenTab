@@ -40,13 +40,6 @@ export class RetryUtils {
         // Tính toán delay với jitter nếu enabled
         const currentDelay = config.jitter ? this.addJitter(delay) : delay;
 
-        console.warn(
-          `[RetryUtils] ⚠️ Attempt ${
-            attempt + 1
-          } failed, retrying in ${currentDelay}ms:`,
-          error
-        );
-
         // Chờ delay
         await this.delay(currentDelay);
 
@@ -83,13 +76,6 @@ export class RetryUtils {
 
         // Tính toán delay với jitter nếu enabled
         const currentDelay = config.jitter ? this.addJitter(delay) : delay;
-
-        console.warn(
-          `[RetryUtils] ⚠️ Attempt ${
-            attempt + 1
-          } failed, retrying in ${currentDelay}ms:`,
-          error
-        );
 
         // Chờ delay
         await this.delay(currentDelay);

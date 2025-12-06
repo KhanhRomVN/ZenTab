@@ -22,25 +22,6 @@ export class PromptController {
     baseDelay: 200,
   };
 
-  // Language rule - yêu cầu AI trả lời bằng tiếng Việt
-  private static readonly LANGUAGE_RULE = `
-CRITICAL LANGUAGE RULE:
-- You MUST respond in Vietnamese (Tiếng Việt) for ALL outputs
-- All explanations, descriptions, and responses must be in Vietnamese
-- Code comments should also be in Vietnamese when possible`;
-
-  // Clarification rules
-  private static readonly CLARIFICATION_RULE = `
-CRITICAL CLARIFICATION RULES (STRICTLY ENFORCED):
-... (giữ nguyên clarification rules từ file cũ)
-`;
-
-  // Text wrapping rules
-  private static readonly TEXT_WRAP_RULE = `
-CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
-... (giữ nguyên text wrap rules từ file cũ)
-`;
-
   // Storage key cho folder tokens
   private static readonly FOLDER_TOKENS_KEY = "folderTokenAccumulator";
   private static folderTokenMutex: Map<string, Promise<void>> = new Map();
@@ -69,18 +50,18 @@ CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
   }
 
   /**
-   * Build final prompt với rules
+   * Build final prompt - chỉ gửi message gốc từ WS
    */
-  private static buildFinalPrompt(
+  private static async buildFinalPrompt(
     systemPrompt: string | null | undefined,
     userPrompt: string
-  ): string {
-    // Request đầu tiên: systemPrompt + rules + userPrompt
+  ): Promise<string> {
+    // Chỉ gửi trực tiếp message nhận được từ WS
+    // Không thêm bất kỳ rules nào
     if (systemPrompt) {
-      return `${systemPrompt}\n\n${this.LANGUAGE_RULE}\n\n${this.CLARIFICATION_RULE}\n\n${this.TEXT_WRAP_RULE}\n\nUSER REQUEST:\n${userPrompt}`;
+      return `${systemPrompt}\n\n${userPrompt}`;
     }
 
-    // Request thứ 2 trở đi: chỉ userPrompt
     return userPrompt;
   }
 
@@ -280,7 +261,7 @@ CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
         const userPrompt = userPromptOrRequestId;
         requestId = requestIdOrIsNewTask;
         isNewTaskFlag = isNewTask === true;
-        finalPrompt = this.buildFinalPrompt(systemPrompt, userPrompt);
+        finalPrompt = await this.buildFinalPrompt(systemPrompt, userPrompt);
       } else {
         finalPrompt = promptOrSystemPrompt;
         requestId = userPromptOrRequestId;
@@ -542,11 +523,17 @@ CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
       // Lấy response
       const rawResponse = await this.getLatestResponseDirectly(tabId);
 
+      // 🆕 LOG 1: Raw response từ DeepSeek tab
+      console.log(`[PromptController] 📥 RAW RESPONSE`, rawResponse);
+
       if (!rawResponse) {
         await this.sendErrorResponse(tabId, requestId, "No response received");
         await this.tabStateManager.markTabFree(tabId);
         return;
       }
+
+      // 🆕 LOG 2: Processed response sau khi xử lý
+      console.log(`[PromptController] 🔄 PROCESSED RESPONSE`, rawResponse);
 
       // Lấy folderPath từ storage
       const folderPath = await this.getFolderPathForRequest(requestId);
@@ -720,7 +707,16 @@ CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
   ): Promise<void> {
     try {
       const responseObject = this.buildOpenAIResponse(response, usage);
+
+      console.log(
+        `[PromptController] 🔧 BUILT JSON OBJECT for tab ${tabId}:`,
+        responseObject
+      );
+
       const folderPath = await this.getFolderPathForRequest(requestId);
+      const responseString = JSON.stringify(responseObject);
+
+      console.log(`[PromptController] 📤 SENDING JSON STRING:`, responseString);
 
       await browserAPI.setStorageValue("wsOutgoingMessage", {
         connectionId: await this.getConnectionIdForRequest(requestId),
@@ -729,8 +725,8 @@ CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
           requestId: requestId,
           tabId: tabId,
           success: true,
-          response: JSON.stringify(responseObject),
-          folderPath: folderPath || null, // 🆕 Include folderPath in response
+          response: responseString,
+          folderPath: folderPath || null,
           timestamp: Date.now(),
         },
         timestamp: Date.now(),
@@ -754,17 +750,19 @@ CRITICAL TEXT BLOCK WRAPPING RULES (STRICTLY ENFORCED):
     try {
       const folderPath = await this.getFolderPathForRequest(requestId);
 
+      const errorObject = {
+        type: "promptResponse",
+        requestId: requestId,
+        tabId: tabId,
+        success: false,
+        error: error,
+        folderPath: folderPath || null,
+        timestamp: Date.now(),
+      };
+
       await browserAPI.setStorageValue("wsOutgoingMessage", {
         connectionId: await this.getConnectionIdForRequest(requestId),
-        data: {
-          type: "promptResponse",
-          requestId: requestId,
-          tabId: tabId,
-          success: false,
-          error: error,
-          folderPath: folderPath || null, // 🆕 Include folderPath in error response
-          timestamp: Date.now(),
-        },
+        data: errorObject,
         timestamp: Date.now(),
       });
     } catch (error) {

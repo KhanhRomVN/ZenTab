@@ -184,10 +184,6 @@ export class ResponseMonitor {
     requestId: string,
     _originalPrompt: string
   ): Promise<void> {
-    console.warn(
-      `[ResponseMonitor] ⚠️ Continue button detected for request ${requestId}`
-    );
-
     const errorContent = `❌ **LỖI: Response bị cắt cụt bởi DeepSeek**
 
 **Nguyên nhân:**

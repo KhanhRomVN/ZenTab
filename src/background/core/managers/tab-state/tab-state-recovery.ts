@@ -18,7 +18,6 @@ export class TabStateRecovery {
    */
   public async startAutoRecovery(): Promise<void> {
     if (this.isRunning) {
-      console.warn("[TabStateRecovery] ⚠️ Auto recovery already running");
       return;
     }
 

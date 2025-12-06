@@ -17,9 +17,6 @@ export class StorageMutex {
     if (this.locked && this.lockTimestamp > 0) {
       const lockAge = Date.now() - this.lockTimestamp;
       if (lockAge > this.LOCK_TIMEOUT) {
-        console.warn(
-          "[StorageMutex] ⚠️ Detected stale lock, force releasing..."
-        );
         this.forceRelease();
       }
     }

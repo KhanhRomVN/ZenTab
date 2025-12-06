@@ -11,12 +11,6 @@ export class DependencyContainer {
    * Register một service instance
    */
   public register<T>(serviceName: string, instance: T): void {
-    if (this.services.has(serviceName)) {
-      console.warn(
-        `[DependencyContainer] ⚠️ Overwriting existing service: ${serviceName}`
-      );
-    }
-
     this.services.set(serviceName, instance);
   }
 
@@ -24,12 +18,6 @@ export class DependencyContainer {
    * Register một factory function (lazy loading)
    */
   public registerFactory<T>(serviceName: string, factory: () => T): void {
-    if (this.factories.has(serviceName)) {
-      console.warn(
-        `[DependencyContainer] ⚠️ Overwriting existing factory: ${serviceName}`
-      );
-    }
-
     this.factories.set(serviceName, factory);
   }
 
@@ -42,9 +30,6 @@ export class DependencyContainer {
       const instance = this.services.get(serviceName);
       // Nếu instance là Promise, trả về null và log warning
       if (instance && typeof instance.then === "function") {
-        console.warn(
-          `[DependencyContainer] ⚠️ Service ${serviceName} is a Promise. Use getAsync() instead.`
-        );
         return null;
       }
       return instance as T;
@@ -58,9 +43,6 @@ export class DependencyContainer {
 
         // Nếu factory trả về Promise, lưu Promise và trả về null
         if (instanceOrPromise && typeof instanceOrPromise.then === "function") {
-          console.warn(
-            `[DependencyContainer] ⚠️ Factory ${serviceName} returned a Promise. Use getAsync() instead.`
-          );
           // Lưu Promise để dùng sau
           this.services.set(serviceName, instanceOrPromise);
           return null;

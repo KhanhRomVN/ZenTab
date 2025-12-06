@@ -21,7 +21,6 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
 
   const handleRemoveFolderLink = async () => {
     if (!tab.folderPath) {
-      console.warn(`[TabCard] ⚠️ No folderPath to unlink for tab ${tab.tabId}`);
       return;
     }
 

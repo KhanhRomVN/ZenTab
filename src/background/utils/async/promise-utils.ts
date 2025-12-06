@@ -38,13 +38,6 @@ export class PromiseUtils {
           throw error;
         }
 
-        console.warn(
-          `[PromiseUtils] ⚠️ Attempt ${
-            attempt + 1
-          } failed, retrying in ${delay}ms:`,
-          error
-        );
-
         await this.delay(delay);
         delay = Math.min(delay * backoffFactor, maxDelay);
       }

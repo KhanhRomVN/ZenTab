@@ -25,7 +25,6 @@ export class StartupManager {
    */
   public async startup(): Promise<void> {
     if (this.isInitialized) {
-      console.warn("[StartupManager] ⚠️ System already initialized");
       return;
     }
 
@@ -62,9 +61,6 @@ export class StartupManager {
    */
   public async shutdown(): Promise<void> {
     if (!this.isInitialized) {
-      console.warn(
-        "[StartupManager] ⚠️ System not initialized, nothing to shutdown"
-      );
       return;
     }
 
@@ -104,16 +100,12 @@ export class StartupManager {
       if (tabEventHandler) {
         await tabEventHandler.setupListeners();
         this.registerCleanup(() => tabEventHandler.cleanup());
-      } else {
-        console.warn("[StartupManager] ⚠️ TabEventHandler not available");
       }
 
       // Setup storage event listeners
       if (storageEventHandler) {
         await storageEventHandler.setupListeners();
         this.registerCleanup(() => storageEventHandler.cleanup());
-      } else {
-        console.warn("[StartupManager] ⚠️ StorageEventHandler not available");
       }
 
       // Setup runtime message listener

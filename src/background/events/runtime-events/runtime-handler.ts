@@ -87,10 +87,6 @@ export class RuntimeEventHandler {
         return this.handleGetStorageUsage(message, sender, sendResponse);
 
       default:
-        console.warn(
-          "[RuntimeEventHandler] ⚠️ Unknown message type:",
-          message.type
-        );
         sendResponse({ success: false, error: "Unknown message type" });
         return false;
     }
@@ -440,7 +436,6 @@ export class RuntimeEventHandler {
         break;
 
       default:
-        console.warn("[RuntimeEventHandler] ⚠️ Unknown alarm:", alarm.name);
     }
   }
 

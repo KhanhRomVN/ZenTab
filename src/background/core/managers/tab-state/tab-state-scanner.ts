@@ -192,21 +192,12 @@ export class TabStateScanner {
         return null;
       }
 
-      // 🆕 FIX: Use Promise-based API with detailed logging
       try {
         const container = await browserAPI.contextualIdentities.get(
           cookieStoreId
         );
 
         const containerName = container?.name || null;
-
-        // 🆕 DEBUG: Log successful container name retrieval
-        if (containerName) {
-          console.log(
-            `[TabStateScanner] ✅ Container name for ${cookieStoreId}: ${containerName}`
-          );
-        }
-
         return containerName;
       } catch (apiError) {
         console.error(

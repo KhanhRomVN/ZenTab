@@ -130,9 +130,6 @@ export class StorageChangeHandler {
       });
 
       if (result[requestKey]) {
-        console.warn(
-          `[StorageChangeHandler] ⚠️ Request already processed: ${requestId}`
-        );
         return;
       }
 
