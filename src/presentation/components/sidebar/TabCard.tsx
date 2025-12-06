@@ -40,9 +40,6 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
       );
 
       if (response && response.success) {
-        console.log(
-          `[TabCard] ✅ Successfully unlinked folder for tab ${tab.tabId}`
-        );
       } else {
         console.error(`[TabCard] ❌ Failed to unlink folder:`, response);
         alert(`Failed to unlink folder: ${response?.error || "Unknown error"}`);

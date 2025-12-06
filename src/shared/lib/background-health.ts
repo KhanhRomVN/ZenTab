@@ -122,9 +122,6 @@ export class BackgroundHealth {
           errorMessage.includes("Receiving end does not exist")
         ) {
           if (attempt < maxRetries) {
-            console.log(
-              `[BackgroundHealth] 🔄 Retrying... (attempt ${attempt}/${maxRetries})`
-            );
             await new Promise((resolve) => setTimeout(resolve, attempt * 500));
             continue;
           }

@@ -370,15 +370,7 @@ export class TimeoutUtils {
       }, timeoutMs);
 
       // Progress updates
-      progressIntervalId = setInterval(() => {
-        if (!isCancelled) {
-          const elapsed = Date.now() - startTime;
-          const remaining = Math.max(0, timeoutMs - elapsed);
-          console.debug(
-            `[TimeoutUtils] Progress: ${elapsed}ms elapsed, ${remaining}ms remaining`
-          );
-        }
-      }, progressIntervalMs);
+      progressIntervalId = setInterval(() => {}, progressIntervalMs);
 
       // Execute the actual promise
       promiseFn()

@@ -108,23 +108,11 @@ export class TabStateScanner {
           folderPath: state.folderPath || null,
         });
 
-        // Log tab info for debugging
-        console.log(`[TabStateScanner] 📋 Processing tab ${tab.id}:`, {
-          title: tab.title,
-          url: tab.url,
-          cookieStoreId: tab.cookieStoreId,
-          status: actualStatus,
-        });
-
         // Get container name from Firefox Multi Account Container
         const containerName = await this.getContainerName(tab.cookieStoreId);
 
         // Detect LLM provider
         const provider = this.detectProvider(tab.url);
-
-        console.log(
-          `[TabStateScanner] 📊 Tab ${tab.id} processed - Container: ${containerName}, Provider: ${provider}`
-        );
 
         tabStates.push({
           tabId: tab.id,
@@ -179,20 +167,11 @@ export class TabStateScanner {
   private async getContainerName(
     cookieStoreId?: string
   ): Promise<string | null> {
-    console.log(
-      `[TabStateScanner] 🔍 getContainerName called with cookieStoreId:`,
-      cookieStoreId
-    );
-
     if (!cookieStoreId) {
-      console.log(`[TabStateScanner] ⚠️ cookieStoreId is undefined/null`);
       return null;
     }
 
     if (cookieStoreId === "firefox-default") {
-      console.log(
-        `[TabStateScanner] ⚠️ cookieStoreId is firefox-default, skipping`
-      );
       return null;
     }
 
@@ -200,15 +179,7 @@ export class TabStateScanner {
       // 🔥 FIX: Check global browser object correctly
       const isFirefox = typeof (globalThis as any).browser !== "undefined";
 
-      console.log(
-        `[TabStateScanner] 🔍 Browser type:`,
-        isFirefox ? "Firefox" : "Chrome-based"
-      );
-
       if (!isFirefox) {
-        console.log(
-          `[TabStateScanner] ⚠️ Not Firefox - contextualIdentities not available`
-        );
         return null;
       }
 
@@ -216,15 +187,8 @@ export class TabStateScanner {
 
       // Check if contextualIdentities API exists
       if (!browserAPI.contextualIdentities) {
-        console.log(
-          `[TabStateScanner] ⚠️ contextualIdentities API not available - check manifest permissions`
-        );
         return null;
       }
-
-      console.log(
-        `[TabStateScanner] ✅ contextualIdentities API available, fetching container...`
-      );
 
       // 🔥 FIX: Use Promise-based API (Firefox WebExtensions standard)
       try {
@@ -232,16 +196,7 @@ export class TabStateScanner {
           cookieStoreId
         );
 
-        console.log(
-          `[TabStateScanner] 📦 Container fetched:`,
-          JSON.stringify(container, null, 2)
-        );
-
         const containerName = container?.name || null;
-        console.log(
-          `[TabStateScanner] ✅ Final container name for ${cookieStoreId}:`,
-          containerName
-        );
 
         return containerName;
       } catch (apiError) {

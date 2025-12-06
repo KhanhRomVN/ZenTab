@@ -297,8 +297,6 @@ export class StartupManager {
       return;
     }
 
-    console.log("[StartupManager] ✅ Setting up runtime message listener");
-
     // 🔥 FIX: Track if listener is ready
     let listenerReady = false;
 
@@ -307,7 +305,6 @@ export class StartupManager {
       (message: any, sender: any, sendResponse: any) => {
         // 🔥 FIX: Immediately mark as ready and return true
         if (!listenerReady) {
-          console.log("[StartupManager] 📡 Message listener is now ready");
           listenerReady = true;
         }
 
@@ -364,8 +361,6 @@ export class StartupManager {
 
     // 🔥 FIX: Đợi một chút để đảm bảo listener đã ready
     await new Promise((resolve) => setTimeout(resolve, 100));
-
-    console.log("[StartupManager] ✅ Runtime message listener setup complete");
   }
 
   /**
