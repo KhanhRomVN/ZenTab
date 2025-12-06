@@ -520,11 +520,13 @@ export class PromptController {
     originalPrompt: string
   ): Promise<void> {
     try {
-      // Lấy response
+      // STEP 1: Lấy raw response từ page (multi-line)
       const rawResponse = await this.getLatestResponseDirectly(tabId);
 
-      // 🆕 LOG 1: Raw response từ DeepSeek tab
-      console.log(`[PromptController] 📥 RAW RESPONSE`, rawResponse);
+      // LOG 1: Raw HTML content (multi-line - preserve format)
+      console.log(
+        `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${rawResponse}`
+      );
 
       if (!rawResponse) {
         await this.sendErrorResponse(tabId, requestId, "No response received");
@@ -532,18 +534,53 @@ export class PromptController {
         return;
       }
 
-      // 🆕 LOG 2: Processed response sau khi xử lý
-      console.log(`[PromptController] 🔄 PROCESSED RESPONSE`, rawResponse);
+      // STEP 2: Process response (multi-line)
+      let processedResponse = this.decodeHtmlEntities(rawResponse);
+      processedResponse = this.fixXmlStructure(processedResponse);
+      processedResponse = this.unwrapTaskProgress(processedResponse);
 
-      // Lấy folderPath từ storage
+      // Remove UI artifacts
+      processedResponse = processedResponse
+        .replace(/\n*Copy\s*\n*/gi, "\n")
+        .replace(/\n*Download\s*\n*/gi, "\n")
+        .replace(/\btext\s*\n+/gi, "\n");
+
+      // Clean code fences
+      processedResponse = this.cleanSearchReplaceCodeFences(processedResponse);
+      processedResponse = this.cleanContentCodeFences(processedResponse);
+
+      // Remove excessive newlines
+      processedResponse = processedResponse
+        .replace(/```\s*\n+(<[a-z_]+>)/gi, "$1")
+        .replace(/(<\/[a-z_]+>)\s*\n+```/gi, "$1");
+
+      // Ensure proper newlines around closing tags
+      processedResponse = processedResponse.replace(
+        /([^\n])(<\/[a-z_]+>)/g,
+        "$1\n$2"
+      );
+      processedResponse = processedResponse.replace(
+        /(<\/[a-z_]+>)(<\/[a-z_]+>)/g,
+        "$1\n$2"
+      );
+
+      // Clean up excessive newlines (keep max 2)
+      processedResponse = processedResponse.replace(/\n{3,}/g, "\n\n").trim();
+
+      // LOG 2: Processed response (multi-line - preserve format)
+      console.log(
+        `[PromptController] 🔄 PROCESSED RESPONSE (CLEAN):\n${processedResponse}`
+      );
+
+      // STEP 3: Lấy folderPath từ storage
       const folderPath = await this.getFolderPathForRequest(requestId);
 
-      // Tính tokens
+      // STEP 4: Tính tokens
       const promptTokens = this.calculateTokens(originalPrompt);
-      const completionTokens = this.calculateTokens(rawResponse);
+      const completionTokens = this.calculateTokens(processedResponse);
       const totalTokens = promptTokens + completionTokens;
 
-      // Lưu tokens nếu có folderPath
+      // STEP 5: Lưu tokens nếu có folderPath
       if (folderPath) {
         await this.saveTokensForFolder(
           folderPath,
@@ -557,11 +594,38 @@ export class PromptController {
         await this.tabStateManager.markTabFree(tabId);
       }
 
-      // Gửi response
-      await this.sendSuccessResponse(tabId, requestId, rawResponse, {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // STEP 6: Build OpenAI response (với processedResponse đã clean)
+      const responseObject = this.buildOpenAIResponse(processedResponse, {
         prompt_tokens: promptTokens,
         completion_tokens: completionTokens,
         total_tokens: totalTokens,
+      });
+
+      console.log(
+        `[PromptController] 🔧 BUILT JSON OBJECT for tab ${tabId}:`,
+        responseObject
+      );
+
+      // STEP 7: Convert JSON to string
+      const responseString = JSON.stringify(responseObject);
+
+      console.log(`[PromptController] 📤 SENDING JSON STRING:`, responseString);
+
+      // STEP 8: Gửi qua WebSocket
+      await browserAPI.setStorageValue("wsOutgoingMessage", {
+        connectionId: await this.getConnectionIdForRequest(requestId),
+        data: {
+          type: "promptResponse",
+          requestId: requestId,
+          tabId: tabId,
+          success: true,
+          response: responseString,
+          folderPath: folderPath || null,
+          timestamp: Date.now(),
+        },
+        timestamp: Date.now(),
       });
     } catch (error) {
       console.error(`[PromptController] ❌ Error handling response:`, error);
@@ -582,28 +646,533 @@ export class PromptController {
   ): Promise<string | null> {
     try {
       const result = await browserAPI.executeScript(tabId, () => {
+        // Cuộn xuống cuối trang
+        window.scrollTo({
+          top: document.documentElement.scrollHeight,
+          behavior: "smooth",
+        });
+
         // Tìm tất cả message containers
-        const messageContainers =
-          document.querySelectorAll('[class*="message"]');
-        if (messageContainers.length === 0) return null;
+        const possibleSelectors = [
+          '[class*="message"]',
+          '[class*="chat-message"]',
+          '[class*="conversation"]',
+          ".ds-markdown",
+        ];
 
-        // Lấy container cuối cùng (mới nhất)
-        const lastContainer = messageContainers[messageContainers.length - 1];
-
-        // Tìm markdown content
-        const markdown = lastContainer.querySelector(".ds-markdown");
-        if (markdown) {
-          return markdown.textContent?.trim() || null;
+        let allMessages: Element[] = [];
+        for (const selector of possibleSelectors) {
+          const found = Array.from(document.querySelectorAll(selector));
+          if (found.length > 0) {
+            allMessages = found;
+            break;
+          }
         }
 
-        return lastContainer.textContent?.trim() || null;
+        if (allMessages.length === 0) {
+          return null;
+        }
+
+        // Lọc ra CHỈ CÁC AI RESPONSES
+        const aiResponses = allMessages.filter((msg) => {
+          const hasMarkdown = msg.querySelector(".ds-markdown") !== null;
+          const hasContent = msg.classList && !msg.classList.contains("user");
+          return hasMarkdown || hasContent;
+        });
+
+        if (aiResponses.length === 0) {
+          return null;
+        }
+
+        // Lấy AI response CUỐI CÙNG
+        const lastAIResponse = aiResponses[aiResponses.length - 1];
+        const lastMarkdown =
+          lastAIResponse.querySelector(".ds-markdown") || lastAIResponse;
+
+        if (!lastMarkdown) {
+          return null;
+        }
+
+        // Extract markdown content
+        const extractMarkdown = (element: Element): string => {
+          let result = "";
+
+          const traverse = (node: Node): void => {
+            if (node.nodeType === Node.TEXT_NODE) {
+              const text = node.textContent || "";
+              const safeText = String(text);
+
+              if (
+                safeText.includes("<task_progress>") ||
+                safeText.includes("</task_progress>")
+              ) {
+                result += safeText;
+                return;
+              }
+
+              result += safeText;
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+              const el = node as Element;
+              const tag = el.tagName.toLowerCase();
+              const className = String(el.className || "");
+
+              // Xử lý ds-markdown-html spans (chứa XML tags)
+              if (className.includes("ds-markdown-html")) {
+                const htmlContent = String(el.textContent || "");
+
+                if (htmlContent.startsWith("</") && !result.endsWith("\n")) {
+                  result += "\n";
+                }
+
+                result += htmlContent;
+                return;
+              }
+
+              // Handle line breaks
+              if (tag === "br") {
+                result += "\n";
+                return;
+              }
+
+              // Handle code blocks
+              if (tag === "pre") {
+                const codeEl = el.querySelector("code");
+                if (codeEl) {
+                  const lang =
+                    codeEl.className.match(/language-(\w+)/)?.[1] || "";
+                  result += "```" + lang + "\n";
+                  result += codeEl.textContent || "";
+                  result += "\n```\n";
+                } else {
+                  result += "```\n";
+                  result += el.textContent || "";
+                  result += "\n```\n";
+                }
+                return;
+              }
+
+              // Handle inline code
+              if (
+                tag === "code" &&
+                el.parentElement?.tagName.toLowerCase() !== "pre"
+              ) {
+                result += "`" + (el.textContent || "") + "`";
+                return;
+              }
+
+              // Handle lists
+              if (tag === "ul" || tag === "ol") {
+                const items = Array.from(el.children);
+
+                items.forEach((item, index) => {
+                  if (item.tagName.toLowerCase() === "li") {
+                    const checkbox = item.querySelector(
+                      'input[type="checkbox"]'
+                    ) as HTMLInputElement | null;
+
+                    if (checkbox) {
+                      const isChecked = checkbox.checked;
+                      result += isChecked ? "- [x] " : "- [ ] ";
+
+                      const textNodes: string[] = [];
+                      const extractText = (n: Node): void => {
+                        if (n.nodeType === Node.TEXT_NODE) {
+                          const text = (n.textContent || "").trim();
+                          if (text) {
+                            textNodes.push(text);
+                          }
+                        } else if (n.nodeType === Node.ELEMENT_NODE) {
+                          const elem = n as Element;
+                          if (elem.tagName.toLowerCase() !== "input") {
+                            Array.from(elem.childNodes).forEach(extractText);
+                          }
+                        }
+                      };
+                      Array.from(item.childNodes).forEach(extractText);
+                      result += textNodes.join("").trim() + "\n";
+                    } else {
+                      if (tag === "ol") {
+                        result += `${index + 1}. `;
+                      } else {
+                        result += "- ";
+                      }
+
+                      Array.from(item.childNodes).forEach((child) => {
+                        if (child.nodeType === Node.TEXT_NODE) {
+                          result += child.textContent || "";
+                        } else if (child.nodeType === Node.ELEMENT_NODE) {
+                          const childEl = child as Element;
+                          const childTag = childEl.tagName.toLowerCase();
+
+                          if (childTag === "p") {
+                            traverse(child);
+                            if (result.endsWith("\n\n")) {
+                              result = result.slice(0, -2);
+                            }
+                          } else {
+                            traverse(child);
+                          }
+                        }
+                      });
+                      result += "\n";
+                    }
+                  }
+                });
+                return;
+              }
+
+              // Handle headings
+              if (tag.match(/^h[1-6]$/)) {
+                const level = parseInt(tag[1]);
+                result += "#".repeat(level) + " ";
+                Array.from(el.childNodes).forEach(traverse);
+                result += "\n\n";
+                return;
+              }
+
+              // Handle paragraphs
+              if (tag === "p") {
+                Array.from(el.childNodes).forEach(traverse);
+                if (el.textContent && el.textContent.trim()) {
+                  result += "\n\n";
+                }
+                return;
+              }
+
+              // Handle blockquotes
+              if (tag === "blockquote") {
+                const lines = (el.textContent || "").split("\n");
+                lines.forEach((line) => {
+                  if (line.trim()) {
+                    result += "> " + line + "\n";
+                  }
+                });
+                result += "\n";
+                return;
+              }
+
+              // Handle bold
+              if (tag === "strong" || tag === "b") {
+                result += "**";
+                Array.from(el.childNodes).forEach(traverse);
+                result += "**";
+                return;
+              }
+
+              // Handle italic
+              if (tag === "em" || tag === "i") {
+                result += "*";
+                Array.from(el.childNodes).forEach(traverse);
+                result += "*";
+                return;
+              }
+
+              // Handle divs and other containers
+              Array.from(el.childNodes).forEach(traverse);
+
+              const blockElements = [
+                "div",
+                "section",
+                "article",
+                "header",
+                "footer",
+                "main",
+              ];
+              if (blockElements.includes(tag)) {
+                result += "\n";
+              }
+            }
+          };
+
+          traverse(element);
+          return result;
+        };
+
+        let markdownText = extractMarkdown(lastMarkdown);
+
+        // Clean up formatting
+        markdownText = markdownText
+          .replace(/\n+(<\/?\w+>)/g, "\n$1")
+          .replace(/ {2,}/g, " ")
+          .replace(/(<task_progress>)\s+(-)/g, "$1\n$2")
+          .replace(/(-\s*\[\s*[x ]\s*\][^\n]*)\s+(-)/g, "$1\n$2")
+          .replace(
+            /(-\s*\[\s*[x ]\s*\][^\n<]*?)(<\/(?!path|thinking|read_file|write_file)\w+>)/g,
+            "$1\n$2"
+          )
+          .replace(
+            /(<\/task_progress>)(<\/(?:read_file|write_file|execute_command)>)/g,
+            "$1$2"
+          );
+
+        return markdownText;
       });
+
+      if (!result || typeof result !== "string") {
+        return null;
+      }
 
       return result;
     } catch (error) {
-      console.error(`[PromptController] ❌ Error getting response:`, error);
+      console.error(
+        `[PromptController] ❌ Error getting latest response:`,
+        error
+      );
       return null;
     }
+  }
+
+  /**
+   * Decode HTML entities
+   */
+  private static decodeHtmlEntities(text: string): string {
+    const entities: Record<string, string> = {
+      "&lt;": "<",
+      "&gt;": ">",
+      "&amp;": "&",
+      "&quot;": '"',
+      "&#39;": "'",
+      "&#x27;": "'",
+      "&#x2F;": "/",
+      "&#60;": "<",
+      "&#62;": ">",
+      "&nbsp;": " ",
+    };
+
+    let decoded = text;
+    for (const [entity, char] of Object.entries(entities)) {
+      decoded = decoded.split(entity).join(char);
+    }
+
+    // Handle numeric entities
+    decoded = decoded.replace(/&#(\d+);/g, (_, num) =>
+      String.fromCharCode(parseInt(num, 10))
+    );
+
+    // Handle hex entities
+    decoded = decoded.replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
+      String.fromCharCode(parseInt(hex, 16))
+    );
+
+    return decoded;
+  }
+
+  /**
+   * Fix XML structure
+   */
+  private static fixXmlStructure(content: string): string {
+    return content.replace(/(<\/[a-z_]+>)(<[a-z_]+>)/g, "$1\n$2");
+  }
+
+  /**
+   * Unwrap task progress blocks
+   */
+  private static unwrapTaskProgress(content: string): string {
+    const textBlockPattern =
+      /```text[\s\S]*?(<task_progress>[\s\S]*?<\/task_progress>)[\s\S]*?```/g;
+
+    let unwrapped = content.replace(textBlockPattern, "$1");
+    unwrapped = unwrapped.replace(
+      /(Copy\s*(?:Download)?\s*\n+)(<[a-z_]+>)/gi,
+      "$2"
+    );
+
+    unwrapped = unwrapped.replace(/\btext\s*\n+(<[a-z_]+>)/gi, "$1");
+    unwrapped = unwrapped.replace(
+      /```\s*\n*(<task_progress>[\s\S]*?<\/task_progress>)\s*\n*```/g,
+      "$1"
+    );
+
+    unwrapped = unwrapped.replace(/```\s*\n+(<[a-z_]+>)/gi, "$1");
+    unwrapped = unwrapped.replace(/(<\/[a-z_]+>)\s*\n+```/gi, "$1");
+
+    return unwrapped;
+  }
+
+  /**
+   * Clean SEARCH/REPLACE code fences
+   */
+  private static cleanSearchReplaceCodeFences(content: string): string {
+    const diffBlockPattern = /<diff>([\s\S]*?)<\/diff>/g;
+    const CODE_FENCE = "```";
+    const UI_ARTIFACTS = ["text", "copy", "download"];
+
+    return content.replace(diffBlockPattern, (_match, diffContent) => {
+      const lines = diffContent.split("\n");
+      const searchMarker = "<<<<<<< SEARCH";
+      const separatorMarker = "=======";
+      const replaceMarker = "> REPLACE";
+
+      let searchIdx = -1;
+      let separatorIdx = -1;
+      let replaceIdx = -1;
+
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(searchMarker)) searchIdx = i;
+        if (lines[i].includes(separatorMarker)) separatorIdx = i;
+        if (lines[i].includes(replaceMarker)) replaceIdx = i;
+      }
+
+      if (searchIdx === -1 || separatorIdx === -1 || replaceIdx === -1) {
+        return `<diff>${diffContent}</diff>`;
+      }
+
+      const linesToRemove = new Set<number>();
+
+      // Xóa dòng trống sau search marker
+      if (searchIdx + 1 < lines.length && lines[searchIdx + 1].trim() === "") {
+        linesToRemove.add(searchIdx + 1);
+      }
+
+      // Sau search marker: tìm code fence
+      for (let i = searchIdx + 1; i < separatorIdx; i++) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+        const isUIArtifact = UI_ARTIFACTS.includes(trimmed.toLowerCase());
+        if (trimmed !== "" && !isUIArtifact) {
+          break;
+        }
+      }
+
+      // Xóa dòng trống trước separator
+      if (separatorIdx - 1 >= 0 && lines[separatorIdx - 1].trim() === "") {
+        linesToRemove.add(separatorIdx - 1);
+      }
+
+      // Trước separator: tìm code fence
+      for (let i = separatorIdx - 1; i > searchIdx; i--) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+        if (trimmed !== "") {
+          break;
+        }
+      }
+
+      // Xóa dòng trống sau separator
+      if (
+        separatorIdx + 1 < lines.length &&
+        lines[separatorIdx + 1].trim() === ""
+      ) {
+        linesToRemove.add(separatorIdx + 1);
+      }
+
+      // Sau separator: tìm code fence
+      for (let i = separatorIdx + 1; i < replaceIdx; i++) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+        const isUIArtifact = UI_ARTIFACTS.includes(trimmed.toLowerCase());
+        if (trimmed !== "" && !isUIArtifact) {
+          break;
+        }
+      }
+
+      // Xóa dòng trống trước replace marker
+      if (replaceIdx - 1 >= 0 && lines[replaceIdx - 1].trim() === "") {
+        linesToRemove.add(replaceIdx - 1);
+      }
+
+      // Trước replace marker: tìm code fence
+      for (let i = replaceIdx - 1; i > separatorIdx; i--) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+        if (trimmed !== "") {
+          break;
+        }
+      }
+
+      const cleanedLines = lines.filter(
+        (_: string, idx: number) => !linesToRemove.has(idx)
+      );
+
+      return `<diff>${cleanedLines.join("\n")}</diff>`;
+    });
+  }
+
+  /**
+   * Clean content code fences
+   */
+  private static cleanContentCodeFences(content: string): string {
+    const contentBlockPattern = /<content>([\s\S]*?)<\/content>/g;
+    const CODE_FENCE = "```";
+    const UI_ARTIFACTS = ["text", "copy", "download"];
+
+    return content.replace(contentBlockPattern, (_match, contentBlock) => {
+      const lines = contentBlock.split("\n");
+
+      if (lines.length === 0) {
+        return `<content>${contentBlock}</content>`;
+      }
+
+      const linesToRemove = new Set<number>();
+
+      // Xóa dòng trống đầu tiên
+      if (lines[0].trim() === "") {
+        linesToRemove.add(0);
+      }
+
+      // Tìm và xóa code fence đầu tiên
+      for (let i = 0; i < lines.length; i++) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+
+        const isUIArtifact = UI_ARTIFACTS.includes(trimmed.toLowerCase());
+        if (trimmed !== "" && !isUIArtifact) {
+          break;
+        }
+      }
+
+      // Xóa dòng trống cuối cùng
+      const lastIdx = lines.length - 1;
+      if (lastIdx >= 0 && lines[lastIdx].trim() === "") {
+        linesToRemove.add(lastIdx);
+      }
+
+      // Tìm và xóa code fence cuối cùng
+      for (let i = lastIdx; i >= 0; i--) {
+        if (linesToRemove.has(i)) continue;
+
+        const trimmed = lines[i].trim();
+        if (trimmed === CODE_FENCE) {
+          linesToRemove.add(i);
+          break;
+        }
+
+        if (trimmed !== "") {
+          break;
+        }
+      }
+
+      const cleanedLines = lines.filter(
+        (_: string, idx: number) => !linesToRemove.has(idx)
+      );
+
+      return `<content>${cleanedLines.join("\n")}</content>`;
+    });
   }
 
   /**
@@ -694,49 +1263,6 @@ export class PromptController {
     error: string
   ): Promise<void> {
     await this.sendErrorResponse(tabId, requestId, error);
-  }
-
-  /**
-   * Gửi success response
-   */
-  private static async sendSuccessResponse(
-    tabId: number,
-    requestId: string,
-    response: string,
-    usage: any
-  ): Promise<void> {
-    try {
-      const responseObject = this.buildOpenAIResponse(response, usage);
-
-      console.log(
-        `[PromptController] 🔧 BUILT JSON OBJECT for tab ${tabId}:`,
-        responseObject
-      );
-
-      const folderPath = await this.getFolderPathForRequest(requestId);
-      const responseString = JSON.stringify(responseObject);
-
-      console.log(`[PromptController] 📤 SENDING JSON STRING:`, responseString);
-
-      await browserAPI.setStorageValue("wsOutgoingMessage", {
-        connectionId: await this.getConnectionIdForRequest(requestId),
-        data: {
-          type: "promptResponse",
-          requestId: requestId,
-          tabId: tabId,
-          success: true,
-          response: responseString,
-          folderPath: folderPath || null,
-          timestamp: Date.now(),
-        },
-        timestamp: Date.now(),
-      });
-    } catch (error) {
-      console.error(
-        `[PromptController] ❌ Error sending success response:`,
-        error
-      );
-    }
   }
 
   /**
