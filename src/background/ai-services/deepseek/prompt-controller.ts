@@ -214,6 +214,9 @@ export class PromptController {
     isNewTask?: boolean
   ): Promise<boolean> {
     try {
+      // 🔥 Lưu originalPrompt để dùng sau
+      const originalPrompt = prompt;
+
       // Validate tab
       const validation = await this.validateTab(tabId);
       if (!validation.isValid) {
@@ -255,15 +258,31 @@ export class PromptController {
       // 🆕 Đợi AI thực sự bắt đầu generate
       const generationStarted = await this.waitForGenerationStart(tabId);
       if (!generationStarted) {
-        console.warn(
-          `[PromptController] ⚠️ Could not confirm AI generation start for tab ${tabId}, but proceeding with polling`
+        console.error(
+          `[PromptController] ❌ AI didn't start generating within ${this.CONFIG.generationStartTimeout}ms. Aborting.`
         );
-        // Vẫn tiếp tục để catch trường hợp AI start chậm
+
+        // 🔥 Gửi error về Zen
+        await this.sendErrorResponse(
+          tabId,
+          requestId,
+          `AI không bắt đầu generate sau ${
+            this.CONFIG.generationStartTimeout / 1000
+          }s. Vui lòng thử lại hoặc chọn tab khác.`,
+          "GENERATION_START_TIMEOUT"
+        );
+
+        // Mark tab as free
+        await this.tabStateManager.markTabFree(tabId);
+        return false;
       }
+
+      // 🔥 Gửi WebSocket message báo đã chuyển sang trạng thái đợi response
+      await this.notifyZenGenerationStarted(tabId, requestId);
 
       // Start response polling
       this.activePollingTasks.set(tabId, requestId);
-      this.startResponsePolling(tabId, requestId, prompt);
+      this.startResponsePolling(tabId, requestId, originalPrompt);
 
       return true;
     } catch (error) {
@@ -464,6 +483,35 @@ export class PromptController {
       `[PromptController] ⚠️ AI didn't start generating within ${timeout}ms. Proceeding with polling anyway.`
     );
     return false;
+  }
+
+  /**
+   * 🔥 Thông báo cho Zen rằng AI đã bắt đầu generate
+   */
+  private static async notifyZenGenerationStarted(
+    tabId: number,
+    requestId: string
+  ): Promise<void> {
+    try {
+      const connectionId = await this.getConnectionIdForRequest(requestId);
+
+      await browserAPI.setStorageValue("wsOutgoingMessage", {
+        connectionId: connectionId,
+        data: {
+          type: "generationStarted",
+          requestId: requestId,
+          tabId: tabId,
+          timestamp: Date.now(),
+        },
+        timestamp: Date.now(),
+      });
+
+      console.log(
+        `[PromptController] ✅ Notified Zen: AI started generating for request ${requestId}`
+      );
+    } catch (error) {
+      console.error(`[PromptController] ❌ Failed to notify Zen:`, error);
+    }
   }
 
   /**
@@ -1311,7 +1359,8 @@ export class PromptController {
   private static async sendErrorResponse(
     tabId: number,
     requestId: string,
-    error: string
+    error: string,
+    errorType?: string
   ): Promise<void> {
     try {
       const folderPath = await this.getFolderPathForRequest(requestId);
@@ -1322,6 +1371,7 @@ export class PromptController {
         tabId: tabId,
         success: false,
         error: error,
+        errorType: errorType || "UNKNOWN_ERROR",
         folderPath: folderPath || null,
         timestamp: Date.now(),
       };
