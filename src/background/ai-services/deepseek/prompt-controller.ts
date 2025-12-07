@@ -17,9 +17,10 @@ export class PromptController {
   private static readonly CONFIG = {
     maxPolls: 1500,
     pollInterval: 1000,
-    initialDelay: 3000,
+    initialDelay: 1000,
     maxRetries: 3,
     baseDelay: 200,
+    generationStartTimeout: 15000, // Timeout để đợi AI bắt đầu generate
   };
 
   // Storage key cho folder tokens
@@ -251,6 +252,15 @@ export class PromptController {
         return false;
       }
 
+      // 🆕 Đợi AI thực sự bắt đầu generate
+      const generationStarted = await this.waitForGenerationStart(tabId);
+      if (!generationStarted) {
+        console.warn(
+          `[PromptController] ⚠️ Could not confirm AI generation start for tab ${tabId}, but proceeding with polling`
+        );
+        // Vẫn tiếp tục để catch trường hợp AI start chậm
+      }
+
       // Start response polling
       this.activePollingTasks.set(tabId, requestId);
       this.startResponsePolling(tabId, requestId, prompt);
@@ -418,6 +428,42 @@ export class PromptController {
       console.error(`[PromptController] ❌ Error clicking send button:`, error);
       return false;
     }
+  }
+
+  /**
+   * Đợi cho đến khi AI thực sự bắt đầu generate (button = stop icon)
+   */
+  private static async waitForGenerationStart(tabId: number): Promise<boolean> {
+    const timeout = this.CONFIG.generationStartTimeout;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeout) {
+      try {
+        const isGenerating = await StateController.isGenerating(tabId);
+
+        if (isGenerating) {
+          const elapsedTime = Date.now() - startTime;
+          console.log(
+            `[PromptController] ✅ AI started generating after ${elapsedTime}ms`
+          );
+          return true;
+        }
+
+        // Check mỗi 200ms
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } catch (error) {
+        console.error(
+          `[PromptController] ❌ Error checking generation status:`,
+          error
+        );
+        // Continue checking despite errors
+      }
+    }
+
+    console.warn(
+      `[PromptController] ⚠️ AI didn't start generating within ${timeout}ms. Proceeding with polling anyway.`
+    );
+    return false;
   }
 
   /**
