@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import TabCard from "./TabCard";
 import CustomButton from "../common/CustomButton";
 import MenuDrawer from "./MenuDrawer";
@@ -27,6 +27,10 @@ const Sidebar: React.FC = () => {
     id: string;
     status: string;
   } | null>(null);
+
+  // 🔥 NEW: Use ref for synchronous access to optimistic state
+  const optimisticBusyTabsRef = useRef<Set<number>>(new Set());
+  const [, forceUpdate] = useState({});
 
   useEffect(() => {
     // 🔥 FIX: Polling nhanh hơn (300ms) để UI responsive với busy state changes
@@ -89,11 +93,19 @@ const Sidebar: React.FC = () => {
     initializeSidebar();
 
     const messageListener = (message: any) => {
-      if (message.action === "tabsUpdated") {
-        // 🔥 NEW: Invalidate cache trước khi load để force fresh data
-        loadTabs();
+      // 🔥 Handle optimistic updates for request lifecycle
+      if (message.action === "requestStarted" && message.tabId) {
+        optimisticBusyTabsRef.current.add(message.tabId);
+        forceUpdate({}); // Trigger re-render
+      }
 
-        // 🔥 NEW: Double-check sau 200ms để catch delayed state updates
+      if (message.action === "requestCompleted" && message.tabId) {
+        optimisticBusyTabsRef.current.delete(message.tabId);
+        forceUpdate({}); // Trigger re-render
+      }
+
+      if (message.action === "tabsUpdated") {
+        loadTabs();
         setTimeout(() => {
           loadTabs();
         }, 200);
@@ -164,7 +176,7 @@ const Sidebar: React.FC = () => {
     };
   }, []);
 
-  const loadTabs = async (providedWsState?: { status: string }) => {
+  const loadTabs = async () => {
     try {
       const response = await BackgroundHealth.sendMessage<TabStateResponse>(
         { action: "getTabStates" },
@@ -188,7 +200,20 @@ const Sidebar: React.FC = () => {
       }
 
       const tabStates = response.tabStates || [];
-      setTabs(tabStates);
+
+      // 🔥 MERGE: Combine backend state with optimistic state
+      const mergedTabs = tabStates.map((tab: any) => {
+        // If tab is in optimistic busy set, override status to "busy"
+        if (optimisticBusyTabsRef.current.has(tab.tabId)) {
+          return {
+            ...tab,
+            status: "busy",
+          };
+        }
+        return tab;
+      });
+
+      setTabs(mergedTabs);
 
       const activeTabIds: Set<string> = new Set(
         tabStates.map((t: any) => String(t.tabId))

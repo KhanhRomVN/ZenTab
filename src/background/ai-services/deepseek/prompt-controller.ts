@@ -235,6 +235,17 @@ export class PromptController {
       // Mark tab as busy
       await this.tabStateManager.markTabBusy(tabId, requestId);
 
+      // 🔥 Notify UI: Request started (for optimistic updates)
+      try {
+        await browserAPI.sendMessage({
+          action: "requestStarted",
+          tabId: tabId,
+          requestId: requestId,
+        });
+      } catch (error) {
+        // Silent fail - UI notification is not critical
+      }
+
       // Create new chat nếu cần
       if (isNewTask === true) {
         await ChatController.clickNewChatButton(tabId);
@@ -272,15 +283,32 @@ export class PromptController {
           "GENERATION_START_TIMEOUT"
         );
 
-        // Mark tab as free
         await this.tabStateManager.markTabFree(tabId);
+
+        // 🔥 Notify UI: Request completed (error case)
+        try {
+          await browserAPI.sendMessage({
+            action: "requestCompleted",
+            tabId: tabId,
+            requestId: requestId,
+          });
+        } catch (error) {
+          // Silent fail
+        }
+
         return false;
       }
 
       // 🔥 Gửi WebSocket message báo đã chuyển sang trạng thái đợi response
+      console.log(
+        `[PromptController] ✅ GENERATION STARTED - tabId: ${tabId}, requestId: ${requestId}`
+      );
       await this.notifyZenGenerationStarted(tabId, requestId);
 
       // Start response polling
+      console.log(
+        `[PromptController] 🔄 STARTING RESPONSE POLLING - tabId: ${tabId}, requestId: ${requestId}`
+      );
       this.activePollingTasks.set(tabId, requestId);
       this.startResponsePolling(tabId, requestId, originalPrompt);
 
@@ -505,10 +533,6 @@ export class PromptController {
         },
         timestamp: Date.now(),
       });
-
-      console.log(
-        `[PromptController] ✅ Notified Zen: AI started generating for request ${requestId}`
-      );
     } catch (error) {
       console.error(`[PromptController] ❌ Failed to notify Zen:`, error);
     }
@@ -533,6 +557,9 @@ export class PromptController {
 
         if (!isGenerating) {
           // AI đã trả lời xong
+          console.log(
+            `[PromptController] ✅ GENERATION COMPLETE - tabId: ${tabId}, requestId: ${requestId}`
+          );
           await this.handleResponseComplete(tabId, requestId, originalPrompt);
           this.activePollingTasks.delete(tabId);
           return;
@@ -563,9 +590,9 @@ export class PromptController {
       const rawResponse = await this.getLatestResponseDirectly(tabId);
 
       // LOG 1: Raw HTML content (multi-line - preserve format)
-      console.log(
-        `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${rawResponse}`
-      );
+      // console.log(
+      //   `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${rawResponse}`
+      // );
 
       if (!rawResponse) {
         await this.sendErrorResponse(tabId, requestId, "No response received");
@@ -607,9 +634,9 @@ export class PromptController {
       processedResponse = processedResponse.replace(/\n{3,}/g, "\n\n").trim();
 
       // LOG 2: Processed response (multi-line - preserve format)
-      console.log(
-        `[PromptController] 🔄 PROCESSED RESPONSE (CLEAN):\n${processedResponse}`
-      );
+      // console.log(
+      //   `[PromptController] 🔄 PROCESSED RESPONSE (CLEAN):\n${processedResponse}`
+      // );
 
       // STEP 3: Lấy folderPath từ storage
       const folderPath = await this.getFolderPathForRequest(requestId);
@@ -650,7 +677,7 @@ export class PromptController {
       // STEP 7: Convert JSON to string
       const responseString = JSON.stringify(responseObject);
 
-      console.log(`[PromptController] 📤 SENDING JSON STRING:`, responseString);
+      // console.log(`[PromptController] 📤 SENDING JSON STRING:`, responseString);
 
       // STEP 8: Gửi qua WebSocket
       await browserAPI.setStorageValue("wsOutgoingMessage", {
@@ -666,6 +693,17 @@ export class PromptController {
         },
         timestamp: Date.now(),
       });
+
+      // 🔥 Notify UI: Request completed (for optimistic updates)
+      try {
+        await browserAPI.sendMessage({
+          action: "requestCompleted",
+          tabId: tabId,
+          requestId: requestId,
+        });
+      } catch (error) {
+        // Silent fail - UI notification is not critical
+      }
     } catch (error) {
       console.error(`[PromptController] ❌ Error handling response:`, error);
       await this.sendErrorResponse(
@@ -1237,11 +1275,6 @@ export class PromptController {
         return folderPath;
       }
 
-      // 🔥 FALLBACK: Try to get from wsMessages if not in dedicated storage
-      console.log(
-        `[PromptController] ⚠️ No folderPath in dedicated storage, checking wsMessages...`
-      );
-
       const messagesResult = await new Promise<any>((resolve) => {
         browserAPI.storage.local.get(["wsMessages"], (data: any) => {
           resolve(data || {});
@@ -1259,26 +1292,9 @@ export class PromptController {
 
         if (matchingMsg?.data?.folderPath) {
           const fallbackPath = matchingMsg.data.folderPath;
-          console.log(
-            `[PromptController] ✅ FOLDER PATH from wsMessages:`,
-            JSON.stringify({
-              requestId: requestId,
-              folderPath: fallbackPath,
-              source: "wsMessages_fallback",
-            })
-          );
           return fallbackPath;
         }
       }
-
-      console.log(
-        `[PromptController] ❌ FOLDER PATH NOT FOUND:`,
-        JSON.stringify({
-          requestId: requestId,
-          checkedSources: ["folderPath_storage", "wsMessages"],
-          result: "null",
-        })
-      );
 
       return null;
     } catch (error) {

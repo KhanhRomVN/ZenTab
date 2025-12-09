@@ -211,8 +211,10 @@ export class MessageHandler {
       case "getTabStates":
         try {
           const tabStates = await this.tabStateManager.getAllTabStates();
+
           sendResponse({ success: true, tabStates });
         } catch (error) {
+          console.error(`[MessageHandler] ❌ getTabStates ERROR:`, error);
           sendResponse({
             success: false,
             error: error instanceof Error ? error.message : String(error),

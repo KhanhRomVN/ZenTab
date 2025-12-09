@@ -64,6 +64,7 @@ export class TabStateCore {
   public async markTabBusy(tabId: number, requestId: string): Promise<boolean> {
     try {
       const state = await this.storage.getTabState(tabId);
+
       if (!state || state.status !== "free") {
         console.error(
           `[TabStateCore] ❌ Tab ${tabId} không thể mark as busy, current status: ${state?.status}`
@@ -82,6 +83,10 @@ export class TabStateCore {
       if (success) {
         this.cache.set(tabId, newState);
         await this.notifyUIUpdate();
+      } else {
+        console.error(
+          `[TabStateCore] ❌ FAILED TO SAVE BUSY STATE - tabId: ${tabId}, requestId: ${requestId}`
+        );
       }
 
       return success;
@@ -338,6 +343,9 @@ export class TabStateCore {
     try {
       const state = await this.storage.getTabState(tabId);
       if (!state) {
+        console.error(
+          `[TabStateCore] ❌ Cannot mark tab ${tabId} as ${status} - state not found`
+        );
         return false;
       }
 
@@ -351,6 +359,10 @@ export class TabStateCore {
       if (success) {
         this.cache.set(tabId, newState);
         await this.notifyUIUpdate();
+      } else {
+        console.error(
+          `[TabStateCore] ❌ FAILED TO SAVE STATUS - tabId: ${tabId}, status: ${status}`
+        );
       }
 
       return success;
