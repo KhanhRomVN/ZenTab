@@ -190,6 +190,18 @@ export class WSConnection {
         return;
       }
 
+      // Handle conversation ping forwarding
+      if (message.type === "conversationPing") {
+        await this.handleConversationPing(message);
+        return;
+      }
+
+      // Handle conversation pong forwarding
+      if (message.type === "conversationPong") {
+        await this.handleConversationPong(message);
+        return;
+      }
+
       // Store other messages
       await this.storeMessage(message);
     } catch (error) {
@@ -363,6 +375,34 @@ export class WSConnection {
   }
 
   /**
+   * Handle conversation ping forwarding
+   */
+  private async handleConversationPing(message: any): Promise<void> {
+    const conversationId = message.conversationId;
+
+    // Forward via WebSocket immediately (no deduplication needed for ping)
+    this.send(message);
+
+    console.log(
+      `[WSConnection] 🏓 Forwarded PING to Zen - conversationId: ${conversationId}`
+    );
+  }
+
+  /**
+   * Handle conversation pong forwarding
+   */
+  private async handleConversationPong(message: any): Promise<void> {
+    const conversationId = message.conversationId;
+
+    // Forward via WebSocket immediately
+    this.send(message);
+
+    console.log(
+      `[WSConnection] 🏓 Forwarded PONG to ZenTab - conversationId: ${conversationId}`
+    );
+  }
+
+  /**
    * Store message to storage
    */
   private async storeMessage(message: any): Promise<void> {
@@ -476,7 +516,16 @@ export class WSConnection {
         // Forward via WebSocket
         if (this.ws && this.state.status === "connected") {
           try {
-            this.ws.send(JSON.stringify(outgoingMessage.data));
+            const messageToSend = JSON.stringify(outgoingMessage.data);
+
+            // 🔍 DEBUG: Log outgoing messages
+            console.log(
+              `[WSConnection] 📤 Sending message via WebSocket:`,
+              outgoingMessage.data.type,
+              outgoingMessage.data
+            );
+
+            this.ws.send(messageToSend);
           } catch (error) {
             console.error(
               "[WSConnection] ❌ Failed to send outgoing message:",

@@ -378,6 +378,14 @@ export class PromptController {
       console.log(
         `[PromptController] ✅ GENERATION STARTED - tabId: ${tabId}, requestId: ${requestId}`
       );
+
+      // Get folderPath for multi-workspace filtering
+      const folderPath = await this.getFolderPathForRequest(requestId);
+
+      // 🆕 PING to Zen: AI started generating (send FIRST)
+      await this.sendPingToZen(tabId, requestId, conversationId, folderPath);
+
+      // Then send generationStarted
       await this.notifyZenGenerationStarted(tabId, requestId);
 
       // Start response polling
@@ -586,6 +594,55 @@ export class PromptController {
       `[PromptController] ⚠️ AI didn't start generating within ${timeout}ms. Proceeding with polling anyway.`
     );
     return false;
+  }
+
+  /**
+   * 🆕 PING to Zen: Gửi ping khi AI bắt đầu generate
+   */
+  private static async sendPingToZen(
+    tabId: number,
+    requestId: string,
+    conversationId?: string,
+    folderPath?: string | null
+  ): Promise<void> {
+    try {
+      const connectionId = await this.getConnectionIdForRequest(requestId);
+
+      const pingMessage = {
+        connectionId: connectionId,
+        data: {
+          type: "conversationPing", // 🔥 Changed from "ping" to avoid conflict with system ping
+          conversationId: conversationId,
+          tabId: tabId,
+          requestId: requestId,
+          folderPath: folderPath || null, // 🆕 Add folderPath for multi-workspace filtering
+          timestamp: Date.now(),
+        },
+        timestamp: Date.now(),
+      };
+
+      await browserAPI.setStorageValue("wsOutgoingMessage", pingMessage);
+
+      console.log(
+        `[PromptController] 🏓 PING sent to Zen - Full message:`,
+        JSON.stringify(pingMessage, null, 2)
+      );
+    } catch (error) {
+      console.error(`[PromptController] ❌ Failed to send ping:`, error);
+    }
+  }
+
+  /**
+   * 🆕 Handle PONG from Zen
+   */
+  public static async handlePongFromZen(
+    tabId: number,
+    conversationId: string
+  ): Promise<void> {
+    console.log(
+      `[PromptController] 🏓 PONG received from Zen - conversationId: ${conversationId}, tabId: ${tabId}`
+    );
+    // Có thể thêm logic khác nếu cần
   }
 
   /**

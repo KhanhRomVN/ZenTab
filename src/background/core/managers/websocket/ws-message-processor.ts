@@ -57,6 +57,9 @@ export class WSMessageProcessor {
         case "updateTabStatus":
           return this.processUpdateTabStatus(message);
 
+        case "conversationPong":
+          return this.processPong(message);
+
         default:
           return {
             success: false,
@@ -430,6 +433,49 @@ export class WSMessageProcessor {
         "[WSMessageProcessor] ❌ Error processing updateTabStatus:",
         error
       );
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  /**
+   * Process conversation pong message from Zen
+   */
+  private async processPong(message: any): Promise<{
+    success: boolean;
+    response?: any;
+    error?: string;
+  }> {
+    const { tabId, conversationId } = message;
+
+    if (!tabId || !conversationId) {
+      return {
+        success: false,
+        error: "Missing required fields: tabId or conversationId",
+      };
+    }
+
+    try {
+      // Forward to PromptController
+      const { PromptController } = await import(
+        "../../ai-services/deepseek/prompt-controller"
+      );
+
+      await PromptController.handlePongFromZen(tabId, conversationId);
+
+      return {
+        success: true,
+        response: {
+          type: "pongProcessed",
+          tabId,
+          conversationId,
+          timestamp: Date.now(),
+        },
+      };
+    } catch (error) {
+      console.error("[WSMessageProcessor] ❌ Error processing pong:", error);
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
