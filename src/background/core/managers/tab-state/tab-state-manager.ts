@@ -145,6 +145,30 @@ export class TabStateManager {
     return this.core.getTabsByFolder(folderPath);
   }
 
+  public async linkTabToConversation(
+    tabId: number,
+    conversationId: string
+  ): Promise<boolean> {
+    return this.core.linkTabToConversation(tabId, conversationId);
+  }
+
+  public async unlinkTabFromConversation(tabId: number): Promise<boolean> {
+    return this.core.unlinkTabFromConversation(tabId);
+  }
+
+  public async getTabByConversation(
+    conversationId: string
+  ): Promise<TabStateInfo | null> {
+    return this.core.getTabByConversation(conversationId);
+  }
+
+  public async markTabFreeWithConversation(
+    tabId: number,
+    conversationId: string | null
+  ): Promise<boolean> {
+    return this.core.markTabFreeWithConversation(tabId, conversationId);
+  }
+
   public async forceResetTab(tabId: number): Promise<boolean> {
     return this.core.forceResetTab(tabId);
   }

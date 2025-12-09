@@ -54,9 +54,16 @@ export class DeepSeekController {
     tabId: number,
     prompt: string,
     requestId: string,
-    isNewTask?: boolean
+    isNewTask?: boolean,
+    conversationId?: string
   ): Promise<boolean> {
-    return PromptController.sendPrompt(tabId, prompt, requestId, isNewTask);
+    return PromptController.sendPrompt(
+      tabId,
+      prompt,
+      requestId,
+      isNewTask,
+      conversationId
+    );
   }
 
   // Token management operations

@@ -211,7 +211,8 @@ export class PromptController {
     tabId: number,
     prompt: string,
     requestId: string,
-    isNewTask?: boolean
+    isNewTask?: boolean,
+    conversationId?: string
   ): Promise<boolean> {
     try {
       // 🔥 Lưu originalPrompt để dùng sau
@@ -230,6 +231,80 @@ export class PromptController {
           validation.error || "Validation failed"
         );
         return false;
+      }
+
+      // 🆕 CONVERSATION VALIDATION (Strict Mode)
+      if (conversationId) {
+        if (isNewTask === true) {
+          // First request: Link tab to conversation
+          const linkSuccess = await this.tabStateManager.linkTabToConversation(
+            tabId,
+            conversationId
+          );
+          if (!linkSuccess) {
+            console.error(
+              `[PromptController] ❌ Failed to link tab ${tabId} to conversation ${conversationId}`
+            );
+            await this.sendErrorResponse(
+              tabId,
+              requestId,
+              "Failed to link tab to conversation",
+              "CONVERSATION_LINK_FAILED"
+            );
+            return false;
+          }
+          console.log(
+            `[PromptController] ✅ First request - Linked tab ${tabId} to conversation ${conversationId}`
+          );
+        } else {
+          // Subsequent request: Validate conversation exists and matches tab
+          const linkedTab = await this.tabStateManager.getTabByConversation(
+            conversationId
+          );
+
+          if (!linkedTab) {
+            console.error(
+              `[PromptController] ❌ Conversation ${conversationId} not found`
+            );
+            await this.sendErrorResponse(
+              tabId,
+              requestId,
+              `Conversation không tồn tại. Vui lòng bắt đầu conversation mới.`,
+              "CONVERSATION_NOT_FOUND"
+            );
+            return false;
+          }
+
+          if (linkedTab.tabId !== tabId) {
+            console.error(
+              `[PromptController] ❌ Conversation ${conversationId} is linked to tab ${linkedTab.tabId}, not tab ${tabId}`
+            );
+            await this.sendErrorResponse(
+              tabId,
+              requestId,
+              `Conversation đã chuyển sang tab khác (Tab ${linkedTab.tabId}). Vui lòng quay lại tab gốc hoặc bắt đầu conversation mới.`,
+              "CONVERSATION_TAB_MISMATCH"
+            );
+            return false;
+          }
+
+          console.log(
+            `[PromptController] ✅ Subsequent request - Conversation ${conversationId} validated for tab ${tabId}`
+          );
+        }
+
+        // Store conversationId mapping for later retrieval
+        const conversationMappingKey = `conversationId_${requestId}`;
+        await browserAPI.setStorageValue(
+          conversationMappingKey,
+          conversationId
+        );
+
+        // Schedule cleanup after 5 minutes
+        setTimeout(() => {
+          const browserAPICleanup = this.getBrowserAPI();
+          browserAPICleanup.storage.local.remove([conversationMappingKey]);
+        }, 300000);
       }
 
       // Mark tab as busy
@@ -641,6 +716,9 @@ export class PromptController {
       // STEP 3: Lấy folderPath từ storage
       const folderPath = await this.getFolderPathForRequest(requestId);
 
+      // STEP 3.5: Lấy conversationId từ storage
+      const conversationId = await this.getConversationIdForRequest(requestId);
+
       // STEP 4: Tính tokens
       const promptTokens = this.calculateTokens(originalPrompt);
       const completionTokens = this.calculateTokens(processedResponse);
@@ -654,7 +732,15 @@ export class PromptController {
           completionTokens,
           totalTokens
         );
+      }
 
+      // STEP 5.5: Mark tab free with conversationId (if exists) or folderPath
+      if (conversationId) {
+        await this.tabStateManager.markTabFreeWithConversation(
+          tabId,
+          conversationId
+        );
+      } else if (folderPath) {
         await this.tabStateManager.markTabFreeWithFolder(tabId, folderPath);
       } else {
         await this.tabStateManager.markTabFree(tabId);
@@ -1300,6 +1386,32 @@ export class PromptController {
     } catch (error) {
       console.error(
         `[PromptController] ❌ Error in getFolderPathForRequest:`,
+        error
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Lấy conversationId từ requestId mapping
+   */
+  private static async getConversationIdForRequest(
+    requestId: string
+  ): Promise<string | null> {
+    try {
+      const conversationMappingKey = `conversationId_${requestId}`;
+      const browserAPI = this.getBrowserAPI();
+
+      const result = await new Promise<any>((resolve) => {
+        browserAPI.storage.local.get([conversationMappingKey], (data: any) => {
+          resolve(data || {});
+        });
+      });
+
+      return result[conversationMappingKey] || null;
+    } catch (error) {
+      console.error(
+        `[PromptController] ❌ Error in getConversationIdForRequest:`,
         error
       );
       return null;

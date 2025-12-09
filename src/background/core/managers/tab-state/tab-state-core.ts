@@ -150,6 +150,42 @@ export class TabStateCore {
   }
 
   /**
+   * Đánh dấu tab là "free" với conversationId
+   */
+  public async markTabFreeWithConversation(
+    tabId: number,
+    conversationId: string | null
+  ): Promise<boolean> {
+    try {
+      const state = await this.storage.getTabState(tabId);
+      if (!state) {
+        return false;
+      }
+
+      const newState: TabStateData = {
+        ...state,
+        status: "free",
+        requestId: null,
+        conversationId: conversationId,
+      };
+
+      const success = await this.storage.saveTabState(tabId, newState);
+      if (success) {
+        this.cache.set(tabId, newState);
+        await this.notifyUIUpdate();
+      }
+
+      return success;
+    } catch (error) {
+      console.error(
+        `[TabStateCore] ❌ Error marking tab ${tabId} as free with conversation:`,
+        error
+      );
+      return false;
+    }
+  }
+
+  /**
    * Link tab tới một folder
    */
   public async linkTabToFolder(
@@ -183,6 +219,45 @@ export class TabStateCore {
   }
 
   /**
+   * Link tab tới một conversation
+   */
+  public async linkTabToConversation(
+    tabId: number,
+    conversationId: string
+  ): Promise<boolean> {
+    try {
+      const state = await this.storage.getTabState(tabId);
+      if (!state) {
+        console.error(
+          `[TabStateCore] ❌ Cannot link tab ${tabId} to conversation - state not found`
+        );
+        return false;
+      }
+
+      const newState: TabStateData = {
+        ...state,
+        conversationId: conversationId,
+      };
+
+      const success = await this.storage.saveTabState(tabId, newState);
+      if (success) {
+        this.cache.set(tabId, newState);
+        console.log(
+          `[TabStateCore] ✅ Linked tab ${tabId} to conversation ${conversationId}`
+        );
+      }
+
+      return success;
+    } catch (error) {
+      console.error(
+        `[TabStateCore] ❌ Error linking tab ${tabId} to conversation:`,
+        error
+      );
+      return false;
+    }
+  }
+
+  /**
    * Unlink tab từ folder
    */
   public async unlinkTabFromFolder(tabId: number): Promise<boolean> {
@@ -207,6 +282,37 @@ export class TabStateCore {
     } catch (error) {
       console.error(
         `[TabStateCore] ❌ Error unlinking tab ${tabId} from folder:`,
+        error
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Unlink tab từ conversation
+   */
+  public async unlinkTabFromConversation(tabId: number): Promise<boolean> {
+    try {
+      const state = await this.storage.getTabState(tabId);
+      if (!state) {
+        return false;
+      }
+
+      const newState: TabStateData = {
+        ...state,
+        conversationId: null,
+      };
+
+      const success = await this.storage.saveTabState(tabId, newState);
+      if (success) {
+        this.cache.set(tabId, newState);
+        await this.notifyUIUpdate();
+      }
+
+      return success;
+    } catch (error) {
+      console.error(
+        `[TabStateCore] ❌ Error unlinking tab ${tabId} from conversation:`,
         error
       );
       return false;
@@ -251,6 +357,30 @@ export class TabStateCore {
         error
       );
       return [];
+    }
+  }
+
+  /**
+   * Lấy tab theo conversationId
+   */
+  public async getTabByConversation(
+    conversationId: string
+  ): Promise<TabStateInfo | null> {
+    try {
+      const tabId = await this.storage.getTabByConversation(conversationId);
+      if (!tabId) {
+        return null;
+      }
+
+      const allTabs = await this.getAllTabStates();
+      const tab = allTabs.find((t) => t.tabId === tabId);
+      return tab || null;
+    } catch (error) {
+      console.error(
+        `[TabStateCore] ❌ Error getting tab by conversation ${conversationId}:`,
+        error
+      );
+      return null;
     }
   }
 

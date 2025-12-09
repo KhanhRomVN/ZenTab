@@ -222,6 +222,35 @@ export class TabStateStorage {
   }
 
   /**
+   * Tìm tab theo conversationId
+   */
+  public async getTabByConversation(
+    conversationId: string
+  ): Promise<number | null> {
+    await this.storageMutex.acquire();
+    try {
+      const states = await this.getAllTabStates();
+
+      for (const [tabIdStr, state] of Object.entries(states)) {
+        const tabState = state as TabStateData;
+        if (tabState.conversationId === conversationId) {
+          return parseInt(tabIdStr);
+        }
+      }
+
+      return null;
+    } catch (error) {
+      console.error(
+        `[TabStateStorage] ❌ Error finding tab by conversation ${conversationId}:`,
+        error
+      );
+      return null;
+    } finally {
+      this.storageMutex.release();
+    }
+  }
+
+  /**
    * Unlink tất cả tabs từ một folder
    */
   public async unlinkFolder(folderPath: string): Promise<boolean> {

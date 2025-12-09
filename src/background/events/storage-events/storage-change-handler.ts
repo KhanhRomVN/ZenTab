@@ -104,7 +104,8 @@ export class StorageChangeHandler {
     message: any,
     connectionId: string
   ): Promise<void> {
-    const { tabId, prompt, requestId, isNewTask, folderPath } = message;
+    const { tabId, prompt, requestId, isNewTask, folderPath, conversationId } =
+      message;
 
     // 🔥 FIX: More lenient validation - only check essential fields
     if (!tabId) {
@@ -177,7 +178,8 @@ export class StorageChangeHandler {
         tabId,
         prompt,
         requestId,
-        isNewTask === true
+        isNewTask === true,
+        conversationId // 🆕 Pass conversationId to controller
       );
 
       if (success) {

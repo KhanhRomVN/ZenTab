@@ -8,6 +8,7 @@ export interface TabStateData {
   requestId: string | null;
   requestCount: number;
   folderPath?: string | null;
+  conversationId?: string | null;
 }
 
 /**
@@ -22,6 +23,7 @@ export interface TabStateInfo {
   canAccept: boolean;
   requestCount: number;
   folderPath: string | null;
+  conversationId?: string | null;
   provider?: "deepseek" | "chatgpt" | "gemini" | "grok" | "claude";
   cookieStoreId?: string;
 }
