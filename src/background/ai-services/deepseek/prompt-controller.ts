@@ -599,17 +599,20 @@ export class PromptController {
   /**
    * 🆕 PING to Zen: Gửi ping khi AI bắt đầu generate
    */
-  private static async sendPingToZen(
+  public static async sendPingToZen(
     tabId: number,
     requestId: string,
     conversationId?: string,
-    folderPath?: string | null
+    folderPath?: string | null,
+    connectionId?: string
   ): Promise<void> {
     try {
-      const connectionId = await this.getConnectionIdForRequest(requestId);
+      // Use provided connectionId or get from request
+      const connId =
+        connectionId || (await this.getConnectionIdForRequest(requestId));
 
       const pingMessage = {
-        connectionId: connectionId,
+        connectionId: connId,
         data: {
           type: "conversationPing", // 🔥 Changed from "ping" to avoid conflict with system ping
           conversationId: conversationId,
@@ -634,15 +637,20 @@ export class PromptController {
 
   /**
    * 🆕 Handle PONG from Zen
+   * Note: Heartbeat start/update logic is handled in storage-change-handler
    */
   public static async handlePongFromZen(
     tabId: number,
-    conversationId: string
+    conversationId: string,
+    folderPath?: string | null
   ): Promise<void> {
     console.log(
       `[PromptController] 🏓 PONG received from Zen - conversationId: ${conversationId}, tabId: ${tabId}`
     );
-    // Có thể thêm logic khác nếu cần
+
+    // Heartbeat logic is handled in storage-change-handler based on requestId
+    // First pong (req-*) → startHeartbeat()
+    // Heartbeat pong (heartbeat-*) → handlePongReceived()
   }
 
   /**

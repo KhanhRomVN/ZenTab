@@ -460,10 +460,16 @@ export class WSMessageProcessor {
     try {
       // Forward to PromptController
       const { PromptController } = await import(
-        "../../ai-services/deepseek/prompt-controller"
+        "../../../ai-services/deepseek/prompt-controller"
       );
 
       await PromptController.handlePongFromZen(tabId, conversationId);
+
+      // Notify HeartbeatManager (for ongoing heartbeat)
+      const { HeartbeatManager } = await import(
+        "../heartbeat/heartbeat-manager"
+      );
+      HeartbeatManager.getInstance().handlePongReceived(conversationId);
 
       return {
         success: true,

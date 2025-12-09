@@ -2,6 +2,7 @@
 
 import { TabStateManager } from "../../core/managers/tab-state";
 import { WSManager } from "../../core/managers/websocket";
+import { HeartbeatManager } from "../../core/managers/heartbeat/heartbeat-manager";
 
 /**
  * Storage Change Handler - Xử lý storage change events
@@ -91,8 +92,48 @@ export class StorageChangeHandler {
       // Process latest message
       const latestMsg = recentMsgs[recentMsgs.length - 1];
 
+      console.log(
+        `[StorageChangeHandler] 📨 Processing message type: ${latestMsg.data?.type}, connectionId: ${connectionId}`
+      );
+
       if (latestMsg.data.type === "sendPrompt") {
         await this.handleSendPromptMessage(latestMsg.data, connectionId);
+      } else if (latestMsg.data.type === "conversationPong") {
+        console.log(
+          `[StorageChangeHandler] 🏓 Processing PONG - conversationId: ${latestMsg.data.conversationId}, requestId: ${latestMsg.data.requestId}`
+        );
+
+        // Call PromptController directly
+        const { PromptController } = await import(
+          "../../ai-services/deepseek/prompt-controller"
+        );
+        await PromptController.handlePongFromZen(
+          latestMsg.data.tabId,
+          latestMsg.data.conversationId,
+          latestMsg.data.folderPath
+        );
+
+        // Check if this is first pong or heartbeat pong
+        const isFirstPong = latestMsg.data.requestId?.startsWith("req-");
+
+        console.log(
+          `[StorageChangeHandler] 🔍 Pong type check - requestId: "${latestMsg.data.requestId}", isFirstPong: ${isFirstPong}`
+        );
+
+        if (isFirstPong) {
+          // First pong: Start heartbeat
+          await HeartbeatManager.getInstance().startHeartbeat(
+            latestMsg.data.conversationId,
+            latestMsg.data.tabId,
+            latestMsg.data.folderPath,
+            connectionId
+          );
+        } else {
+          // Heartbeat pong: Just update timestamp
+          HeartbeatManager.getInstance().handlePongReceived(
+            latestMsg.data.conversationId
+          );
+        }
       }
     }
   }

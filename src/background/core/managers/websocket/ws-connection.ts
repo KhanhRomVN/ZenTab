@@ -375,31 +375,30 @@ export class WSConnection {
   }
 
   /**
-   * Handle conversation ping forwarding
+   * Handle conversation ping - NOT USED
+   * (Ping is sent from PromptController, not received from Zen)
    */
   private async handleConversationPing(message: any): Promise<void> {
-    const conversationId = message.conversationId;
-
-    // Forward via WebSocket immediately (no deduplication needed for ping)
-    this.send(message);
-
-    console.log(
-      `[WSConnection] 🏓 Forwarded PING to Zen - conversationId: ${conversationId}`
+    // This should never be called in current flow
+    // ZenTab sends ping TO Zen, doesn't receive ping FROM Zen
+    console.warn(
+      `[WSConnection] ⚠️ Unexpected conversationPing received - this shouldn't happen`
     );
   }
 
   /**
-   * Handle conversation pong forwarding
+   * Handle conversation pong from Zen
+   * Process locally to trigger heartbeat
    */
   private async handleConversationPong(message: any): Promise<void> {
     const conversationId = message.conversationId;
 
-    // Forward via WebSocket immediately
-    this.send(message);
-
     console.log(
-      `[WSConnection] 🏓 Forwarded PONG to ZenTab - conversationId: ${conversationId}`
+      `[WSConnection] 🏓 Received PONG from Zen - conversationId: ${conversationId}`
     );
+
+    // Process message locally (trigger PromptController → HeartbeatManager)
+    await this.storeMessage(message);
   }
 
   /**
@@ -419,12 +418,13 @@ export class WSConnection {
         messages[this.state.id] = [];
       }
 
-      // Check for duplicates
-      const isDuplicate = message.requestId
-        ? messages[this.state.id].some(
-            (existing: any) => existing.data.requestId === message.requestId
-          )
-        : false;
+      // Check for duplicates (skip for conversationPong as it shares requestId with ping)
+      const isDuplicate =
+        message.requestId && message.type !== "conversationPong"
+          ? messages[this.state.id].some(
+              (existing: any) => existing.data.requestId === message.requestId
+            )
+          : false;
 
       if (isDuplicate) {
         return;

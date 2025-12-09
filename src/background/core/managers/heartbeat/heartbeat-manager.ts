@@ -1,0 +1,224 @@
+// src/background/core/managers/heartbeat/heartbeat-manager.ts
+
+import { TabStateManager } from "../tab-state/tab-state-manager";
+import { browserAPI } from "../../../utils/browser/browser-api";
+
+/**
+ * HeartbeatManager - Manages periodic ping-pong heartbeat for active conversations
+ *
+ * Flow:
+ * 1. First pong received → Start heartbeat
+ * 2. Send ping every 5 seconds
+ * 3. Monitor pong responses
+ * 4. If no pong within timeout → Cleanup tab state
+ */
+export class HeartbeatManager {
+  private static instance: HeartbeatManager | null = null;
+
+  // Map: conversationId → interval ID
+  private intervals: Map<string, NodeJS.Timeout> = new Map();
+
+  // Map: conversationId → last pong timestamp
+  private lastPongTime: Map<string, number> = new Map();
+
+  // Map: conversationId → tabId
+  private conversationToTab: Map<string, number> = new Map();
+
+  // Map: conversationId → folderPath
+  private conversationToFolder: Map<string, string | null> = new Map();
+
+  // Map: conversationId → connectionId
+  private conversationToConnection: Map<string, string> = new Map();
+
+  // Configuration
+  private readonly PING_INTERVAL = 5000; // 5 seconds
+  private readonly PONG_TIMEOUT = 10000; // 10 seconds
+
+  private constructor() {}
+
+  /**
+   * Get singleton instance
+   */
+  public static getInstance(): HeartbeatManager {
+    if (!HeartbeatManager.instance) {
+      HeartbeatManager.instance = new HeartbeatManager();
+    }
+    return HeartbeatManager.instance;
+  }
+
+  /**
+   * Start heartbeat for a conversation
+   * Called when first pong is received
+   */
+  public async startHeartbeat(
+    conversationId: string,
+    tabId: number,
+    folderPath: string | null,
+    connectionId: string
+  ): Promise<void> {
+    // Stop existing heartbeat if any
+    this.stopHeartbeat(conversationId);
+
+    console.log(
+      `[HeartbeatManager] ✅ Starting heartbeat for conversation ${conversationId}, tab ${tabId}`
+    );
+
+    console.log(
+      `[HeartbeatManager] 📁 Stored folderPath for conversation ${conversationId}: ${folderPath}`
+    );
+
+    // Store mappings
+    this.conversationToTab.set(conversationId, tabId);
+    this.conversationToFolder.set(conversationId, folderPath);
+    this.conversationToConnection.set(conversationId, connectionId);
+    this.lastPongTime.set(conversationId, Date.now());
+
+    // Create interval to send ping every 5 seconds
+    const interval = setInterval(() => {
+      this.sendPing(conversationId, tabId);
+      this.checkPongTimeout(conversationId, tabId);
+    }, this.PING_INTERVAL);
+
+    this.intervals.set(conversationId, interval);
+  }
+
+  /**
+   * Stop heartbeat for a conversation
+   */
+  public stopHeartbeat(conversationId: string): void {
+    const interval = this.intervals.get(conversationId);
+    if (interval) {
+      clearInterval(interval);
+      this.intervals.delete(conversationId);
+      this.lastPongTime.delete(conversationId);
+      this.conversationToTab.delete(conversationId);
+      this.conversationToFolder.delete(conversationId);
+      this.conversationToConnection.delete(conversationId);
+
+      console.log(
+        `[HeartbeatManager] 🛑 Stopped heartbeat for conversation ${conversationId}`
+      );
+    }
+  }
+
+  /**
+   * Handle pong received from Zen
+   * Updates last pong timestamp
+   */
+  public handlePongReceived(conversationId: string): void {
+    this.lastPongTime.set(conversationId, Date.now());
+    console.log(
+      `[HeartbeatManager] ✅ Pong received for conversation ${conversationId}`
+    );
+  }
+
+  /**
+   * Send ping to Zen via PromptController (reuse existing ping logic)
+   */
+  private async sendPing(conversationId: string, tabId: number): Promise<void> {
+    try {
+      // Get stored folderPath and connectionId for this conversation
+      const folderPath = this.conversationToFolder.get(conversationId) || null;
+      const connectionId =
+        this.conversationToConnection.get(conversationId) || "default";
+
+      // Call PromptController to send ping (reuse existing logic)
+      const { PromptController } = await import(
+        "../../../ai-services/deepseek/prompt-controller"
+      );
+
+      // Use heartbeat requestId
+      const requestId = `heartbeat-${Date.now()}`;
+
+      await PromptController.sendPingToZen(
+        tabId,
+        requestId,
+        conversationId,
+        folderPath,
+        connectionId // Pass stored connectionId
+      );
+
+      const pingCount = Math.floor(
+        (Date.now() - (this.lastPongTime.get(conversationId) || 0)) /
+          this.PING_INTERVAL
+      );
+      console.log(
+        `[HeartbeatManager] 🏓 Sending ping #${pingCount} for conversation ${conversationId}`
+      );
+    } catch (error) {
+      console.error(
+        `[HeartbeatManager] ❌ Failed to send ping for conversation ${conversationId}:`,
+        error
+      );
+    }
+  }
+
+  /**
+   * Check if pong timeout occurred
+   * If yes, cleanup tab state and stop heartbeat
+   */
+  private async checkPongTimeout(
+    conversationId: string,
+    tabId: number
+  ): Promise<void> {
+    const lastPong = this.lastPongTime.get(conversationId);
+    if (!lastPong) return;
+
+    const timeSinceLastPong = Date.now() - lastPong;
+
+    if (timeSinceLastPong > this.PONG_TIMEOUT) {
+      console.warn(
+        `[HeartbeatManager] ⚠️ Pong timeout for conversation ${conversationId} (${timeSinceLastPong}ms) - cleaning up`
+      );
+
+      // Stop heartbeat
+      this.stopHeartbeat(conversationId);
+
+      // Cleanup tab state
+      await this.cleanupTabState(tabId);
+    }
+  }
+
+  /**
+   * Cleanup tab state when heartbeat fails
+   * - Unlink conversationId
+   * - Unlink folderPath
+   * - Mark tab as free
+   */
+  private async cleanupTabState(tabId: number): Promise<void> {
+    try {
+      const tabStateManager = TabStateManager.getInstance();
+
+      // Unlink conversation
+      await tabStateManager.unlinkTabFromConversation(tabId);
+
+      // Unlink folder
+      await tabStateManager.unlinkFolder(tabId);
+
+      // Mark tab as free
+      await tabStateManager.markTabFree(tabId);
+
+      console.log(
+        `[HeartbeatManager] 🧹 Cleaned up tab ${tabId} state after heartbeat timeout`
+      );
+    } catch (error) {
+      console.error(
+        `[HeartbeatManager] ❌ Failed to cleanup tab ${tabId}:`,
+        error
+      );
+    }
+  }
+
+  /**
+   * Get WebSocket connectionId
+   * TODO: Implement proper connection ID retrieval
+   */
+  private async getConnectionId(): Promise<string> {
+    // For now, return a placeholder
+    // In production, this should get the actual connectionId from WSManager
+    const result = await browserAPI.getStorageValue<any>("wsStates");
+    const states = result?.wsStates || {};
+    const firstConnectionId = Object.keys(states)[0];
+    return firstConnectionId || "ws-unknown";
+  }
+}
