@@ -27,13 +27,13 @@ export class MessageHandler {
    */
   public async handleMessage(
     message: any,
-    sender: any,
+    _sender: any,
     sendResponse: (response: any) => void
   ): Promise<boolean> {
     try {
-      // 🔥 FIX: Validate message structure first
+      // Validate message structure
       if (!message || typeof message !== "object") {
-        console.error("[MessageHandler] ❌ Invalid message:", message);
+        console.error("[MessageHandler] Invalid message:", message);
         sendResponse({
           success: false,
           error: "Invalid message format",
@@ -42,10 +42,7 @@ export class MessageHandler {
       }
 
       if (!message.action || typeof message.action !== "string") {
-        console.error(
-          "[MessageHandler] ❌ Missing or invalid action:",
-          message
-        );
+        console.error("[MessageHandler] Missing action:", message);
         sendResponse({
           success: false,
           error: "Missing action field",
@@ -54,7 +51,7 @@ export class MessageHandler {
       }
 
       // Handle WebSocket actions
-      if (this.handleWebSocketActions(message, sendResponse)) {
+      if (await this.handleWebSocketActions(message, sendResponse)) {
         return true;
       }
 
@@ -76,8 +73,7 @@ export class MessageHandler {
       // Handle other actions
       return this.handleOtherActions(message, sendResponse);
     } catch (error) {
-      // 🔥 FIX: Always respond even on error
-      console.error("[MessageHandler] ❌ Unexpected error:", error);
+      console.error("[MessageHandler] Unexpected error:", error);
       sendResponse({
         success: false,
         error: error instanceof Error ? error.message : String(error),
@@ -89,13 +85,13 @@ export class MessageHandler {
   /**
    * Handle WebSocket related actions
    */
-  private handleWebSocketActions(
+  private async handleWebSocketActions(
     message: any,
     sendResponse: (response: any) => void
-  ): boolean {
+  ): Promise<boolean> {
     switch (message.action) {
       case "connectWebSocket":
-        this.handleConnectWebSocket(message, sendResponse);
+        await this.handleConnectWebSocket(message, sendResponse);
         return true;
 
       case "disconnectWebSocket":
@@ -107,7 +103,7 @@ export class MessageHandler {
         return true;
 
       case "getWSConnectionInfo":
-        this.handleGetWSConnectionInfo(message, sendResponse);
+        await this.handleGetWSConnectionInfo(message, sendResponse);
         return true;
 
       default:
@@ -211,10 +207,9 @@ export class MessageHandler {
       case "getTabStates":
         try {
           const tabStates = await this.tabStateManager.getAllTabStates();
-
           sendResponse({ success: true, tabStates });
         } catch (error) {
-          console.error(`[MessageHandler] ❌ getTabStates ERROR:`, error);
+          console.error("[MessageHandler] getTabStates error:", error);
           sendResponse({
             success: false,
             error: error instanceof Error ? error.message : String(error),
@@ -303,16 +298,19 @@ export class MessageHandler {
    * Handle WebSocket connect
    */
   private async handleConnectWebSocket(
-    _message: any,
+    message: any,
     sendResponse: (response: any) => void
   ): Promise<void> {
     try {
-      const result = await this.wsManager.connect();
+      const result = await this.wsManager.connect(message.apiProvider);
+      console.log("[MessageHandler] wsManager.connect result:", result);
       sendResponse(result);
     } catch (error) {
+      console.error("[MessageHandler] WebSocket connection error:", error);
       sendResponse({
         success: false,
         error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
       });
     }
   }
@@ -321,7 +319,7 @@ export class MessageHandler {
    * Handle WebSocket disconnect
    */
   private handleDisconnectWebSocket(
-    message: any,
+    _message: any,
     sendResponse: (response: any) => void
   ): void {
     const result = this.wsManager.disconnect();
@@ -343,7 +341,7 @@ export class MessageHandler {
    * Handle get WebSocket connection info
    */
   private async handleGetWSConnectionInfo(
-    message: any,
+    _message: any,
     sendResponse: (response: any) => void
   ): Promise<void> {
     try {

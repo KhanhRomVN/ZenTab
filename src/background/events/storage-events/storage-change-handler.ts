@@ -75,7 +75,7 @@ export class StorageChangeHandler {
     }
 
     // Process each connection's messages
-    for (const [, msgArray] of Object.entries(messages)) {
+    for (const [connectionId, msgArray] of Object.entries(messages)) {
       const msgs = msgArray as Array<{ timestamp: number; data: any }>;
 
       const now = Date.now();
@@ -131,23 +131,14 @@ export class StorageChangeHandler {
 
     // 🔥 FIX: More lenient validation - only check essential fields
     if (!tabId) {
-      console.error(
-        "[StorageChangeHandler] ❌ Invalid sendPrompt: missing tabId"
-      );
       return;
     }
 
     if (!requestId) {
-      console.error(
-        "[StorageChangeHandler] ❌ Invalid sendPrompt: missing requestId"
-      );
       return;
     }
 
     if (!prompt || prompt.trim() === "") {
-      console.error(
-        "[StorageChangeHandler] ❌ Invalid sendPrompt: missing or empty prompt"
-      );
       return;
     }
 
@@ -221,10 +212,6 @@ export class StorageChangeHandler {
         browserAPI.storage.local.remove([requestKey]);
       }
     } catch (error) {
-      console.error(
-        "[StorageChangeHandler] ❌ Error processing sendPrompt:",
-        error
-      );
       browserAPI.storage.local.remove([requestKey]);
     }
   }
@@ -284,11 +271,6 @@ export class StorageChangeHandler {
       // Cleanup request
       browserAPI.storage.local.remove(["wsIncomingRequest"]);
     } catch (error) {
-      console.error(
-        "[StorageChangeHandler] ❌ Error processing getAvailableTabs:",
-        error
-      );
-
       // Send error response
       await this.sendErrorResponse(
         requestId,
@@ -307,9 +289,6 @@ export class StorageChangeHandler {
     const { folderPath } = request;
 
     if (!folderPath) {
-      console.error(
-        "[StorageChangeHandler] ❌ cleanupFolderLink missing folderPath"
-      );
       this.getBrowserAPI().storage.local.remove(["wsIncomingRequest"]);
       return;
     }
@@ -318,10 +297,6 @@ export class StorageChangeHandler {
       await this.tabStateManager.unlinkFolder(folderPath);
       this.getBrowserAPI().storage.local.remove(["wsIncomingRequest"]);
     } catch (error) {
-      console.error(
-        "[StorageChangeHandler] ❌ Error processing cleanupFolderLink:",
-        error
-      );
       this.getBrowserAPI().storage.local.remove(["wsIncomingRequest"]);
     }
   }
@@ -333,9 +308,6 @@ export class StorageChangeHandler {
     const { folderPath, requestId } = request;
 
     if (!folderPath || !requestId) {
-      console.error(
-        "[StorageChangeHandler] ❌ getTabsByFolder missing required fields"
-      );
       this.getBrowserAPI().storage.local.remove(["wsIncomingRequest"]);
       return;
     }
@@ -368,11 +340,6 @@ export class StorageChangeHandler {
 
       browserAPI.storage.local.remove(["wsIncomingRequest"]);
     } catch (error) {
-      console.error(
-        "[StorageChangeHandler] ❌ Error processing getTabsByFolder:",
-        error
-      );
-
       // Send error response
       await this.sendErrorResponse(
         requestId,

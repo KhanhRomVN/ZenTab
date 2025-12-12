@@ -48,6 +48,7 @@ export class WSConnection {
       try {
         // 🆕 Add clientType=external
         const urlWithParams = `${this.state.url}?clientType=external`;
+
         this.ws = new WebSocket(urlWithParams);
 
         this.ws.onopen = () => {
@@ -66,14 +67,7 @@ export class WSConnection {
           resolve();
         };
 
-        this.ws.onerror = (error) => {
-          console.error("[WSConnection] ❌ WebSocket ERROR:", {
-            errorType: error.type,
-            readyState: this.ws?.readyState,
-            connectionId: this.state.id,
-            url: this.state.url,
-          });
-
+        this.ws.onerror = () => {
           this.state.status = "error";
           this.notifyStateChange();
           this.sendDisconnectSignal();
@@ -102,11 +96,6 @@ export class WSConnection {
           this.handleMessage(event.data);
         };
       } catch (error) {
-        console.error(
-          "[WSConnection] ❌ Exception during WebSocket creation:",
-          error
-        );
-
         this.state.status = "error";
         this.notifyStateChange();
         resolve();
@@ -137,7 +126,7 @@ export class WSConnection {
         const messageStr = JSON.stringify(data);
         this.ws.send(messageStr);
       } catch (error) {
-        console.error("[WSConnection] ❌ Failed to send message:", error);
+        // Silent error
       }
     }
   }
@@ -211,10 +200,16 @@ export class WSConnection {
         return;
       }
 
+      // 🔥 CRITICAL: Handle sendPrompt message
+      if (message.type === "sendPrompt") {
+        await this.storeMessage(message);
+        return;
+      }
+
       // Store other messages
       await this.storeMessage(message);
     } catch (error) {
-      console.error("[WSConnection] ❌ Error handling message:", error);
+      // Silent error
     }
   }
 
@@ -389,12 +384,9 @@ export class WSConnection {
    * Handle conversation ping - NOT USED
    * (Ping is sent from PromptController, not received from Zen)
    */
-  private async handleConversationPing(message: any): Promise<void> {
+  private async handleConversationPing(_message: any): Promise<void> {
     // This should never be called in current flow
     // ZenTab sends ping TO Zen, doesn't receive ping FROM Zen
-    console.warn(
-      `[WSConnection] ⚠️ Unexpected conversationPing received - this shouldn't happen`
-    );
   }
 
   /**
@@ -460,7 +452,7 @@ export class WSConnection {
 
       await storageManager.set("wsMessages", messages);
     } catch (error) {
-      console.error("[WSConnection] ❌ Error storing message:", error);
+      // Silent error
     }
   }
 
@@ -495,7 +487,7 @@ export class WSConnection {
         // Ignore errors if no receivers
       }
     } catch (error) {
-      console.error("[WSConnection] ❌ Error notifying state change:", error);
+      // Silent error
     }
   }
 
@@ -527,10 +519,7 @@ export class WSConnection {
 
             this.ws.send(messageToSend);
           } catch (error) {
-            console.error(
-              "[WSConnection] ❌ Failed to send outgoing message:",
-              error
-            );
+            // Silent error
           }
         }
 
@@ -591,17 +580,11 @@ export class WSConnection {
             storageManager.remove(["wsOutgoingMessage"]).catch(() => {});
           }, 500);
         })
-        .catch((error) => {
-          console.error(
-            "[WSConnection] ❌ Failed to send disconnect signal:",
-            error
-          );
+        .catch(() => {
+          // Silent error
         });
     } catch (error) {
-      console.error(
-        "[WSConnection] ❌ Error sending disconnect signal:",
-        error
-      );
+      // Silent error
     }
   }
 
@@ -656,16 +639,16 @@ export class WSConnection {
 
       // Send focusedTabsUpdate
       if (this.ws && this.state.status === "connected") {
-        this.ws.send(
-          JSON.stringify({
-            type: "focusedTabsUpdate",
-            data: focusedTabs,
-            timestamp: Date.now(),
-          })
-        );
+        const message = {
+          type: "focusedTabsUpdate",
+          data: focusedTabs,
+          timestamp: Date.now(),
+        };
+
+        this.ws.send(JSON.stringify(message));
       }
     } catch (error) {
-      console.error(`[WSConnection] ❌ Error broadcasting tabs:`, error);
+      // Silent error
     }
   }
 

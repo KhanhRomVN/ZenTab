@@ -179,110 +179,78 @@ const Sidebar: React.FC = () => {
   const handleAddPort = async (port: number) => {
     // Check if port already exists
     if (ports.some((p) => p.port === port)) {
+      return;
     }
 
-    // Try to connect first
     try {
-      const ws = new WebSocket(`ws://localhost:${port}/ws`);
-
-      ws.onopen = () => {};
-
-      ws.onmessage = (event) => {
-        try {
-          const message = JSON.parse(event.data);
-
-          if (message.type === "connection-established") {
-            // Add to list after successful connection
-            setPorts((prev) => [...prev, { port, isConnected: true }]);
-
-            // 🔥 CRITICAL: Send current tab list to Zen
-
-            const tabsData = tabs.map((tab) => ({
-              tabId: tab.tabId,
-              url: tab.url,
-              title: tab.title,
-              status: tab.status,
-              provider: tab.provider,
-            }));
-
-            ws.send(
-              JSON.stringify({
-                type: "focusedTabsUpdate",
-                data: tabsData,
-                timestamp: Date.now(),
-              })
-            );
-          } else if (message.type === "focusedTabsUpdate") {
-          } else if (message.type === "requestFocusedTabs") {
-            // Zen is requesting tab list
-
-            const tabsData = tabs.map((tab) => ({
-              tabId: tab.tabId,
-              url: tab.url,
-              title: tab.title,
-              status: tab.status,
-              provider: tab.provider,
-            }));
-
-            ws.send(
-              JSON.stringify({
-                type: "focusedTabsUpdate",
-                data: tabsData,
-                timestamp: Date.now(),
-              })
-            );
-          }
-        } catch (error) {
-          console.error(
-            `[Sidebar] ❌ Error parsing message from port ${port}:`,
-            error
-          );
-        }
-      };
-
-      ws.onerror = (error) => {
-        console.error(`[Sidebar] ❌ WebSocket error on port ${port}:`, error);
-      };
-
-      ws.onclose = () => {
-        // Remove from list when connection closes
-        setPorts((prev) => prev.filter((p) => p.port !== port));
-      };
-
-      // Wait for connection to open
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          ws.close();
-          reject(new Error("Connection timeout"));
-        }, 5000);
-
-        ws.addEventListener(
-          "open",
-          () => {
-            clearTimeout(timeout);
-            resolve(null);
-          },
-          { once: true }
+      const response = await new Promise<any>((resolve) => {
+        const startTime = Date.now();
+        console.log(
+          `[Sidebar] 📤 [${startTime}] Sending connectWebSocket message...`
         );
-
-        ws.addEventListener(
-          "error",
-          () => {
-            clearTimeout(timeout);
-            reject(new Error("Connection failed"));
+        chrome.runtime.sendMessage(
+          {
+            action: "connectWebSocket",
+            apiProvider: `localhost:${port}`,
           },
-          { once: true }
+          (res) => {
+            const endTime = Date.now();
+            console.log(
+              `[Sidebar] 📥 [${endTime}] Callback received for connectWebSocket. Duration: ${
+                endTime - startTime
+              }ms`
+            );
+            resolve(res);
+          }
         );
       });
+
+      console.log(`[Sidebar] connectWebSocket response raw:`, response);
+      if (chrome.runtime.lastError) {
+        console.error(
+          "[Sidebar] ❌ chrome.runtime.lastError:",
+          JSON.stringify(chrome.runtime.lastError)
+        );
+      }
+
+      if (response && response.success) {
+        // Add to ports list
+        setPorts((prev) => [...prev, { port, isConnected: true }]);
+      } else {
+        console.error(`[Sidebar] ❌ Connection failed:`, response?.error);
+        alert(
+          `Failed to connect to port ${port}: ${
+            response?.error || "Unknown error"
+          }`
+        );
+      }
     } catch (error) {
-      console.error(`[Sidebar] ❌ Failed to connect to port ${port}:`, error);
-      // Don't add to list if connection failed
+      console.error(`[Sidebar] ❌ Exception in handleAddPort:`, error);
+      alert(
+        `Failed to connect to port ${port}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
   };
 
   const handleRemovePort = async (port: number) => {
-    // TODO: Implement disconnect logic
-    setPorts((prev) => prev.filter((p) => p.port !== port));
+    console.log(`[Sidebar] 🗑️ Requesting to remove port ${port}`);
+    try {
+      // Disconnect WebSocket via background
+      console.log(`[Sidebar] 🔌 Sending disconnectWebSocket message...`);
+      const response = await chrome.runtime.sendMessage({
+        action: "disconnectWebSocket",
+      });
+      console.log(`[Sidebar] ✅ disconnectWebSocket response:`, response);
+
+      console.log(`[Sidebar] 🔄 Updating state to remove port ${port}`);
+      setPorts((prev) => prev.filter((p) => p.port !== port));
+      // alert(`Removed port ${port}`); // Debug alert
+    } catch (error) {
+      console.error(`[Sidebar] ❌ Error removing port:`, error);
+      alert(`Error removing port: ${error}`);
+    }
   };
 
   return (

@@ -208,11 +208,7 @@ export class StartupManager {
     }
 
     // Initialize Tab Broadcaster
-    const tabBroadcaster = await this.dependencyContainer.getAsync<any>(
-      "TabBroadcaster"
-    );
-    if (tabBroadcaster) {
-    }
+    await this.dependencyContainer.getAsync<any>("TabBroadcaster");
   }
 
   /**
@@ -295,58 +291,62 @@ export class StartupManager {
     // Unified Message Listener
     browserAPI.runtime.onMessage.addListener(
       (message: any, sender: any, sendResponse: any) => {
-        // 🔥 FIX: Immediately mark as ready and return true
+        console.log(
+          `[StartupManager] 📨 [${Date.now()}] Message received:`,
+          message.type || message.action,
+          message
+        );
+
+        // Wrapper to trace response
+        const originalSendResponse = sendResponse;
+        sendResponse = (response: any) => {
+          console.log(
+            `[StartupManager] 📤 [${Date.now()}] Sending response:`,
+            response
+          );
+          try {
+            originalSendResponse(response);
+          } catch (error) {
+            console.error(
+              `[StartupManager] ❌ [${Date.now()}] Error calling originalSendResponse:`,
+              error
+            );
+          }
+        };
+
+        // 🔥 FIX: Immediately mark as ready
         if (!listenerReady) {
           listenerReady = true;
         }
 
-        try {
-          // Wrap async handler
-          (async () => {
-            try {
-              await messageHandler.handleMessage(message, sender, sendResponse);
-            } catch (error) {
-              console.error(
-                "[StartupManager] ❌ Message handler error:",
-                error
-              );
-
-              try {
-                sendResponse({
-                  success: false,
-                  error: error instanceof Error ? error.message : String(error),
-                });
-              } catch (responseError) {
-                console.error(
-                  "[StartupManager] ❌ Failed to send error response:",
-                  responseError
-                );
-              }
-            }
-          })();
-        } catch (syncError) {
-          console.error(
-            "[StartupManager] ❌ Sync error in message listener:",
-            syncError
-          );
-
+        // 🔥 FIX: Handle async message processing
+        // We MUST return true synchronously to keep the channel open
+        // Then call sendResponse asynchronously
+        (async () => {
           try {
-            sendResponse({
-              success: false,
-              error:
-                syncError instanceof Error
-                  ? syncError.message
-                  : String(syncError),
-            });
-          } catch (responseError) {
-            console.error(
-              "[StartupManager] ❌ Failed to send sync error response:",
-              responseError
-            );
-          }
-        }
+            await messageHandler.handleMessage(message, sender, sendResponse);
+          } catch (error) {
+            console.error("[StartupManager] Message handler error:", error);
 
-        // CRITICAL: Always return true để giữ message channel mở
+            try {
+              sendResponse({
+                success: false,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            } catch (responseError) {
+              console.error(
+                "[StartupManager] Failed to send error response:",
+                responseError
+              );
+            }
+          }
+        })();
+
+        // CRITICAL: Return true IMMEDIATELY to keep message channel open for async response
+        console.log(
+          `[StartupManager] ⏳ [${Date.now()}] Returning true for async handling of:`,
+          message.type || message.action
+        );
         return true;
       }
     );

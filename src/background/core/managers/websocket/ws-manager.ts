@@ -2,10 +2,7 @@
 
 import { WSConnection } from "./ws-connection";
 import { StorageManager } from "../../storage/storage-manager";
-import {
-  WSConnectionConfig,
-  WSConnectionState,
-} from "../../types/websocket.types";
+import { WSConnectionState } from "../../types/websocket.types";
 
 /**
  * WebSocket Manager - Quản lý WebSocket connections
@@ -25,7 +22,13 @@ export class WSManager {
   /**
    * Connect tới WebSocket server
    */
-  public async connect(): Promise<{ success: boolean; error?: string }> {
+  public async connect(
+    overrideUrl?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    console.log(
+      `[WSManager] 🔌 [${Date.now()}] connect() called with overrideUrl:`,
+      overrideUrl
+    );
     if (this.isConnecting) {
       return { success: false, error: "Already connecting" };
     }
@@ -37,8 +40,11 @@ export class WSManager {
     this.isConnecting = true;
 
     try {
-      // Lấy API Provider từ storage
-      const apiProvider = await this.storageManager.get<string>("apiProvider");
+      // Use override URL if provided, otherwise check storage
+      const storedProvider = await this.storageManager.get<string>(
+        "apiProvider"
+      );
+      const apiProvider = overrideUrl || storedProvider;
 
       if (!apiProvider || !this.isValidApiProvider(apiProvider)) {
         return {
@@ -47,23 +53,20 @@ export class WSManager {
         };
       }
 
-      // Parse API Provider URL
       const { port, wsUrl } = this.parseApiProvider(apiProvider);
       const connectionId = `ws-${Date.now()}-${port}`;
 
-      // Tạo connection mới
       this.connection = new WSConnection({
         id: connectionId,
         port: port,
         url: wsUrl,
       });
 
-      // Connect
       await this.connection.connect();
 
       return { success: true };
     } catch (error) {
-      console.error("[WSManager] ❌ Connection failed:", error);
+      console.error("[WSManager] Connection failed:", error);
       this.connection = null;
 
       return {
@@ -242,6 +245,7 @@ export class WSManager {
           }
           return true;
         }
+        return false;
       }
     );
   }
