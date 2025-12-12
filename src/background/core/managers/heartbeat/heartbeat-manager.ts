@@ -54,10 +54,6 @@ export class HeartbeatManager {
     // Stop existing heartbeat if any
     this.stopHeartbeat(conversationId);
 
-    console.log(
-      `[HeartbeatManager] ✅ Starting heartbeat for conversation ${conversationId}, tab ${tabId}`
-    );
-
     // Store mappings
     this.conversationToTab.set(conversationId, tabId);
     this.conversationToFolder.set(conversationId, folderPath);
@@ -83,10 +79,6 @@ export class HeartbeatManager {
       this.lastPongTime.delete(conversationId);
       this.conversationToTab.delete(conversationId);
       this.conversationToFolder.delete(conversationId);
-
-      console.log(
-        `[HeartbeatManager] 🛑 Stopped heartbeat for conversation ${conversationId}`
-      );
     }
   }
 
@@ -200,10 +192,6 @@ export class HeartbeatManager {
 
       // Mark tab as free
       await tabStateManager.markTabFree(tabId);
-
-      console.log(
-        `[HeartbeatManager] 🧹 Cleaned up tab ${tabId} state after heartbeat timeout`
-      );
     } catch (error) {
       console.error(
         `[HeartbeatManager] ❌ Failed to cleanup tab ${tabId}:`,

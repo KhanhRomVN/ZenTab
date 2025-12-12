@@ -129,10 +129,6 @@ export class StorageChangeHandler {
     const { tabId, prompt, requestId, isNewTask, folderPath, conversationId } =
       message;
 
-    console.log(
-      `[StorageChangeHandler] 🔍 DEBUG: Received sendPrompt with folderPath: ${folderPath}`
-    );
-
     // 🔥 FIX: More lenient validation - only check essential fields
     if (!tabId) {
       console.error(

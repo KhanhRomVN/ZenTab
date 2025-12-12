@@ -261,9 +261,6 @@ export class PromptController {
             );
             return false;
           }
-          console.log(
-            `[PromptController] ✅ First request - Linked tab ${tabId} to conversation ${conversationId}`
-          );
         } else {
           // Subsequent request: Validate conversation exists and matches tab
           const linkedTab = await this.tabStateManager.getTabByConversation(
@@ -379,9 +376,6 @@ export class PromptController {
       }
 
       // 🔥 Gửi WebSocket message báo đã chuyển sang trạng thái đợi response
-      console.log(
-        `[PromptController] ✅ GENERATION STARTED - tabId: ${tabId}, requestId: ${requestId}`
-      );
 
       // Get folderPath for multi-workspace filtering
       const folderPathForPing = await this.getFolderPathForRequest(requestId);
@@ -683,9 +677,7 @@ export class PromptController {
 
         if (!isGenerating) {
           // AI đã trả lời xong
-          console.log(
-            `[PromptController] ✅ GENERATION COMPLETE - tabId: ${tabId}, requestId: ${requestId}`
-          );
+
           await this.handleResponseComplete(tabId, requestId, originalPrompt);
           this.activePollingTasks.delete(tabId);
           return;
@@ -809,14 +801,6 @@ export class PromptController {
       const responseString = JSON.stringify(responseObject);
 
       // console.log(`[PromptController] 📤 SENDING JSON STRING:`, responseString);
-
-      // STEP 8: Gửi qua WebSocket
-      console.log(`[PromptController] 📤 Sending promptResponse:`, {
-        requestId,
-        tabId,
-        folderPath,
-        responseLength: responseString.length,
-      });
 
       const outgoingMessage = {
         data: {
@@ -1431,9 +1415,6 @@ export class PromptController {
 
         if (matchingMsg?.data?.folderPath) {
           const fallbackPath = matchingMsg.data.folderPath;
-          console.log(
-            `[PromptController] 🔍 DEBUG: Found folderPath in wsMessages fallback: ${fallbackPath}`
-          );
           return fallbackPath;
         }
       }

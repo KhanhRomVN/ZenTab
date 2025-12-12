@@ -179,38 +179,24 @@ const Sidebar: React.FC = () => {
   const handleAddPort = async (port: number) => {
     // Check if port already exists
     if (ports.some((p) => p.port === port)) {
-      console.log(`[Sidebar] Port ${port} already exists`);
-      return;
     }
-
-    console.log(`[Sidebar] 🔌 Attempting to connect to port ${port}...`);
 
     // Try to connect first
     try {
       const ws = new WebSocket(`ws://localhost:${port}/ws`);
 
-      ws.onopen = () => {
-        console.log(`[Sidebar] ✅ WebSocket opened for port ${port}`);
-      };
+      ws.onopen = () => {};
 
       ws.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          console.log(`[Sidebar] 📥 Received message from port ${port}:`, {
-            type: message.type,
-            hasData: !!message.data,
-            dataLength: message.data?.length,
-          });
 
           if (message.type === "connection-established") {
-            console.log(`[Sidebar] 🎉 Connection established on port ${port}`);
             // Add to list after successful connection
             setPorts((prev) => [...prev, { port, isConnected: true }]);
 
             // 🔥 CRITICAL: Send current tab list to Zen
-            console.log(
-              `[Sidebar] 📤 Sending focusedTabsUpdate with ${tabs.length} tabs`
-            );
+
             const tabsData = tabs.map((tab) => ({
               tabId: tab.tabId,
               url: tab.url,
@@ -227,16 +213,9 @@ const Sidebar: React.FC = () => {
               })
             );
           } else if (message.type === "focusedTabsUpdate") {
-            console.log(`[Sidebar] 📋 Received focusedTabsUpdate:`, {
-              port,
-              tabCount: message.data?.length || 0,
-              tabs: message.data,
-            });
           } else if (message.type === "requestFocusedTabs") {
             // Zen is requesting tab list
-            console.log(
-              `[Sidebar] 📤 Zen requested tabs, sending ${tabs.length} tabs`
-            );
+
             const tabsData = tabs.map((tab) => ({
               tabId: tab.tabId,
               url: tab.url,
@@ -266,7 +245,6 @@ const Sidebar: React.FC = () => {
       };
 
       ws.onclose = () => {
-        console.log(`[Sidebar] 🔌 WebSocket closed for port ${port}`);
         // Remove from list when connection closes
         setPorts((prev) => prev.filter((p) => p.port !== port));
       };
@@ -296,8 +274,6 @@ const Sidebar: React.FC = () => {
           { once: true }
         );
       });
-
-      console.log(`[Sidebar] ✅ Successfully connected to port ${port}`);
     } catch (error) {
       console.error(`[Sidebar] ❌ Failed to connect to port ${port}:`, error);
       // Don't add to list if connection failed
