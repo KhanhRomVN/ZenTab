@@ -1,21 +1,21 @@
 import React from "react";
-import { X, Settings } from "lucide-react";
+import { X, Wifi } from "lucide-react";
 import MotionCustomDrawer from "../common/CustomDrawer";
 
 interface MenuDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  onOpenSettings: () => void;
+  onOpenWebSocketManager: () => void;
 }
 
 const MenuDrawer: React.FC<MenuDrawerProps> = ({
   isOpen,
   onClose,
-  onOpenSettings,
+  onOpenWebSocketManager,
 }) => {
-  const handleSettingsClick = () => {
+  const handleWebSocketManagerClick = () => {
     onClose();
-    onOpenSettings();
+    onOpenWebSocketManager();
   };
 
   return (
@@ -44,11 +44,11 @@ const MenuDrawer: React.FC<MenuDrawerProps> = ({
 
         <div className="flex-1 overflow-y-auto p-2">
           <button
-            onClick={handleSettingsClick}
+            onClick={handleWebSocketManagerClick}
             className="w-full flex items-center gap-3 px-4 py-3 text-left text-text-primary hover:bg-sidebar-itemHover rounded-lg transition-colors"
           >
-            <Settings className="w-5 h-5" />
-            <span className="text-sm font-medium">Settings</span>
+            <Wifi className="w-5 h-5" />
+            <span className="text-sm font-medium">WebSocket Manager</span>
           </button>
         </div>
       </div>

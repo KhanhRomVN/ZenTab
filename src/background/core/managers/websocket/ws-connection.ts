@@ -46,12 +46,20 @@ export class WSConnection {
 
     return new Promise<void>((resolve) => {
       try {
-        this.ws = new WebSocket(this.state.url);
+        // 🆕 Add clientType=external
+        const urlWithParams = `${this.state.url}?clientType=external`;
+        this.ws = new WebSocket(urlWithParams);
 
         this.ws.onopen = () => {
           this.state.status = "connected";
           this.state.lastConnected = Date.now();
           this.lastPingTime = Date.now();
+
+          console.log(`[WSConnection] ✅ WebSocket CONNECTED successfully:`, {
+            connectionId: this.state.id,
+            url: this.state.url,
+            status: this.state.status,
+          });
 
           this.notifyStateChange();
           this.startHealthMonitor();
@@ -157,6 +165,25 @@ export class WSConnection {
       // Handle ping messages
       if (message.type === "ping") {
         this.handlePing(message);
+        return;
+      }
+
+      // 🆕 Handle connection-established message
+      if (message.type === "connection-established") {
+        console.log(`[WSConnection] 🎉 Connection established to Zen server:`, {
+          connectionId: message.connectionId,
+          port: message.port,
+          zenServerStats: message.connectionStats || "N/A",
+        });
+        return;
+      }
+
+      // 🆕 Handle connection stats update (broadcast from Zen)
+      if (message.type === "connectionStatsUpdate") {
+        console.log(
+          `[WSConnection] 📊 Zen windows (${message.stats.webview}):`,
+          message.connectionIds || []
+        );
         return;
       }
 
@@ -364,6 +391,14 @@ export class WSConnection {
     this.forwardedRequests.add(requestId);
     await storageManager.set(storageKey, Date.now());
 
+    // 🔍 DEBUG: Verify connectionId is present before forwarding
+    console.log(`[WSConnection] 🔍 Forwarding promptResponse:`, {
+      requestId: message.requestId,
+      hasConnectionId: !!message.connectionId,
+      connectionId: message.connectionId,
+      hasFolderPath: !!message.folderPath,
+    });
+
     // Forward via WebSocket
     this.send(message);
 
@@ -392,10 +427,6 @@ export class WSConnection {
    */
   private async handleConversationPong(message: any): Promise<void> {
     const conversationId = message.conversationId;
-
-    console.log(
-      `[WSConnection] 🏓 Received PONG from Zen - conversationId: ${conversationId}`
-    );
 
     // Process message locally (trigger PromptController → HeartbeatManager)
     await this.storeMessage(message);
@@ -519,11 +550,6 @@ export class WSConnection {
             const messageToSend = JSON.stringify(outgoingMessage.data);
 
             // 🔍 DEBUG: Log outgoing messages
-            console.log(
-              `[WSConnection] 📤 Sending message via WebSocket:`,
-              outgoingMessage.data.type,
-              outgoingMessage.data
-            );
 
             this.ws.send(messageToSend);
           } catch (error) {

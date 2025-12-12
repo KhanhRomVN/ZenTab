@@ -1,7 +1,6 @@
 // src/background/core/managers/heartbeat/heartbeat-manager.ts
 
 import { TabStateManager } from "../tab-state/tab-state-manager";
-import { browserAPI } from "../../../utils/browser/browser-api";
 
 /**
  * HeartbeatManager - Manages periodic ping-pong heartbeat for active conversations
@@ -63,10 +62,6 @@ export class HeartbeatManager {
       `[HeartbeatManager] ✅ Starting heartbeat for conversation ${conversationId}, tab ${tabId}`
     );
 
-    console.log(
-      `[HeartbeatManager] 📁 Stored folderPath for conversation ${conversationId}: ${folderPath}`
-    );
-
     // Store mappings
     this.conversationToTab.set(conversationId, tabId);
     this.conversationToFolder.set(conversationId, folderPath);
@@ -102,14 +97,39 @@ export class HeartbeatManager {
   }
 
   /**
+   * Check if heartbeat is active for a conversation
+   */
+  public isHeartbeatActive(conversationId: string): boolean {
+    return this.intervals.has(conversationId);
+  }
+
+  /**
+   * Get heartbeat status for a conversation
+   */
+  public getHeartbeatStatus(conversationId: string): {
+    active: boolean;
+    lastPongTime?: number;
+    folderPath?: string | null;
+  } {
+    const active = this.intervals.has(conversationId);
+
+    if (!active) {
+      return { active: false };
+    }
+
+    return {
+      active: true,
+      lastPongTime: this.lastPongTime.get(conversationId),
+      folderPath: this.conversationToFolder.get(conversationId),
+    };
+  }
+
+  /**
    * Handle pong received from Zen
    * Updates last pong timestamp
    */
   public handlePongReceived(conversationId: string): void {
     this.lastPongTime.set(conversationId, Date.now());
-    console.log(
-      `[HeartbeatManager] ✅ Pong received for conversation ${conversationId}`
-    );
   }
 
   /**
@@ -136,14 +156,6 @@ export class HeartbeatManager {
         conversationId,
         folderPath,
         connectionId // Pass stored connectionId
-      );
-
-      const pingCount = Math.floor(
-        (Date.now() - (this.lastPongTime.get(conversationId) || 0)) /
-          this.PING_INTERVAL
-      );
-      console.log(
-        `[HeartbeatManager] 🏓 Sending ping #${pingCount} for conversation ${conversationId}`
       );
     } catch (error) {
       console.error(
@@ -193,7 +205,7 @@ export class HeartbeatManager {
       await tabStateManager.unlinkTabFromConversation(tabId);
 
       // Unlink folder
-      await tabStateManager.unlinkFolder(tabId);
+      await tabStateManager.unlinkTabFromFolder(tabId);
 
       // Mark tab as free
       await tabStateManager.markTabFree(tabId);
@@ -207,18 +219,5 @@ export class HeartbeatManager {
         error
       );
     }
-  }
-
-  /**
-   * Get WebSocket connectionId
-   * TODO: Implement proper connection ID retrieval
-   */
-  private async getConnectionId(): Promise<string> {
-    // For now, return a placeholder
-    // In production, this should get the actual connectionId from WSManager
-    const result = await browserAPI.getStorageValue<any>("wsStates");
-    const states = result?.wsStates || {};
-    const firstConnectionId = Object.keys(states)[0];
-    return firstConnectionId || "ws-unknown";
   }
 }

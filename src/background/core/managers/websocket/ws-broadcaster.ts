@@ -9,6 +9,8 @@ interface FocusedTab {
   url?: string;
   provider?: "deepseek" | "chatgpt" | "gemini" | "grok" | "claude";
   cookieStoreId?: string;
+  folderPath?: string | null;
+  conversationId?: string | null;
 }
 
 /**
@@ -231,6 +233,18 @@ export class TabBroadcaster {
     try {
       const browserAPI = this.getBrowserAPI();
 
+      // 🆕 Get tab states from session storage
+      const storage = await new Promise<any>((resolve) => {
+        if (!browserAPI.storage || !browserAPI.storage.session) {
+          resolve({});
+          return;
+        }
+        browserAPI.storage.session.get("zenTabStates", (result: any) => {
+          resolve(result || {});
+        });
+      });
+      const zenTabStates = storage.zenTabStates || {};
+
       // 🆕 Query tất cả AI chat tabs (không chỉ DeepSeek)
       const urlPatterns = [
         "https://chat.deepseek.com/*",
@@ -268,6 +282,9 @@ export class TabBroadcaster {
         const cookieStoreId = (tab as any).cookieStoreId || undefined;
         const containerName = await this.getContainerName(cookieStoreId);
 
+        // Get state from storage
+        const tabState = zenTabStates[tab.id];
+
         focusedTabs.push({
           tabId: tab.id,
           containerName: containerName || `Tab ${tab.id}`,
@@ -275,6 +292,8 @@ export class TabBroadcaster {
           url: tab.url,
           provider: provider,
           cookieStoreId: cookieStoreId,
+          folderPath: tabState?.folderPath || null,
+          conversationId: tabState?.conversationId || null,
         });
       }
 

@@ -92,17 +92,9 @@ export class StorageChangeHandler {
       // Process latest message
       const latestMsg = recentMsgs[recentMsgs.length - 1];
 
-      console.log(
-        `[StorageChangeHandler] 📨 Processing message type: ${latestMsg.data?.type}, connectionId: ${connectionId}`
-      );
-
       if (latestMsg.data.type === "sendPrompt") {
         await this.handleSendPromptMessage(latestMsg.data, connectionId);
       } else if (latestMsg.data.type === "conversationPong") {
-        console.log(
-          `[StorageChangeHandler] 🏓 Processing PONG - conversationId: ${latestMsg.data.conversationId}, requestId: ${latestMsg.data.requestId}`
-        );
-
         // Call PromptController directly
         const { PromptController } = await import(
           "../../ai-services/deepseek/prompt-controller"
@@ -115,10 +107,6 @@ export class StorageChangeHandler {
 
         // Check if this is first pong or heartbeat pong
         const isFirstPong = latestMsg.data.requestId?.startsWith("req-");
-
-        console.log(
-          `[StorageChangeHandler] 🔍 Pong type check - requestId: "${latestMsg.data.requestId}", isFirstPong: ${isFirstPong}`
-        );
 
         if (isFirstPong) {
           // First pong: Start heartbeat
@@ -147,6 +135,10 @@ export class StorageChangeHandler {
   ): Promise<void> {
     const { tabId, prompt, requestId, isNewTask, folderPath, conversationId } =
       message;
+
+    console.log(
+      `[StorageChangeHandler] 🔍 DEBUG: Received sendPrompt with folderPath: ${folderPath}`
+    );
 
     // 🔥 FIX: More lenient validation - only check essential fields
     if (!tabId) {
@@ -195,10 +187,14 @@ export class StorageChangeHandler {
       // 🆕 CRITICAL: Store folderPath mapping separately to avoid triggering validation
       // Don't store incomplete sendPrompt messages in wsMessages
       const folderMappingKey = `folderPath_${requestId}`;
+      const connectionMappingKey = `connectionId_${requestId}`; // 🆕 Store connectionId mapping
 
       await new Promise<void>((resolve) => {
         browserAPI.storage.local.set(
-          { [folderMappingKey]: folderPath || null },
+          {
+            [folderMappingKey]: folderPath || null,
+            [connectionMappingKey]: connectionId, // 🆕 Store connectionId for routing
+          },
           () => {
             resolve();
           }
@@ -207,7 +203,10 @@ export class StorageChangeHandler {
 
       // Schedule cleanup after 5 minutes
       setTimeout(() => {
-        browserAPI.storage.local.remove([folderMappingKey]);
+        browserAPI.storage.local.remove([
+          folderMappingKey,
+          connectionMappingKey,
+        ]); // 🆕 Clean both mappings
       }, 300000);
 
       // Dynamic import để tránh circular dependencies
@@ -220,7 +219,8 @@ export class StorageChangeHandler {
         prompt,
         requestId,
         isNewTask === true,
-        conversationId // 🆕 Pass conversationId to controller
+        conversationId, // 🆕 Pass conversationId to controller
+        connectionId // 🆕 Pass connectionId for routing
       );
 
       if (success) {

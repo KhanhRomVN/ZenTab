@@ -2,9 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import TabCard from "./TabCard";
 import CustomButton from "../common/CustomButton";
 import MenuDrawer from "./MenuDrawer";
-import SettingDrawer from "./SettingDrawer";
-import { Settings, Power, PowerOff } from "lucide-react";
-import { WSHelper } from "@/shared/lib/ws-helper";
+import WebSocketDrawer from "./WebSocketDrawer";
+import { Settings } from "lucide-react";
 import { BackgroundHealth } from "@/shared/lib/background-health";
 
 interface TabStateResponse {
@@ -16,30 +15,15 @@ interface TabStateResponse {
 const Sidebar: React.FC = () => {
   const [tabs, setTabs] = useState<any[]>([]);
   const [showMenuDrawer, setShowMenuDrawer] = useState(false);
-  const [showSettingDrawer, setShowSettingDrawer] = useState(false);
+  const [showWebSocketDrawer, setShowWebSocketDrawer] = useState(false);
+  const [ports, setPorts] = useState<
+    Array<{ port: number; isConnected: boolean }>
+  >([]);
   const [, setActiveTabs] = useState<Set<string>>(new Set());
-  const [wsStatus, setWsStatus] = useState<
-    "connecting" | "connected" | "disconnected" | "error"
-  >("disconnected");
-  const [isTogglingWs, setIsTogglingWs] = useState(false);
-  const [apiProvider, setApiProvider] = useState<string>("");
-  const [wsConnection, setWsConnection] = useState<{
-    id: string;
-    status: string;
-  } | null>(null);
 
   // 🔥 NEW: Use ref for synchronous access to optimistic state
   const optimisticBusyTabsRef = useRef<Set<number>>(new Set());
   const [, forceUpdate] = useState({});
-
-  useEffect(() => {
-    // 🔥 FIX: Polling nhanh hơn (300ms) để UI responsive với busy state changes
-    const intervalId = setInterval(() => {
-      loadWebSocketStatus();
-    }, 300);
-
-    return () => clearInterval(intervalId);
-  }, []);
 
   useEffect(() => {
     const initializeSidebar = async () => {
@@ -50,14 +34,6 @@ const Sidebar: React.FC = () => {
         console.error("[Sidebar] ❌ Background script failed to initialize");
         return;
       }
-
-      const storageResult = await chrome.storage.local.get(["apiProvider"]);
-      const storedProvider = storageResult?.apiProvider || "";
-
-      setApiProvider(storedProvider);
-
-      // Load WebSocket status (chỉ load, không auto-connect)
-      await loadWebSocketStatus();
 
       // Load tabs với retry
       let retries = 3;
@@ -141,38 +117,11 @@ const Sidebar: React.FC = () => {
     chrome.tabs.onRemoved.addListener(tabRemovedListener);
     chrome.tabs.onUpdated.addListener(tabUpdatedListener);
 
-    const storageListener = async (
-      changes: { [key: string]: chrome.storage.StorageChange },
-      areaName: string
-    ) => {
-      if (areaName !== "local") return;
-
-      if (changes.wsStates) {
-        await loadWebSocketStatus();
-      }
-
-      if (changes.apiProvider) {
-        const newProvider = changes.apiProvider.newValue;
-        const oldProvider = changes.apiProvider.oldValue;
-
-        // 🔥 FIX: Sync UI state khi storage thay đổi (từ Settings hoặc backend)
-        if (newProvider && newProvider !== oldProvider) {
-          setApiProvider(newProvider);
-
-          // 🔥 NEW: Reload WebSocket status để update UI với connection mới
-          loadWebSocketStatus();
-        }
-      }
-    };
-
-    chrome.storage.onChanged.addListener(storageListener);
-
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
       chrome.tabs.onCreated.removeListener(tabCreatedListener);
       chrome.tabs.onRemoved.removeListener(tabRemovedListener);
       chrome.tabs.onUpdated.removeListener(tabUpdatedListener);
-      chrome.storage.onChanged.removeListener(storageListener);
     };
   }, []);
 
@@ -227,171 +176,141 @@ const Sidebar: React.FC = () => {
     }
   };
 
-  const loadWebSocketStatus = async () => {
-    try {
-      const state = await WSHelper.getConnectionState();
-      if (state) {
-        setWsConnection({
-          id: state.id,
-          status: state.status,
-        });
-
-        await new Promise((resolve) => setTimeout(resolve, 50));
-
-        setWsStatus(state.status as any);
-      } else {
-        setWsConnection(null);
-        setWsStatus("disconnected");
-      }
-    } catch (error) {
-      setWsConnection(null);
-      setWsStatus("disconnected");
-    }
-  };
-
-  const formatWebSocketUrl = (apiProvider: string): string => {
-    // 🔥 FIX: Hiển thị message rõ ràng nếu chưa config
-    if (!apiProvider || apiProvider.trim() === "") {
-      return "Not configured - Click Settings to configure";
-    }
-
-    try {
-      let url = apiProvider.trim();
-
-      if (!url.startsWith("http://") && !url.startsWith("https://")) {
-        url = `http://${url}`;
-      }
-
-      const urlObj = new URL(url);
-      const isHttps = urlObj.protocol === "https:";
-      const protocol = isHttps ? "wss" : "ws";
-      const host = urlObj.hostname;
-
-      if (urlObj.port) {
-        return `${protocol}://${host}:${urlObj.port}/ws`;
-      } else if (isHttps) {
-        return `${protocol}://${host}/ws`;
-      } else {
-        return `${protocol}://${host}:3030/ws`;
-      }
-    } catch (error) {
-      return "Invalid API Provider - Check Settings";
-    }
-  };
-
-  const handleApiProviderChange = async (newProvider: string) => {
-    await chrome.storage.local.set({
-      apiProvider: newProvider,
-    });
-
-    setApiProvider(newProvider);
-    if (wsConnection?.status === "connected") {
-      await WSHelper.disconnect();
-
-      // Wait for disconnect to complete
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // Reconnect will automatically use new protocol from storage
-      await WSHelper.connect();
-
-      // Reload WebSocket status
-      await loadWebSocketStatus();
-    }
-  };
-
-  const handleToggleWebSocket = async () => {
-    if (isTogglingWs) {
+  const handleAddPort = async (port: number) => {
+    // Check if port already exists
+    if (ports.some((p) => p.port === port)) {
+      console.log(`[Sidebar] Port ${port} already exists`);
       return;
     }
 
-    setIsTogglingWs(true);
+    console.log(`[Sidebar] 🔌 Attempting to connect to port ${port}...`);
 
+    // Try to connect first
     try {
-      if (wsStatus === "connected") {
-        const result = await WSHelper.disconnect();
-        if (result.success) {
-          setWsStatus("disconnected");
-          setWsConnection(null);
-        } else {
-          console.error(`[Sidebar] ❌ Disconnect failed:`, result.error);
-        }
-      } else {
-        const result = await WSHelper.connect();
+      const ws = new WebSocket(`ws://localhost:${port}/ws`);
 
-        if (!result || typeof result.success !== "boolean") {
-          // Đợi 300ms để backend ghi state
-          await new Promise((resolve) => setTimeout(resolve, 300));
-          const state = await WSHelper.getConnectionState();
+      ws.onopen = () => {
+        console.log(`[Sidebar] ✅ WebSocket opened for port ${port}`);
+      };
 
-          if (state && state.status === "connected") {
-            setWsStatus("connected");
-            setWsConnection({
-              id: state.id,
-              status: state.status,
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          console.log(`[Sidebar] 📥 Received message from port ${port}:`, {
+            type: message.type,
+            hasData: !!message.data,
+            dataLength: message.data?.length,
+          });
+
+          if (message.type === "connection-established") {
+            console.log(`[Sidebar] 🎉 Connection established on port ${port}`);
+            // Add to list after successful connection
+            setPorts((prev) => [...prev, { port, isConnected: true }]);
+
+            // 🔥 CRITICAL: Send current tab list to Zen
+            console.log(
+              `[Sidebar] 📤 Sending focusedTabsUpdate with ${tabs.length} tabs`
+            );
+            const tabsData = tabs.map((tab) => ({
+              tabId: tab.tabId,
+              url: tab.url,
+              title: tab.title,
+              status: tab.status,
+              provider: tab.provider,
+            }));
+
+            ws.send(
+              JSON.stringify({
+                type: "focusedTabsUpdate",
+                data: tabsData,
+                timestamp: Date.now(),
+              })
+            );
+          } else if (message.type === "focusedTabsUpdate") {
+            console.log(`[Sidebar] 📋 Received focusedTabsUpdate:`, {
+              port,
+              tabCount: message.data?.length || 0,
+              tabs: message.data,
             });
-          } else {
-            setWsStatus("error");
+          } else if (message.type === "requestFocusedTabs") {
+            // Zen is requesting tab list
+            console.log(
+              `[Sidebar] 📤 Zen requested tabs, sending ${tabs.length} tabs`
+            );
+            const tabsData = tabs.map((tab) => ({
+              tabId: tab.tabId,
+              url: tab.url,
+              title: tab.title,
+              status: tab.status,
+              provider: tab.provider,
+            }));
+
+            ws.send(
+              JSON.stringify({
+                type: "focusedTabsUpdate",
+                data: tabsData,
+                timestamp: Date.now(),
+              })
+            );
           }
-        } else if (result.success) {
-          setWsStatus("connected");
-          await loadWebSocketStatus();
-        } else {
-          setWsStatus("error");
+        } catch (error) {
+          console.error(
+            `[Sidebar] ❌ Error parsing message from port ${port}:`,
+            error
+          );
         }
-      }
+      };
+
+      ws.onerror = (error) => {
+        console.error(`[Sidebar] ❌ WebSocket error on port ${port}:`, error);
+      };
+
+      ws.onclose = () => {
+        console.log(`[Sidebar] 🔌 WebSocket closed for port ${port}`);
+        // Remove from list when connection closes
+        setPorts((prev) => prev.filter((p) => p.port !== port));
+      };
+
+      // Wait for connection to open
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          ws.close();
+          reject(new Error("Connection timeout"));
+        }, 5000);
+
+        ws.addEventListener(
+          "open",
+          () => {
+            clearTimeout(timeout);
+            resolve(null);
+          },
+          { once: true }
+        );
+
+        ws.addEventListener(
+          "error",
+          () => {
+            clearTimeout(timeout);
+            reject(new Error("Connection failed"));
+          },
+          { once: true }
+        );
+      });
+
+      console.log(`[Sidebar] ✅ Successfully connected to port ${port}`);
     } catch (error) {
-      console.error(`[Sidebar] ❌ Exception in handleToggleWebSocket:`, error);
-      setWsStatus("error");
-      setWsConnection(null);
-    } finally {
-      setIsTogglingWs(false);
+      console.error(`[Sidebar] ❌ Failed to connect to port ${port}:`, error);
+      // Don't add to list if connection failed
     }
+  };
+
+  const handleRemovePort = async (port: number) => {
+    // TODO: Implement disconnect logic
+    setPorts((prev) => prev.filter((p) => p.port !== port));
   };
 
   return (
     <div className="w-full h-screen overflow-hidden bg-background relative flex flex-col">
-      {/* WebSocket Status Header */}
-      <div className="flex-shrink-0 p-3 border-b border-border-default bg-background">
-        <div className="flex items-center justify-between">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  wsStatus === "connected"
-                    ? "bg-green-500"
-                    : wsStatus === "connecting"
-                    ? "bg-yellow-500 animate-pulse"
-                    : wsStatus === "error"
-                    ? "bg-red-500"
-                    : "bg-gray-400"
-                }`}
-              />
-              <span className="text-xs text-text-secondary">
-                {formatWebSocketUrl(apiProvider)}
-              </span>
-            </div>
-          </div>
-          <CustomButton
-            variant={
-              wsConnection?.status === "connected" ? "warning" : "success"
-            }
-            size="sm"
-            icon={wsConnection?.status === "connected" ? PowerOff : Power}
-            onClick={() => {
-              handleToggleWebSocket();
-            }}
-            loading={isTogglingWs}
-            disabled={isTogglingWs || !apiProvider || apiProvider.trim() === ""}
-            aria-label={
-              wsConnection?.status === "connected"
-                ? "Disconnect WebSocket"
-                : "Connect WebSocket"
-            }
-            children={undefined}
-          />
-        </div>
-      </div>
-
       {/* Tab List */}
       <div className="flex-1 overflow-y-auto p-2">
         {tabs.map((tab) => (
@@ -445,13 +364,14 @@ const Sidebar: React.FC = () => {
       <MenuDrawer
         isOpen={showMenuDrawer}
         onClose={() => setShowMenuDrawer(false)}
-        onOpenSettings={() => setShowSettingDrawer(true)}
+        onOpenWebSocketManager={() => setShowWebSocketDrawer(true)}
       />
-      <SettingDrawer
-        isOpen={showSettingDrawer}
-        onClose={() => setShowSettingDrawer(false)}
-        currentApiProvider={apiProvider}
-        onApiProviderChange={handleApiProviderChange}
+      <WebSocketDrawer
+        isOpen={showWebSocketDrawer}
+        onClose={() => setShowWebSocketDrawer(false)}
+        ports={ports}
+        onAddPort={handleAddPort}
+        onRemovePort={handleRemovePort}
       />
     </div>
   );

@@ -206,6 +206,9 @@ export class TabStateCore {
       const success = await this.storage.saveTabState(tabId, newState);
       if (success) {
         this.cache.set(tabId, newState);
+        console.log(
+          `[TabStateCore] ✅ Linked tab ${tabId} to folder: ${folderPath}`
+        );
       }
 
       return success;

@@ -123,6 +123,8 @@ export class TabStateScanner {
           canAccept: canAccept,
           requestCount: state.requestCount || 0,
           folderPath: state.folderPath || null,
+          conversationId:
+            "conversationId" in state ? state.conversationId || null : null,
           provider: provider,
           cookieStoreId: tab.cookieStoreId,
         });

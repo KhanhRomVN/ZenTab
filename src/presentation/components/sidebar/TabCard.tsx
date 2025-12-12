@@ -11,6 +11,7 @@ interface TabCardProps {
     canAccept: boolean;
     requestCount: number;
     folderPath?: string | null;
+    conversationId?: string | null;
     provider?: "deepseek" | "chatgpt" | "gemini" | "grok";
     cookieStoreId?: string;
   };
@@ -118,8 +119,8 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
   return (
     <div className="select-none">
       <div className="group flex flex-col gap-1.5 px-2.5 py-2 transition-all duration-150 rounded-lg hover:bg-sidebar-itemHover border border-transparent hover:border-border-default">
-        {/* Title Row with Provider Badge */}
-        <div className="flex items-center gap-1.5">
+        {/* Badge Row: Provider + ConversationId + Heartbeat */}
+        <div className="flex items-center gap-1.5 flex-wrap">
           {/* Provider Badge */}
           <div
             className={`flex items-center gap-1 px-1.5 py-0.5 rounded ${providerInfo.bgColor}`}
@@ -129,10 +130,26 @@ const TabCard: React.FC<TabCardProps> = ({ tab }) => {
             </span>
           </div>
 
-          {/* Title */}
-          <span className="text-xs font-medium text-text-primary line-clamp-1 flex-1">
-            {tab.title}
-          </span>
+          {/* ConversationId Badge */}
+          {tab.conversationId && (
+            <div className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-50 dark:bg-purple-900/20">
+              <span className="text-[10px] text-purple-600 dark:text-purple-400">
+                💬
+              </span>
+              <span className="text-[10px] font-mono text-purple-600 dark:text-purple-400">
+                {tab.conversationId.slice(-8)}
+              </span>
+            </div>
+          )}
+
+          {/* Heartbeat Badge - TODO: Add heartbeat status check */}
+          {tab.conversationId && (
+            <div className="flex items-center px-1.5 py-0.5 rounded bg-green-50 dark:bg-green-900/20">
+              <span className="text-[10px]" title="Heartbeat Active">
+                💚
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Metadata Row: Tab ID + Request Count + Status */}

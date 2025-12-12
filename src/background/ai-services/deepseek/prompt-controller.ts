@@ -212,7 +212,8 @@ export class PromptController {
     prompt: string,
     requestId: string,
     isNewTask?: boolean,
-    conversationId?: string
+    conversationId?: string,
+    connectionId?: string
   ): Promise<boolean> {
     try {
       // 🔥 Lưu originalPrompt để dùng sau
@@ -234,6 +235,7 @@ export class PromptController {
       }
 
       // 🆕 CONVERSATION VALIDATION (Strict Mode)
+
       if (conversationId) {
         if (isNewTask === true) {
           // First request: Link tab to conversation
@@ -241,6 +243,13 @@ export class PromptController {
             tabId,
             conversationId
           );
+
+          // 🆕 Link to folder if exists
+          const folderPath = await this.getFolderPathForRequest(requestId);
+          if (folderPath) {
+            await this.tabStateManager.linkTabToFolder(tabId, folderPath);
+          }
+
           if (!linkSuccess) {
             console.error(
               `[PromptController] ❌ Failed to link tab ${tabId} to conversation ${conversationId}`
@@ -287,10 +296,6 @@ export class PromptController {
             );
             return false;
           }
-
-          console.log(
-            `[PromptController] ✅ Subsequent request - Conversation ${conversationId} validated for tab ${tabId}`
-          );
         }
 
         // Store conversationId mapping for later retrieval
@@ -299,6 +304,18 @@ export class PromptController {
           conversationMappingKey,
           conversationId
         );
+
+        // 🆕 Store connectionId mapping for accurate routing
+        if (connectionId) {
+          const connectionMappingKey = `connectionId_${requestId}`;
+          await browserAPI.setStorageValue(connectionMappingKey, connectionId);
+
+          // Schedule cleanup
+          setTimeout(() => {
+            const browserAPICleanup = this.getBrowserAPI();
+            browserAPICleanup.storage.local.remove([connectionMappingKey]);
+          }, 300000);
+        }
 
         // Schedule cleanup after 5 minutes
         setTimeout(() => {
@@ -380,18 +397,22 @@ export class PromptController {
       );
 
       // Get folderPath for multi-workspace filtering
-      const folderPath = await this.getFolderPathForRequest(requestId);
+      const folderPathForPing = await this.getFolderPathForRequest(requestId);
 
-      // 🆕 PING to Zen: AI started generating (send FIRST)
-      await this.sendPingToZen(tabId, requestId, conversationId, folderPath);
+      // 🆕 PING to Zen
+      await this.sendPingToZen(
+        tabId,
+        requestId,
+        conversationId,
+        folderPathForPing,
+        connectionId
+      );
 
       // Then send generationStarted
       await this.notifyZenGenerationStarted(tabId, requestId);
 
       // Start response polling
-      console.log(
-        `[PromptController] 🔄 STARTING RESPONSE POLLING - tabId: ${tabId}, requestId: ${requestId}`
-      );
+
       this.activePollingTasks.set(tabId, requestId);
       this.startResponsePolling(tabId, requestId, originalPrompt);
 
@@ -572,10 +593,7 @@ export class PromptController {
         const isGenerating = await StateController.isGenerating(tabId);
 
         if (isGenerating) {
-          const elapsedTime = Date.now() - startTime;
-          console.log(
-            `[PromptController] ✅ AI started generating after ${elapsedTime}ms`
-          );
+          // const elapsedTime = Date.now() - startTime;
           return true;
         }
 
@@ -625,11 +643,6 @@ export class PromptController {
       };
 
       await browserAPI.setStorageValue("wsOutgoingMessage", pingMessage);
-
-      console.log(
-        `[PromptController] 🏓 PING sent to Zen - Full message:`,
-        JSON.stringify(pingMessage, null, 2)
-      );
     } catch (error) {
       console.error(`[PromptController] ❌ Failed to send ping:`, error);
     }
@@ -640,14 +653,10 @@ export class PromptController {
    * Note: Heartbeat start/update logic is handled in storage-change-handler
    */
   public static async handlePongFromZen(
-    tabId: number,
-    conversationId: string,
-    folderPath?: string | null
+    _tabId: number,
+    _conversationId: string,
+    _folderPath?: string | null
   ): Promise<void> {
-    console.log(
-      `[PromptController] 🏓 PONG received from Zen - conversationId: ${conversationId}, tabId: ${tabId}`
-    );
-
     // Heartbeat logic is handled in storage-change-handler based on requestId
     // First pong (req-*) → startHeartbeat()
     // Heartbeat pong (heartbeat-*) → handlePongReceived()
@@ -730,9 +739,6 @@ export class PromptController {
       const rawResponse = await this.getLatestResponseDirectly(tabId);
 
       // LOG 1: Raw HTML content (multi-line - preserve format)
-      // console.log(
-      //   `[PromptController] 📥 RAW RESPONSE FROM DEEPSEEK:\n${rawResponse}`
-      // );
 
       if (!rawResponse) {
         await this.sendErrorResponse(tabId, requestId, "No response received");
@@ -774,9 +780,6 @@ export class PromptController {
       processedResponse = processedResponse.replace(/\n{3,}/g, "\n\n").trim();
 
       // LOG 2: Processed response (multi-line - preserve format)
-      // console.log(
-      //   `[PromptController] 🔄 PROCESSED RESPONSE (CLEAN):\n${processedResponse}`
-      // );
 
       // STEP 3: Lấy folderPath từ storage
       const folderPath = await this.getFolderPathForRequest(requestId);
@@ -831,8 +834,18 @@ export class PromptController {
       // console.log(`[PromptController] 📤 SENDING JSON STRING:`, responseString);
 
       // STEP 8: Gửi qua WebSocket
-      await browserAPI.setStorageValue("wsOutgoingMessage", {
-        connectionId: await this.getConnectionIdForRequest(requestId),
+      const connectionId = await this.getConnectionIdForRequest(requestId);
+
+      console.log(`[PromptController] 📤 Sending promptResponse:`, {
+        requestId,
+        tabId,
+        folderPath,
+        connectionId,
+        responseLength: responseString.length,
+      });
+
+      const outgoingMessage = {
+        connectionId: connectionId,
         data: {
           type: "promptResponse",
           requestId: requestId,
@@ -840,10 +853,21 @@ export class PromptController {
           success: true,
           response: responseString,
           folderPath: folderPath || null, // 🔥 CRITICAL: Must not be undefined
+          connectionId: connectionId, // 🆕 Include connectionId in data for routing
           timestamp: Date.now(),
         },
         timestamp: Date.now(),
+      };
+
+      // 🔍 DEBUG: Verify connectionId is in both wrapper and data
+      console.log(`[PromptController] 🔍 VERIFY connectionId in message:`, {
+        wrapperConnectionId: outgoingMessage.connectionId,
+        dataConnectionId: outgoingMessage.data.connectionId,
+        areEqual:
+          outgoingMessage.connectionId === outgoingMessage.data.connectionId,
       });
+
+      await browserAPI.setStorageValue("wsOutgoingMessage", outgoingMessage);
 
       // 🔥 Notify UI: Request completed (for optimistic updates)
       try {
@@ -1443,6 +1467,9 @@ export class PromptController {
 
         if (matchingMsg?.data?.folderPath) {
           const fallbackPath = matchingMsg.data.folderPath;
+          console.log(
+            `[PromptController] 🔍 DEBUG: Found folderPath in wsMessages fallback: ${fallbackPath}`
+          );
           return fallbackPath;
         }
       }
@@ -1589,7 +1616,22 @@ export class PromptController {
     requestId: string
   ): Promise<string> {
     try {
-      const messages = await browserAPI.getStorageValue<any>("wsMessages");
+      // 🔥 PRIORITY 1: Check dedicated connectionId storage
+      const connectionMappingKey = `connectionId_${requestId}`;
+      const browserAPI = this.getBrowserAPI();
+
+      const connectionResult = await new Promise<any>((resolve) => {
+        browserAPI.storage.local.get([connectionMappingKey], (data: any) => {
+          resolve(data || {});
+        });
+      });
+
+      const storedConnectionId = connectionResult[connectionMappingKey];
+      if (storedConnectionId) {
+        return storedConnectionId;
+      }
+
+      const messages = await browserAPI.getStorageValue("wsMessages");
       if (!messages) return "default";
 
       for (const [connId, msgArray] of Object.entries(messages)) {

@@ -55,14 +55,16 @@ export class DeepSeekController {
     prompt: string,
     requestId: string,
     isNewTask?: boolean,
-    conversationId?: string
+    conversationId?: string,
+    connectionId?: string
   ): Promise<boolean> {
     return PromptController.sendPrompt(
       tabId,
       prompt,
       requestId,
       isNewTask,
-      conversationId
+      conversationId,
+      connectionId
     );
   }
 
