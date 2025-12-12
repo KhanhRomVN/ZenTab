@@ -171,7 +171,7 @@ export class ServiceRegistry {
         );
       }
 
-      return new StorageChangeHandler(tabStateManager, wsManager);
+      return new StorageChangeHandler(tabStateManager);
     });
   }
 

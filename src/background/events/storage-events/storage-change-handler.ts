@@ -1,7 +1,6 @@
 // src/background/events/storage-events/storage-change-handler.ts
 
 import { TabStateManager } from "../../core/managers/tab-state";
-import { WSManager } from "../../core/managers/websocket";
 import { HeartbeatManager } from "../../core/managers/heartbeat/heartbeat-manager";
 
 /**
@@ -9,11 +8,9 @@ import { HeartbeatManager } from "../../core/managers/heartbeat/heartbeat-manage
  */
 export class StorageChangeHandler {
   private tabStateManager: TabStateManager;
-  private wsManager: WSManager;
 
-  constructor(tabStateManager: TabStateManager, wsManager: WSManager) {
+  constructor(tabStateManager: TabStateManager) {
     this.tabStateManager = tabStateManager;
-    this.wsManager = wsManager;
   }
 
   /**
@@ -78,7 +75,7 @@ export class StorageChangeHandler {
     }
 
     // Process each connection's messages
-    for (const [connectionId, msgArray] of Object.entries(messages)) {
+    for (const [, msgArray] of Object.entries(messages)) {
       const msgs = msgArray as Array<{ timestamp: number; data: any }>;
 
       const now = Date.now();
@@ -93,7 +90,7 @@ export class StorageChangeHandler {
       const latestMsg = recentMsgs[recentMsgs.length - 1];
 
       if (latestMsg.data.type === "sendPrompt") {
-        await this.handleSendPromptMessage(latestMsg.data, connectionId);
+        await this.handleSendPromptMessage(latestMsg.data);
       } else if (latestMsg.data.type === "conversationPong") {
         // Call PromptController directly
         const { PromptController } = await import(
@@ -113,8 +110,7 @@ export class StorageChangeHandler {
           await HeartbeatManager.getInstance().startHeartbeat(
             latestMsg.data.conversationId,
             latestMsg.data.tabId,
-            latestMsg.data.folderPath,
-            connectionId
+            latestMsg.data.folderPath
           );
         } else {
           // Heartbeat pong: Just update timestamp
@@ -129,10 +125,7 @@ export class StorageChangeHandler {
   /**
    * Handle send prompt message
    */
-  private async handleSendPromptMessage(
-    message: any,
-    connectionId: string
-  ): Promise<void> {
+  private async handleSendPromptMessage(message: any): Promise<void> {
     const { tabId, prompt, requestId, isNewTask, folderPath, conversationId } =
       message;
 
@@ -184,16 +177,13 @@ export class StorageChangeHandler {
         });
       });
 
-      // 🆕 CRITICAL: Store folderPath mapping separately to avoid triggering validation
-      // Don't store incomplete sendPrompt messages in wsMessages
+      // Store folderPath mapping separately
       const folderMappingKey = `folderPath_${requestId}`;
-      const connectionMappingKey = `connectionId_${requestId}`; // 🆕 Store connectionId mapping
 
       await new Promise<void>((resolve) => {
         browserAPI.storage.local.set(
           {
             [folderMappingKey]: folderPath || null,
-            [connectionMappingKey]: connectionId, // 🆕 Store connectionId for routing
           },
           () => {
             resolve();
@@ -203,10 +193,7 @@ export class StorageChangeHandler {
 
       // Schedule cleanup after 5 minutes
       setTimeout(() => {
-        browserAPI.storage.local.remove([
-          folderMappingKey,
-          connectionMappingKey,
-        ]); // 🆕 Clean both mappings
+        browserAPI.storage.local.remove([folderMappingKey]);
       }, 300000);
 
       // Dynamic import để tránh circular dependencies
@@ -219,8 +206,7 @@ export class StorageChangeHandler {
         prompt,
         requestId,
         isNewTask === true,
-        conversationId, // 🆕 Pass conversationId to controller
-        connectionId // 🆕 Pass connectionId for routing
+        conversationId
       );
 
       if (success) {
@@ -231,7 +217,6 @@ export class StorageChangeHandler {
       } else {
         // Send error response
         await this.sendErrorResponse(
-          connectionId,
           requestId,
           tabId,
           "Failed to send prompt to DeepSeek tab"
@@ -273,7 +258,7 @@ export class StorageChangeHandler {
    * Handle get available tabs request
    */
   private async handleGetAvailableTabs(request: any): Promise<void> {
-    const { requestId, connectionId } = request;
+    const { requestId } = request;
 
     try {
       const availableTabs = await this.tabStateManager.getAllTabStates();
@@ -285,7 +270,6 @@ export class StorageChangeHandler {
         browserAPI.storage.local.set(
           {
             wsOutgoingMessage: {
-              connectionId: connectionId,
               data: {
                 type: "availableTabs",
                 requestId: requestId,
@@ -311,7 +295,6 @@ export class StorageChangeHandler {
 
       // Send error response
       await this.sendErrorResponse(
-        connectionId,
         requestId,
         0,
         error instanceof Error ? error.message : String(error)
@@ -351,9 +334,9 @@ export class StorageChangeHandler {
    * Handle get tabs by folder request
    */
   private async handleGetTabsByFolder(request: any): Promise<void> {
-    const { folderPath, requestId, connectionId } = request;
+    const { folderPath, requestId } = request;
 
-    if (!folderPath || !requestId || !connectionId) {
+    if (!folderPath || !requestId) {
       console.error(
         "[StorageChangeHandler] ❌ getTabsByFolder missing required fields"
       );
@@ -372,7 +355,6 @@ export class StorageChangeHandler {
         browserAPI.storage.local.set(
           {
             wsOutgoingMessage: {
-              connectionId: connectionId,
               data: {
                 type: "availableTabs",
                 requestId: requestId,
@@ -397,7 +379,6 @@ export class StorageChangeHandler {
 
       // Send error response
       await this.sendErrorResponse(
-        connectionId,
         requestId,
         0,
         error instanceof Error ? error.message : String(error)
@@ -430,7 +411,6 @@ export class StorageChangeHandler {
    * Send error response
    */
   private async sendErrorResponse(
-    connectionId: string,
     requestId: string,
     tabId: number,
     error: string
@@ -441,7 +421,6 @@ export class StorageChangeHandler {
       browserAPI.storage.local.set(
         {
           wsOutgoingMessage: {
-            connectionId: connectionId,
             data: {
               type: "promptResponse",
               requestId: requestId,

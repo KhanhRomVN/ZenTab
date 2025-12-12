@@ -212,8 +212,7 @@ export class PromptController {
     prompt: string,
     requestId: string,
     isNewTask?: boolean,
-    conversationId?: string,
-    connectionId?: string
+    conversationId?: string
   ): Promise<boolean> {
     try {
       // 🔥 Lưu originalPrompt để dùng sau
@@ -305,18 +304,6 @@ export class PromptController {
           conversationId
         );
 
-        // 🆕 Store connectionId mapping for accurate routing
-        if (connectionId) {
-          const connectionMappingKey = `connectionId_${requestId}`;
-          await browserAPI.setStorageValue(connectionMappingKey, connectionId);
-
-          // Schedule cleanup
-          setTimeout(() => {
-            const browserAPICleanup = this.getBrowserAPI();
-            browserAPICleanup.storage.local.remove([connectionMappingKey]);
-          }, 300000);
-        }
-
         // Schedule cleanup after 5 minutes
         setTimeout(() => {
           const browserAPICleanup = this.getBrowserAPI();
@@ -404,8 +391,7 @@ export class PromptController {
         tabId,
         requestId,
         conversationId,
-        folderPathForPing,
-        connectionId
+        folderPathForPing
       );
 
       // Then send generationStarted
@@ -621,22 +607,16 @@ export class PromptController {
     tabId: number,
     requestId: string,
     conversationId?: string,
-    folderPath?: string | null,
-    connectionId?: string
+    folderPath?: string | null
   ): Promise<void> {
     try {
-      // Use provided connectionId or get from request
-      const connId =
-        connectionId || (await this.getConnectionIdForRequest(requestId));
-
       const pingMessage = {
-        connectionId: connId,
         data: {
-          type: "conversationPing", // 🔥 Changed from "ping" to avoid conflict with system ping
+          type: "conversationPing",
           conversationId: conversationId,
           tabId: tabId,
           requestId: requestId,
-          folderPath: folderPath || null, // 🆕 Add folderPath for multi-workspace filtering
+          folderPath: folderPath || null,
           timestamp: Date.now(),
         },
         timestamp: Date.now(),
@@ -670,10 +650,7 @@ export class PromptController {
     requestId: string
   ): Promise<void> {
     try {
-      const connectionId = await this.getConnectionIdForRequest(requestId);
-
       await browserAPI.setStorageValue("wsOutgoingMessage", {
-        connectionId: connectionId,
         data: {
           type: "generationStarted",
           requestId: requestId,
@@ -834,38 +811,25 @@ export class PromptController {
       // console.log(`[PromptController] 📤 SENDING JSON STRING:`, responseString);
 
       // STEP 8: Gửi qua WebSocket
-      const connectionId = await this.getConnectionIdForRequest(requestId);
-
       console.log(`[PromptController] 📤 Sending promptResponse:`, {
         requestId,
         tabId,
         folderPath,
-        connectionId,
         responseLength: responseString.length,
       });
 
       const outgoingMessage = {
-        connectionId: connectionId,
         data: {
           type: "promptResponse",
           requestId: requestId,
           tabId: tabId,
           success: true,
           response: responseString,
-          folderPath: folderPath || null, // 🔥 CRITICAL: Must not be undefined
-          connectionId: connectionId, // 🆕 Include connectionId in data for routing
+          folderPath: folderPath || null,
           timestamp: Date.now(),
         },
         timestamp: Date.now(),
       };
-
-      // 🔍 DEBUG: Verify connectionId is in both wrapper and data
-      console.log(`[PromptController] 🔍 VERIFY connectionId in message:`, {
-        wrapperConnectionId: outgoingMessage.connectionId,
-        dataConnectionId: outgoingMessage.data.connectionId,
-        areEqual:
-          outgoingMessage.connectionId === outgoingMessage.data.connectionId,
-      });
 
       await browserAPI.setStorageValue("wsOutgoingMessage", outgoingMessage);
 
@@ -1597,7 +1561,6 @@ export class PromptController {
       };
 
       await browserAPI.setStorageValue("wsOutgoingMessage", {
-        connectionId: await this.getConnectionIdForRequest(requestId),
         data: errorObject,
         timestamp: Date.now(),
       });
@@ -1606,48 +1569,6 @@ export class PromptController {
         `[PromptController] ❌ Error sending error response:`,
         error
       );
-    }
-  }
-
-  /**
-   * Lấy connectionId cho request
-   */
-  private static async getConnectionIdForRequest(
-    requestId: string
-  ): Promise<string> {
-    try {
-      // 🔥 PRIORITY 1: Check dedicated connectionId storage
-      const connectionMappingKey = `connectionId_${requestId}`;
-      const browserAPI = this.getBrowserAPI();
-
-      const connectionResult = await new Promise<any>((resolve) => {
-        browserAPI.storage.local.get([connectionMappingKey], (data: any) => {
-          resolve(data || {});
-        });
-      });
-
-      const storedConnectionId = connectionResult[connectionMappingKey];
-      if (storedConnectionId) {
-        return storedConnectionId;
-      }
-
-      const messages = await browserAPI.getStorageValue("wsMessages");
-      if (!messages) return "default";
-
-      for (const [connId, msgArray] of Object.entries(messages)) {
-        const msgs = msgArray as Array<{ timestamp: number; data: any }>;
-        const matchingMsg = msgs.find(
-          (msg) => msg.data?.requestId === requestId
-        );
-
-        if (matchingMsg) {
-          return connId;
-        }
-      }
-
-      return "default";
-    } catch (error) {
-      return "default";
     }
   }
 

@@ -449,7 +449,6 @@ DeepSeek đã dừng response và yêu cầu nhấn "Continue" để tiếp tụ
 
       // Gửi qua WebSocket
       await browserAPI.setStorageValue("wsOutgoingMessage", {
-        connectionId: await this.getConnectionIdForRequest(requestId),
         data: {
           type: "promptResponse",
           requestId: requestId,
@@ -483,7 +482,6 @@ DeepSeek đã dừng response và yêu cầu nhấn "Continue" để tiếp tụ
 
       // Gửi error qua WebSocket
       await browserAPI.setStorageValue("wsOutgoingMessage", {
-        connectionId: await this.getConnectionIdForRequest(requestId),
         data: {
           type: "promptResponse",
           requestId: requestId,
@@ -535,33 +533,6 @@ DeepSeek đã dừng response và yêu cầu nhấn "Continue" để tiếp tụ
       errorMessage,
       "POLLING_ERROR"
     );
-  }
-
-  /**
-   * Lấy connectionId cho request
-   */
-  private static async getConnectionIdForRequest(
-    requestId: string
-  ): Promise<string> {
-    try {
-      const messages = await browserAPI.getStorageValue<any>("wsMessages");
-      if (!messages) return "default";
-
-      for (const [connId, msgArray] of Object.entries(messages)) {
-        const msgs = msgArray as Array<{ timestamp: number; data: any }>;
-        const matchingMsg = msgs.find(
-          (msg) => msg.data?.requestId === requestId
-        );
-
-        if (matchingMsg) {
-          return connId;
-        }
-      }
-
-      return "default";
-    } catch (error) {
-      return "default";
-    }
   }
 
   /**

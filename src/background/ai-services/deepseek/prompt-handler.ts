@@ -346,11 +346,7 @@ export class PromptHandler {
     errorType: string
   ): Promise<void> {
     try {
-      // Lấy connectionId từ storage
-      const connectionId = await this.getConnectionIdForRequest(requestId);
-
       await browserAPI.setStorageValue("wsOutgoingMessage", {
-        connectionId: connectionId,
         data: {
           type: "promptResponse",
           requestId: requestId,
@@ -364,33 +360,6 @@ export class PromptHandler {
       });
     } catch (error) {
       console.error(`[PromptHandler] ❌ Error sending error response:`, error);
-    }
-  }
-
-  /**
-   * Lấy connectionId cho request
-   */
-  private static async getConnectionIdForRequest(
-    requestId: string
-  ): Promise<string> {
-    try {
-      const messages = await browserAPI.getStorageValue<any>("wsMessages");
-      if (!messages) return "default";
-
-      for (const [connId, msgArray] of Object.entries(messages)) {
-        const msgs = msgArray as Array<{ timestamp: number; data: any }>;
-        const matchingMsg = msgs.find(
-          (msg) => msg.data?.requestId === requestId
-        );
-
-        if (matchingMsg) {
-          return connId;
-        }
-      }
-
-      return "default";
-    } catch (error) {
-      return "default";
     }
   }
 }

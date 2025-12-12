@@ -26,9 +26,6 @@ export class HeartbeatManager {
   // Map: conversationId → folderPath
   private conversationToFolder: Map<string, string | null> = new Map();
 
-  // Map: conversationId → connectionId
-  private conversationToConnection: Map<string, string> = new Map();
-
   // Configuration
   private readonly PING_INTERVAL = 5000; // 5 seconds
   private readonly PONG_TIMEOUT = 10000; // 10 seconds
@@ -52,8 +49,7 @@ export class HeartbeatManager {
   public async startHeartbeat(
     conversationId: string,
     tabId: number,
-    folderPath: string | null,
-    connectionId: string
+    folderPath: string | null
   ): Promise<void> {
     // Stop existing heartbeat if any
     this.stopHeartbeat(conversationId);
@@ -65,7 +61,6 @@ export class HeartbeatManager {
     // Store mappings
     this.conversationToTab.set(conversationId, tabId);
     this.conversationToFolder.set(conversationId, folderPath);
-    this.conversationToConnection.set(conversationId, connectionId);
     this.lastPongTime.set(conversationId, Date.now());
 
     // Create interval to send ping every 5 seconds
@@ -88,7 +83,6 @@ export class HeartbeatManager {
       this.lastPongTime.delete(conversationId);
       this.conversationToTab.delete(conversationId);
       this.conversationToFolder.delete(conversationId);
-      this.conversationToConnection.delete(conversationId);
 
       console.log(
         `[HeartbeatManager] 🛑 Stopped heartbeat for conversation ${conversationId}`
@@ -137,12 +131,10 @@ export class HeartbeatManager {
    */
   private async sendPing(conversationId: string, tabId: number): Promise<void> {
     try {
-      // Get stored folderPath and connectionId for this conversation
+      // Get stored folderPath for this conversation
       const folderPath = this.conversationToFolder.get(conversationId) || null;
-      const connectionId =
-        this.conversationToConnection.get(conversationId) || "default";
 
-      // Call PromptController to send ping (reuse existing logic)
+      // Call PromptController to send ping
       const { PromptController } = await import(
         "../../../ai-services/deepseek/prompt-controller"
       );
@@ -154,8 +146,7 @@ export class HeartbeatManager {
         tabId,
         requestId,
         conversationId,
-        folderPath,
-        connectionId // Pass stored connectionId
+        folderPath
       );
     } catch (error) {
       console.error(
