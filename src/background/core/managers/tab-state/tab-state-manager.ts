@@ -164,9 +164,14 @@ export class TabStateManager {
 
   public async markTabFreeWithConversation(
     tabId: number,
-    conversationId: string | null
+    conversationId: string | null,
+    folderPath?: string | null
   ): Promise<boolean> {
-    return this.core.markTabFreeWithConversation(tabId, conversationId);
+    return this.core.markTabFreeWithConversation(
+      tabId,
+      conversationId,
+      folderPath
+    );
   }
 
   public async forceResetTab(tabId: number): Promise<boolean> {

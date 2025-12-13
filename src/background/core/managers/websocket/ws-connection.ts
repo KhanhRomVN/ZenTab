@@ -107,6 +107,23 @@ export class WSConnection {
    * Disconnect WebSocket
    */
   public disconnect(): void {
+    // 🔥 FIX: Send disconnect signal (empty tabs) BEFORE closing the socket
+    if (this.ws && this.state.status === "connected") {
+      try {
+        const message = {
+          type: "focusedTabsUpdate",
+          data: [], // Empty array = disconnect signal
+          timestamp: Date.now(),
+        };
+        this.ws.send(JSON.stringify(message));
+      } catch (error) {
+        console.error(
+          "[WSConnection] Failed to send disconnect signal:",
+          error
+        );
+      }
+    }
+
     if (this.ws) {
       this.ws.close();
       this.ws = undefined;

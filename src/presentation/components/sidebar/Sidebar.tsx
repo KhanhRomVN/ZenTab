@@ -86,6 +86,28 @@ const Sidebar: React.FC = () => {
           loadTabs();
         }, 200);
       }
+
+      // 🔥 FIX: Listen for WebSocket state changes
+      if (message.type === "wsStateChanged") {
+        const { state } = message;
+        if (state) {
+          if (state.status === "disconnected" || state.status === "error") {
+            // Remove port if disconnected
+            setPorts((prev) => prev.filter((p) => p.port !== state.port));
+          } else if (state.status === "connected") {
+            // Add or update port if connected
+            setPorts((prev) => {
+              const existing = prev.find((p) => p.port === state.port);
+              if (existing) {
+                return prev.map((p) =>
+                  p.port === state.port ? { ...p, isConnected: true } : p
+                );
+              }
+              return [...prev, { port: state.port, isConnected: true }];
+            });
+          }
+        }
+      }
     };
 
     chrome.runtime.onMessage.addListener(messageListener);

@@ -28,6 +28,9 @@ export class TabStateScanner {
 
       const states: Record<number, TabStateData> = {};
 
+      // Fetch existing states FIRST
+      const existingStates = await this.storage.getAllTabStates();
+
       for (const tab of tabs) {
         if (!tab.id) {
           continue;
@@ -35,13 +38,15 @@ export class TabStateScanner {
 
         try {
           const isSleepTab = this.isSleepTab(tab);
+          const existingState = existingStates[tab.id];
 
           if (isSleepTab) {
             states[tab.id] = {
               status: "sleep" as const,
               requestId: null,
-              requestCount: 0,
-              folderPath: null,
+              requestCount: existingState?.requestCount || 0,
+              folderPath: existingState?.folderPath || null,
+              conversationId: existingState?.conversationId || null,
             };
             continue;
           }
@@ -51,17 +56,20 @@ export class TabStateScanner {
 
           states[tab.id] = {
             status: (isBusy ? "busy" : "free") as "free" | "busy",
-            requestId: null,
-            requestCount: 0,
-            folderPath: null,
+            requestId: isBusy ? existingState?.requestId || null : null,
+            requestCount: existingState?.requestCount || 0,
+            folderPath: existingState?.folderPath || null,
+            conversationId: existingState?.conversationId || null,
           };
         } catch (buttonError) {
+          const existingState = existingStates[tab.id];
           // Default to free state nếu check fails
           states[tab.id] = {
             status: "free" as const,
             requestId: null,
-            requestCount: 0,
-            folderPath: null,
+            requestCount: existingState?.requestCount || 0,
+            folderPath: existingState?.folderPath || null,
+            conversationId: existingState?.conversationId || null,
           };
         }
       }

@@ -154,7 +154,8 @@ export class TabStateCore {
    */
   public async markTabFreeWithConversation(
     tabId: number,
-    conversationId: string | null
+    conversationId: string | null,
+    folderPath?: string | null
   ): Promise<boolean> {
     try {
       const state = await this.storage.getTabState(tabId);
@@ -167,6 +168,7 @@ export class TabStateCore {
         status: "free",
         requestId: null,
         conversationId: conversationId,
+        folderPath: folderPath !== undefined ? folderPath : state.folderPath,
       };
 
       const success = await this.storage.saveTabState(tabId, newState);

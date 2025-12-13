@@ -811,7 +811,8 @@ export class PromptController {
       if (conversationId) {
         await this.tabStateManager.markTabFreeWithConversation(
           tabId,
-          conversationId
+          conversationId,
+          folderPath
         );
       } else if (folderPath) {
         await this.tabStateManager.markTabFreeWithFolder(tabId, folderPath);
