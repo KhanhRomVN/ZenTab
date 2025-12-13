@@ -299,11 +299,12 @@ export class RuntimeEventHandler {
     sendResponse: (response?: any) => void
   ): Promise<boolean> {
     try {
-      const wsConnectionInfo = this.wsManager.getConnectionInfo();
+      const wsConnectionInfos = this.wsManager.getConnectionInfo();
 
       sendResponse({
         success: true,
-        wsStatus: wsConnectionInfo,
+        wsStatus: wsConnectionInfos,
+        connections: wsConnectionInfos, // Add explicit connections array
       });
       return true;
     } catch (error) {

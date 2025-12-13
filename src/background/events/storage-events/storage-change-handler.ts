@@ -246,7 +246,7 @@ export class StorageChangeHandler {
    * Handle get available tabs request
    */
   private async handleGetAvailableTabs(request: any): Promise<void> {
-    const { requestId } = request;
+    const { requestId, connectionId } = request;
 
     try {
       const availableTabs = await this.tabStateManager.getAllTabStates();
@@ -258,6 +258,7 @@ export class StorageChangeHandler {
         browserAPI.storage.local.set(
           {
             wsOutgoingMessage: {
+              connectionId: connectionId, // Route to specific connection
               data: {
                 type: "availableTabs",
                 requestId: requestId,
@@ -310,7 +311,7 @@ export class StorageChangeHandler {
    * Handle get tabs by folder request
    */
   private async handleGetTabsByFolder(request: any): Promise<void> {
-    const { folderPath, requestId } = request;
+    const { folderPath, requestId, connectionId } = request;
 
     if (!folderPath || !requestId) {
       this.getBrowserAPI().storage.local.remove(["wsIncomingRequest"]);
@@ -328,6 +329,7 @@ export class StorageChangeHandler {
         browserAPI.storage.local.set(
           {
             wsOutgoingMessage: {
+              connectionId: connectionId, // Route to specific connection
               data: {
                 type: "availableTabs",
                 requestId: requestId,
@@ -381,7 +383,8 @@ export class StorageChangeHandler {
   private async sendErrorResponse(
     requestId: string,
     tabId: number,
-    error: string
+    error: string,
+    connectionId?: string
   ): Promise<void> {
     const browserAPI = this.getBrowserAPI();
 
@@ -389,6 +392,7 @@ export class StorageChangeHandler {
       browserAPI.storage.local.set(
         {
           wsOutgoingMessage: {
+            connectionId: connectionId,
             data: {
               type: "promptResponse",
               requestId: requestId,

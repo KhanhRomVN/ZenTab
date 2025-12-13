@@ -67,6 +67,7 @@ const Sidebar: React.FC = () => {
     };
 
     initializeSidebar();
+    loadConnections(); // Fetch initial connection states
 
     const messageListener = (message: any) => {
       // 🔥 Handle optimistic updates for request lifecycle
@@ -146,6 +147,26 @@ const Sidebar: React.FC = () => {
       chrome.tabs.onUpdated.removeListener(tabUpdatedListener);
     };
   }, []);
+
+  const loadConnections = async () => {
+    try {
+      const response = await new Promise<any>((resolve) => {
+        chrome.runtime.sendMessage({ action: "getWSConnectionInfo" }, (res) => {
+          resolve(res);
+        });
+      });
+
+      if (response && response.success && Array.isArray(response.states)) {
+        const initialPorts = response.states.map((state: any) => ({
+          port: state.port,
+          isConnected: state.status === "connected",
+        }));
+        setPorts(initialPorts);
+      }
+    } catch (error) {
+      console.error("[Sidebar] ❌ Failed to load connections:", error);
+    }
+  };
 
   const loadTabs = async () => {
     try {
@@ -250,6 +271,7 @@ const Sidebar: React.FC = () => {
       // Disconnect WebSocket via background
       await chrome.runtime.sendMessage({
         action: "disconnectWebSocket",
+        port: port,
       });
 
       setPorts((prev) => prev.filter((p) => p.port !== port));

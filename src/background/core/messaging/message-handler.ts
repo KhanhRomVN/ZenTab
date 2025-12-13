@@ -318,10 +318,10 @@ export class MessageHandler {
    * Handle WebSocket disconnect
    */
   private handleDisconnectWebSocket(
-    _message: any,
+    message: any,
     sendResponse: (response: any) => void
   ): void {
-    const result = this.wsManager.disconnect();
+    const result = this.wsManager.disconnect(message.port);
     sendResponse(result);
   }
 
@@ -332,7 +332,8 @@ export class MessageHandler {
     message: any,
     sendResponse: (response: any) => void
   ): void {
-    const success = this.wsManager.send(message.data);
+    // message.port is optional
+    const success = this.wsManager.send(message.data, message.port);
     sendResponse({ success });
   }
 
@@ -344,14 +345,15 @@ export class MessageHandler {
     sendResponse: (response: any) => void
   ): Promise<void> {
     try {
-      const state = this.wsManager.getConnectionInfo();
+      const states = this.wsManager.getConnectionInfo();
 
-      if (state) {
-        sendResponse({ success: true, state });
+      if (states.length > 0) {
+        sendResponse({ success: true, states });
       } else {
         sendResponse({
           success: false,
-          error: "No WebSocket connection found",
+          states: [],
+          error: "No WebSocket connections found",
         });
       }
     } catch (error) {

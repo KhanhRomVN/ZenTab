@@ -19,12 +19,20 @@ export class WSConnection {
   public state: WSConnectionState;
 
   constructor(config: WSConnectionConfig) {
+    console.log(`[WSConnection] 🏗️ Constructor called:`, {
+      id: config.id,
+      port: config.port,
+      url: config.url,
+    });
+
     this.state = {
       id: config.id,
       port: config.port,
       url: config.url,
       status: "disconnected",
     };
+
+    console.log(`[WSConnection] ✅ Instance created with id: ${this.state.id}`);
 
     this.notifyStateChange();
     this.setupOutgoingMessageListener();
@@ -117,8 +125,15 @@ export class WSConnection {
    * Disconnect WebSocket
    */
   public disconnect(): void {
+    console.log(
+      `[WSConnection] 🔌 disconnect() called for connection ${this.state.id} (port ${this.state.port})`
+    );
+
     // 🔥 FIX: Send disconnect signal (empty tabs) BEFORE closing the socket
     if (this.ws && this.state.status === "connected") {
+      console.log(
+        `[WSConnection] 📤 Sending disconnect signal (empty tabs) for ${this.state.id}`
+      );
       try {
         const message = {
           type: "focusedTabsUpdate",
@@ -135,11 +150,15 @@ export class WSConnection {
     }
 
     if (this.ws) {
+      console.log(`[WSConnection] 🔌 Closing WebSocket for ${this.state.id}`);
       this.ws.close();
       this.ws = undefined;
     }
 
     this.state.status = "disconnected";
+    console.log(
+      `[WSConnection] ✅ Disconnected ${this.state.id} (port ${this.state.port})`
+    );
     this.notifyStateChange();
     this.stopHealthMonitor();
   }

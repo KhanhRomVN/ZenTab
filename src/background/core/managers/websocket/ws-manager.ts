@@ -8,9 +8,8 @@ import { WSConnectionState } from "../../types/websocket.types";
  * WebSocket Manager - Quản lý WebSocket connections
  */
 export class WSManager {
-  private connection: WSConnection | null = null;
+  private connections: Map<string, WSConnection> = new Map();
   private storageManager: StorageManager;
-  private isConnecting = false;
 
   constructor(storageManager: StorageManager) {
     this.storageManager = storageManager;
@@ -25,15 +24,11 @@ export class WSManager {
   public async connect(
     overrideUrl?: string
   ): Promise<{ success: boolean; error?: string }> {
-    if (this.isConnecting) {
-      return { success: false, error: "Already connecting" };
-    }
-
-    if (this.connection && this.connection.getState().status === "connected") {
-      return { success: true };
-    }
-
-    this.isConnecting = true;
+    console.log(
+      `[WSManager] 🎯 connect() called with overrideUrl: ${
+        overrideUrl || "(none)"
+      }`
+    );
 
     try {
       // Use override URL if provided, otherwise check storage
@@ -50,91 +45,232 @@ export class WSManager {
       }
 
       const { port, wsUrl } = this.parseApiProvider(apiProvider);
+      const portKey = `port-${port}`;
+
+      // Check if connection for this port already exists
+      const existingConnection = this.connections.get(portKey);
+      if (existingConnection) {
+        const currentState = existingConnection.getState();
+        console.log(
+          `[WSManager] 🔍 Existing connection found for port ${port}: status=${currentState.status}`
+        );
+
+        if (currentState.status === "connected") {
+          console.log(
+            `[WSManager] ✅ Connection already exists and is connected to port ${port}`
+          );
+          return { success: true };
+        } else {
+          // Remove disconnected connection
+          console.log(
+            `[WSManager] 🗑️ Removing stale connection for port ${port}`
+          );
+          this.connections.delete(portKey);
+        }
+      } else {
+        console.log(
+          `[WSManager] ℹ️ No existing connection found for port ${port}`
+        );
+      }
+
       const connectionId = `ws-${Date.now()}-${port}`;
 
-      console.log(
-        `[WSManager] 🔌 Creating connection to port ${port}, URL: ${wsUrl}`
-      );
+      console.log(`[WSManager] 🔌 Creating NEW connection:`, {
+        connectionId,
+        port,
+        wsUrl,
+        apiProvider,
+        totalConnections: this.connections.size,
+      });
 
-      this.connection = new WSConnection({
+      const connection = new WSConnection({
         id: connectionId,
         port: port,
         url: wsUrl,
       });
 
-      await this.connection.connect();
+      console.log(
+        `[WSManager] ✅ WSConnection instance created for port ${port}`
+      );
 
+      console.log(
+        `[WSManager] 🚀 Calling connection.connect() for port ${port}...`
+      );
+      await connection.connect();
+
+      // Add to connections Map
+      this.connections.set(portKey, connection);
+
+      console.log(
+        `[WSManager] ✅ Connection established successfully to port ${port}. Total connections: ${this.connections.size}`
+      );
       return { success: true };
     } catch (error) {
       console.error("[WSManager] Connection failed:", error);
-      this.connection = null;
 
       return {
         success: false,
         error: error instanceof Error ? error.message : String(error),
       };
-    } finally {
-      this.isConnecting = false;
     }
   }
 
   /**
    * Disconnect WebSocket
+   * @param port - Optional port number. If provided, disconnect only that port. Otherwise disconnect all.
    */
-  public disconnect(): { success: boolean } {
-    if (!this.connection) {
-      return { success: true };
-    }
+  public disconnect(port?: number): { success: boolean } {
+    if (port !== undefined) {
+      // Disconnect specific port
+      const portKey = `port-${port}`;
+      const connection = this.connections.get(portKey);
 
-    try {
-      this.connection.disconnect();
-      this.connection = null;
-      return { success: true };
-    } catch (error) {
-      console.error("[WSManager] ❌ Disconnect failed:", error);
-      return { success: false };
+      console.log(
+        `[WSManager] 🔌 disconnect() called for port ${port}, connection exists: ${!!connection}`
+      );
+
+      if (!connection) {
+        console.log(`[WSManager] ℹ️ No connection found for port ${port}`);
+        return { success: true };
+      }
+
+      try {
+        const connId = connection.getState().id;
+        console.log(
+          `[WSManager] 📤 Disconnecting connection: ${connId} (port ${port})`
+        );
+        connection.disconnect();
+        this.connections.delete(portKey);
+        console.log(
+          `[WSManager] ✅ Connection ${connId} disconnected and removed. Remaining connections: ${this.connections.size}`
+        );
+        return { success: true };
+      } catch (error) {
+        console.error(
+          `[WSManager] ❌ Disconnect failed for port ${port}:`,
+          error
+        );
+        return { success: false };
+      }
+    } else {
+      // Disconnect all connections
+      console.log(
+        `[WSManager] 🔌 disconnect() called for ALL connections (${this.connections.size} total)`
+      );
+
+      if (this.connections.size === 0) {
+        console.log("[WSManager] ℹ️ No connections to disconnect");
+        return { success: true };
+      }
+
+      try {
+        const connectionIds: string[] = [];
+        for (const [portKey, connection] of this.connections.entries()) {
+          const connId = connection.getState().id;
+          connectionIds.push(connId);
+          connection.disconnect();
+        }
+        this.connections.clear();
+        console.log(
+          `[WSManager] ✅ All connections disconnected: ${connectionIds.join(
+            ", "
+          )}`
+        );
+        return { success: true };
+      } catch (error) {
+        console.error("[WSManager] ❌ Disconnect all failed:", error);
+        return { success: false };
+      }
     }
   }
 
   /**
    * Gửi message qua WebSocket
+   * @param data - Message data to send
+   * @param port - Optional port number. If provided, send to that port only. Otherwise send to all.
    */
-  public send(data: any): boolean {
-    if (this.connection && this.connection.getState().status === "connected") {
-      this.connection.send(data);
-      return true;
+  public send(data: any, port?: number): boolean {
+    if (port !== undefined) {
+      // Send to specific port
+      const portKey = `port-${port}`;
+      const connection = this.connections.get(portKey);
+      if (connection && connection.getState().status === "connected") {
+        connection.send(data);
+        return true;
+      }
+      return false;
+    } else {
+      // Send to all connections
+      let sentCount = 0;
+      for (const connection of this.connections.values()) {
+        if (connection.getState().status === "connected") {
+          connection.send(data);
+          sentCount++;
+        }
+      }
+      return sentCount > 0;
     }
-    return false;
   }
 
   /**
    * Broadcast message tới tất cả connected clients
    */
   public broadcastToAll(message: any): void {
-    if (this.connection && this.connection.getState().status === "connected") {
-      try {
-        this.connection.send(message);
-      } catch (error) {
-        console.error("[WSManager] ❌ Failed to broadcast message:", error);
+    let broadcastCount = 0;
+    for (const [portKey, connection] of this.connections.entries()) {
+      if (connection.getState().status === "connected") {
+        try {
+          connection.send(message);
+          broadcastCount++;
+        } catch (error) {
+          console.error(
+            `[WSManager] ❌ Failed to broadcast to ${portKey}:`,
+            error
+          );
+        }
       }
     }
+    console.log(
+      `[WSManager] 📡 Broadcast sent to ${broadcastCount}/${this.connections.size} connections`
+    );
   }
 
   /**
    * Kiểm tra có active connections không
    */
   public async hasActiveConnections(): Promise<boolean> {
-    return (
-      this.connection !== null &&
-      this.connection.getState().status === "connected"
-    );
+    for (const connection of this.connections.values()) {
+      if (connection.getState().status === "connected") {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
    * Lấy connection info
+   * @returns Array of all connection states
    */
-  public getConnectionInfo(): WSConnectionState | null {
-    return this.connection ? this.connection.getState() : null;
+  public getConnectionInfo(): WSConnectionState[] {
+    const states: WSConnectionState[] = [];
+    for (const connection of this.connections.values()) {
+      states.push(connection.getState());
+    }
+    return states;
+  }
+
+  /**
+   * Get specific connection by port
+   */
+  public getConnection(port: number): WSConnection | null {
+    return this.connections.get(`port-${port}`) || null;
+  }
+
+  /**
+   * Get all connections
+   */
+  public getAllConnections(): WSConnection[] {
+    return Array.from(this.connections.values());
   }
 
   /**
@@ -215,10 +351,28 @@ export class WSManager {
         const newApiProvider = changes.apiProvider.newValue;
         const oldApiProvider = changes.apiProvider.oldValue;
 
-        if (newApiProvider !== oldApiProvider) {
-          if (this.connection) {
-            this.connection.disconnect();
-            this.connection = null;
+        console.log(`[WSManager] 🔄 apiProvider changed:`, {
+          old: oldApiProvider,
+          new: newApiProvider,
+        });
+
+        if (newApiProvider && newApiProvider !== oldApiProvider) {
+          try {
+            const { port } = this.parseApiProvider(newApiProvider);
+            const portKey = `port-${port}`;
+
+            // Check if we already have a connection for this provider
+            if (!this.connections.has(portKey)) {
+              console.log(
+                `[WSManager] 🆕 New API Provider detected (${newApiProvider}), initiating connection...`
+              );
+              this.connect(newApiProvider);
+            }
+          } catch (error) {
+            console.error(
+              "[WSManager] ❌ Failed to parse new API Provider:",
+              error
+            );
           }
         }
       }
@@ -234,13 +388,18 @@ export class WSManager {
     browserAPI.runtime.onMessage.addListener(
       (message: any, _sender: any, sendResponse: any) => {
         if (message.action === "getWSConnectionInfo") {
-          if (this.connection) {
-            const state = this.connection.getState();
-            sendResponse({ success: true, state });
+          const states: WSConnectionState[] = [];
+          for (const connection of this.connections.values()) {
+            states.push(connection.getState());
+          }
+
+          if (states.length > 0) {
+            sendResponse({ success: true, states });
           } else {
             sendResponse({
               success: false,
-              error: "No WebSocket connection available",
+              states: [],
+              error: "No WebSocket connections available",
             });
           }
           return true;
