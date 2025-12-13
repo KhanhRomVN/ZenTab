@@ -212,15 +212,28 @@ export class PromptController {
     prompt: string,
     requestId: string,
     isNewTask?: boolean,
-    conversationId?: string
+    conversationId?: string,
+    connectionId?: string
   ): Promise<boolean> {
     console.log(
       "[PromptController] 🚀 Sending prompt to tab:",
       tabId,
       "Request:",
-      requestId
+      requestId,
+      "ConnectionId:",
+      connectionId
     );
     try {
+      // Store connectionId mapping for later retrieval
+      if (connectionId) {
+        const connectionMappingKey = `connectionId_${requestId}`;
+        await browserAPI.setStorageValue(connectionMappingKey, connectionId);
+
+        // Schedule cleanup after 5 minutes
+        setTimeout(() => {
+          browserAPI.storage.local.remove([connectionMappingKey]);
+        }, 300000);
+      }
       // 🔥 Lưu originalPrompt để dùng sau
       const originalPrompt = prompt;
 
@@ -395,11 +408,12 @@ export class PromptController {
         tabId,
         requestId,
         conversationId,
-        folderPathForPing
+        folderPathForPing,
+        connectionId
       );
 
       // Then send generationStarted
-      await this.notifyZenGenerationStarted(tabId, requestId);
+      await this.notifyZenGenerationStarted(tabId, requestId, connectionId);
 
       // Start response polling
 
@@ -611,16 +625,19 @@ export class PromptController {
     tabId: number,
     requestId: string,
     conversationId?: string,
-    folderPath?: string | null
+    folderPath?: string | null,
+    connectionId?: string
   ): Promise<void> {
     try {
       const pingMessage = {
+        connectionId: connectionId,
         data: {
           type: "conversationPing",
           conversationId: conversationId,
           tabId: tabId,
           requestId: requestId,
           folderPath: folderPath || null,
+          connectionId: connectionId,
           timestamp: Date.now(),
         },
         timestamp: Date.now(),
@@ -651,14 +668,17 @@ export class PromptController {
    */
   private static async notifyZenGenerationStarted(
     tabId: number,
-    requestId: string
+    requestId: string,
+    connectionId?: string
   ): Promise<void> {
     try {
       await browserAPI.setStorageValue("wsOutgoingMessage", {
+        connectionId: connectionId,
         data: {
           type: "generationStarted",
           requestId: requestId,
           tabId: tabId,
+          connectionId: connectionId,
           timestamp: Date.now(),
         },
         timestamp: Date.now(),
@@ -684,6 +704,7 @@ export class PromptController {
 
       try {
         const isGenerating = await StateController.isGenerating(tabId);
+        // console.log("[PromptController] 🔄 Polling generation status. IsGenerating:", isGenerating);
 
         if (!isGenerating) {
           // AI đã trả lời xong
@@ -713,6 +734,10 @@ export class PromptController {
     requestId: string,
     originalPrompt: string
   ): Promise<void> {
+    console.log(
+      "[PromptController] 🎉 Generation complete. Handling response for request:",
+      requestId
+    );
     try {
       // STEP 1: Lấy raw response từ page (multi-line)
       const rawResponse = await this.getLatestResponseDirectly(tabId);
@@ -766,6 +791,9 @@ export class PromptController {
       // STEP 3.5: Lấy conversationId từ storage
       const conversationId = await this.getConversationIdForRequest(requestId);
 
+      // STEP 3.6: Lấy connectionId từ storage
+      const connectionId = await this.getConnectionIdForRequest(requestId);
+
       // STEP 4: Tính tokens
       const promptTokens = this.calculateTokens(originalPrompt);
       const completionTokens = this.calculateTokens(processedResponse);
@@ -813,6 +841,7 @@ export class PromptController {
       // console.log(`[PromptController] 📤 SENDING JSON STRING:`, responseString);
 
       const outgoingMessage = {
+        connectionId: connectionId,
         data: {
           type: "promptResponse",
           requestId: requestId,
@@ -820,6 +849,7 @@ export class PromptController {
           success: true,
           response: responseString,
           folderPath: folderPath || null,
+          connectionId: connectionId || undefined,
           timestamp: Date.now(),
         },
         timestamp: Date.now(),
@@ -1466,6 +1496,32 @@ export class PromptController {
   }
 
   /**
+   * Lấy connectionId từ requestId mapping
+   */
+  private static async getConnectionIdForRequest(
+    requestId: string
+  ): Promise<string | null> {
+    try {
+      const connectionMappingKey = `connectionId_${requestId}`;
+      const browserAPI = this.getBrowserAPI();
+
+      const result = await new Promise<any>((resolve) => {
+        browserAPI.storage.local.get([connectionMappingKey], (data: any) => {
+          resolve(data || {});
+        });
+      });
+
+      return result[connectionMappingKey] || null;
+    } catch (error) {
+      console.error(
+        `[PromptController] ❌ Error in getConnectionIdForRequest:`,
+        error
+      );
+      return null;
+    }
+  }
+
+  /**
    * Lưu tokens cho folder
    */
   private static async saveTokensForFolder(
@@ -1539,6 +1595,7 @@ export class PromptController {
   ): Promise<void> {
     try {
       const folderPath = await this.getFolderPathForRequest(requestId);
+      const connectionId = await this.getConnectionIdForRequest(requestId);
 
       const errorObject = {
         type: "promptResponse",
@@ -1548,10 +1605,12 @@ export class PromptController {
         error: error,
         errorType: errorType || "UNKNOWN_ERROR",
         folderPath: folderPath || null,
+        connectionId: connectionId || undefined,
         timestamp: Date.now(),
       };
 
       await browserAPI.setStorageValue("wsOutgoingMessage", {
+        connectionId: connectionId,
         data: errorObject,
         timestamp: Date.now(),
       });

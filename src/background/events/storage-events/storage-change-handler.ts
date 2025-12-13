@@ -94,7 +94,7 @@ export class StorageChangeHandler {
       const latestMsg = recentMsgs[recentMsgs.length - 1];
 
       if (latestMsg.data.type === "sendPrompt") {
-        await this.handleSendPromptMessage(latestMsg.data);
+        await this.handleSendPromptMessage(latestMsg.data, connectionId);
       } else if (latestMsg.data.type === "conversationPong") {
         // Call PromptController directly
         const { PromptController } = await import(
@@ -129,7 +129,10 @@ export class StorageChangeHandler {
   /**
    * Handle send prompt message
    */
-  private async handleSendPromptMessage(message: any): Promise<void> {
+  private async handleSendPromptMessage(
+    message: any,
+    connectionId?: string
+  ): Promise<void> {
     const { tabId, prompt, requestId, isNewTask, folderPath, conversationId } =
       message;
 
@@ -137,6 +140,7 @@ export class StorageChangeHandler {
       tabId,
       requestId,
       promptLength: prompt?.length,
+      connectionId,
     });
 
     // 🔥 FIX: More lenient validation - only check essential fields
@@ -207,7 +211,8 @@ export class StorageChangeHandler {
         prompt,
         requestId,
         isNewTask === true,
-        conversationId
+        conversationId,
+        connectionId
       );
 
       if (success) {

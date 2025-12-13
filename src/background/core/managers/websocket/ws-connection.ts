@@ -493,24 +493,48 @@ export class WSConnection {
     }
   }
 
+  private outgoingListenerSetup = false;
+
   /**
    * Setup outgoing message listener
    */
   private setupOutgoingMessageListener(): void {
+    if (this.outgoingListenerSetup) return;
+    this.outgoingListenerSetup = true;
+
     const storageManager = this.getStorageManager();
 
     storageManager.onChange((changes, areaName) => {
       if (areaName !== "local") return;
 
       if (changes.wsOutgoingMessage) {
+        console.log(
+          "[WSConnection] 🔄 Storage changed: wsOutgoingMessage",
+          changes.wsOutgoingMessage
+        );
         const outgoingMessage = changes.wsOutgoingMessage.newValue;
 
-        if (
-          !outgoingMessage ||
-          outgoingMessage.connectionId !== this.state.id
-        ) {
+        if (!outgoingMessage) {
+          // Message removed (cleanup)
           return;
         }
+
+        if (outgoingMessage.connectionId !== this.state.id) {
+          console.log(
+            "[WSConnection] ⚠️ Ignoring outgoing message due to ID mismatch. Expected:",
+            this.state.id,
+            "Got:",
+            outgoingMessage?.connectionId
+          );
+          return;
+        }
+
+        console.log(
+          "[WSConnection] 📤 Sending outgoing message:",
+          outgoingMessage.data.type,
+          "to",
+          this.state.id
+        );
 
         // Forward via WebSocket
         if (this.ws && this.state.status === "connected") {
