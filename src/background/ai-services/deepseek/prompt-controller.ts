@@ -214,6 +214,12 @@ export class PromptController {
     isNewTask?: boolean,
     conversationId?: string
   ): Promise<boolean> {
+    console.log(
+      "[PromptController] 🚀 Sending prompt to tab:",
+      tabId,
+      "Request:",
+      requestId
+    );
     try {
       // 🔥 Lưu originalPrompt để dùng sau
       const originalPrompt = prompt;
@@ -229,6 +235,10 @@ export class PromptController {
           tabId,
           requestId,
           validation.error || "Validation failed"
+        );
+        console.error(
+          "[PromptController] ❌ Tab validation failed:",
+          validation.error
         );
         return false;
       }

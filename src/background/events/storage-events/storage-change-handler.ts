@@ -75,6 +75,10 @@ export class StorageChangeHandler {
     }
 
     // Process each connection's messages
+    console.log(
+      "[StorageChangeHandler] 🔄 Handling WS Messages:",
+      Object.keys(messages)
+    );
     for (const [connectionId, msgArray] of Object.entries(messages)) {
       const msgs = msgArray as Array<{ timestamp: number; data: any }>;
 
@@ -129,6 +133,12 @@ export class StorageChangeHandler {
     const { tabId, prompt, requestId, isNewTask, folderPath, conversationId } =
       message;
 
+    console.log("[StorageChangeHandler] 📨 Handling SendPrompt:", {
+      tabId,
+      requestId,
+      promptLength: prompt?.length,
+    });
+
     // 🔥 FIX: More lenient validation - only check essential fields
     if (!tabId) {
       return;
@@ -154,6 +164,10 @@ export class StorageChangeHandler {
       });
 
       if (result[requestKey]) {
+        console.log(
+          "[StorageChangeHandler] ⚠️ Request already processed:",
+          requestKey
+        );
         return;
       }
 
@@ -197,11 +211,13 @@ export class StorageChangeHandler {
       );
 
       if (success) {
+        console.log("[StorageChangeHandler] ✅ Prompt sent successfully");
         // Cleanup after 2 minutes
         setTimeout(() => {
           browserAPI.storage.local.remove([requestKey]);
         }, 120000);
       } else {
+        console.error("[StorageChangeHandler] ❌ Failed to send prompt");
         // Send error response
         await this.sendErrorResponse(
           requestId,

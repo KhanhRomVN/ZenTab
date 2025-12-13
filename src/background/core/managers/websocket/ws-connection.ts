@@ -202,6 +202,7 @@ export class WSConnection {
 
       // 🔥 CRITICAL: Handle sendPrompt message
       if (message.type === "sendPrompt") {
+        console.log("[WSConnection] 📥 Received sendPrompt:", message);
         await this.storeMessage(message);
         return;
       }
@@ -451,8 +452,9 @@ export class WSConnection {
       }
 
       await storageManager.set("wsMessages", messages);
+      console.log("[WSConnection] 💾 Stored message:", message);
     } catch (error) {
-      // Silent error
+      console.error("[WSConnection] ❌ Error storing message:", error);
     }
   }
 
