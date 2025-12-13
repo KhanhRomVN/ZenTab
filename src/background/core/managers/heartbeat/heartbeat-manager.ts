@@ -162,10 +162,6 @@ export class HeartbeatManager {
     const timeSinceLastPong = Date.now() - lastPong;
 
     if (timeSinceLastPong > this.PONG_TIMEOUT) {
-      console.warn(
-        `[HeartbeatManager] ⚠️ Pong timeout for conversation ${conversationId} (${timeSinceLastPong}ms) - cleaning up`
-      );
-
       // Stop heartbeat
       this.stopHeartbeat(conversationId);
 

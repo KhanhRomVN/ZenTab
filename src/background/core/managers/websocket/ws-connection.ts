@@ -202,7 +202,6 @@ export class WSConnection {
 
       // 🔥 CRITICAL: Handle sendPrompt message
       if (message.type === "sendPrompt") {
-        console.log("[WSConnection] 📥 Received sendPrompt:", message);
         await this.storeMessage(message);
         return;
       }
@@ -452,7 +451,6 @@ export class WSConnection {
       }
 
       await storageManager.set("wsMessages", messages);
-      console.log("[WSConnection] 💾 Stored message:", message);
     } catch (error) {
       console.error("[WSConnection] ❌ Error storing message:", error);
     }
@@ -508,10 +506,6 @@ export class WSConnection {
       if (areaName !== "local") return;
 
       if (changes.wsOutgoingMessage) {
-        console.log(
-          "[WSConnection] 🔄 Storage changed: wsOutgoingMessage",
-          changes.wsOutgoingMessage
-        );
         const outgoingMessage = changes.wsOutgoingMessage.newValue;
 
         if (!outgoingMessage) {
@@ -520,21 +514,8 @@ export class WSConnection {
         }
 
         if (outgoingMessage.connectionId !== this.state.id) {
-          console.log(
-            "[WSConnection] ⚠️ Ignoring outgoing message due to ID mismatch. Expected:",
-            this.state.id,
-            "Got:",
-            outgoingMessage?.connectionId
-          );
           return;
         }
-
-        console.log(
-          "[WSConnection] 📤 Sending outgoing message:",
-          outgoingMessage.data.type,
-          "to",
-          this.state.id
-        );
 
         // Forward via WebSocket
         if (this.ws && this.state.status === "connected") {

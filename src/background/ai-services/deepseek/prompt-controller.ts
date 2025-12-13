@@ -347,19 +347,25 @@ export class PromptController {
 
       // Create new chat nếu cần
       if (isNewTask === true) {
+        console.time("clickNewChat");
         await ChatController.clickNewChatButton(tabId);
         await new Promise((resolve) => setTimeout(resolve, 1000));
+        console.timeEnd("clickNewChat");
       }
 
+      console.time("fillTextarea");
       // Fill textarea
       const fillSuccess = await this.fillTextarea(tabId, prompt);
+      console.timeEnd("fillTextarea");
       if (!fillSuccess) {
         await this.tabStateManager.markTabFree(tabId);
         return false;
       }
 
+      console.time("clickSendButton");
       // Click send button
       const clickSuccess = await this.clickSendButton(tabId);
+      console.timeEnd("clickSendButton");
       if (!clickSuccess) {
         await this.tabStateManager.markTabFree(tabId);
         return false;
@@ -611,10 +617,6 @@ export class PromptController {
         // Continue checking despite errors
       }
     }
-
-    console.warn(
-      `[PromptController] ⚠️ AI didn't start generating within ${timeout}ms. Proceeding with polling anyway.`
-    );
     return false;
   }
 
@@ -734,10 +736,6 @@ export class PromptController {
     requestId: string,
     originalPrompt: string
   ): Promise<void> {
-    console.log(
-      "[PromptController] 🎉 Generation complete. Handling response for request:",
-      requestId
-    );
     try {
       // STEP 1: Lấy raw response từ page (multi-line)
       const rawResponse = await this.getLatestResponseDirectly(tabId);
