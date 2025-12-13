@@ -174,8 +174,18 @@ export class StorageChangeHandler {
         browserAPI.storage.local.set(
           {
             [folderMappingKey]: folderPath || null,
+            [`conversationId_${requestId}`]: conversationId || null,
+            [`connectionId_${requestId}`]: connectionId || null,
           },
           () => {
+            console.log(
+              `[StorageChangeHandler] ✅ Saved request context for ${requestId}:`,
+              {
+                folderPath,
+                conversationId,
+                connectionId,
+              }
+            );
             resolve();
           }
         );

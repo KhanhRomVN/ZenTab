@@ -57,7 +57,9 @@ export class WSConnection {
           this.lastPingTime = Date.now();
 
           this.notifyStateChange();
+          this.notifyStateChange();
           this.startHealthMonitor();
+          this.startTabBroadcastInterval();
 
           // 🆕 Broadcast tabs sau khi connect (delay 500ms để đảm bảo client ready)
           setTimeout(() => {
@@ -93,6 +95,7 @@ export class WSConnection {
           }
 
           this.stopHealthMonitor();
+          this.stopTabBroadcastInterval();
         };
 
         this.ws.onmessage = (event) => {
@@ -726,6 +729,31 @@ export class WSConnection {
       return container?.name || null;
     } catch (error) {
       return null;
+    }
+  }
+
+  private tabBroadcastInterval?: NodeJS.Timeout;
+
+  /**
+   * Start tab broadcast interval
+   */
+  private startTabBroadcastInterval(): void {
+    this.stopTabBroadcastInterval();
+
+    this.tabBroadcastInterval = setInterval(() => {
+      if (this.state.status === "connected") {
+        this.broadcastCurrentTabs();
+      }
+    }, 1000); // 1 second interval
+  }
+
+  /**
+   * Stop tab broadcast interval
+   */
+  private stopTabBroadcastInterval(): void {
+    if (this.tabBroadcastInterval) {
+      clearInterval(this.tabBroadcastInterval);
+      this.tabBroadcastInterval = undefined;
     }
   }
 

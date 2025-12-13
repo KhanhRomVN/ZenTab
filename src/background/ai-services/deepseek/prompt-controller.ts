@@ -785,6 +785,14 @@ export class PromptController {
       // STEP 3.6: Lấy connectionId từ storage
       const connectionId = await this.getConnectionIdForRequest(requestId);
 
+      console.log(`[PromptController] 🔄 Processing response completion:`, {
+        requestId,
+        tabId,
+        folderPath,
+        conversationId,
+        connectionId,
+      });
+
       // STEP 4: Tính tokens
       const promptTokens = this.calculateTokens(originalPrompt);
       const completionTokens = this.calculateTokens(processedResponse);
@@ -800,21 +808,6 @@ export class PromptController {
         );
       }
 
-      // STEP 5.5: Mark tab free with conversationId (if exists) or folderPath
-      if (conversationId) {
-        await this.tabStateManager.markTabFreeWithConversation(
-          tabId,
-          conversationId,
-          folderPath
-        );
-      } else if (folderPath) {
-        await this.tabStateManager.markTabFreeWithFolder(tabId, folderPath);
-      } else {
-        await this.tabStateManager.markTabFree(tabId);
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 100));
-
       // STEP 6: Build OpenAI response (với processedResponse đã clean)
       const responseObject = this.buildOpenAIResponse(processedResponse, {
         prompt_tokens: promptTokens,
@@ -822,15 +815,8 @@ export class PromptController {
         total_tokens: totalTokens,
       });
 
-      // console.log(
-      //   `[PromptController] 🔧 BUILT JSON OBJECT for tab ${tabId}:`,
-      //   responseObject
-      // );
-
       // STEP 7: Convert JSON to string
       const responseString = JSON.stringify(responseObject);
-
-      // console.log(`[PromptController] 📤 SENDING JSON STRING:`, responseString);
 
       const outgoingMessage = {
         connectionId: connectionId,
@@ -858,6 +844,29 @@ export class PromptController {
         });
       } catch (error) {
         // Silent fail - UI notification is not critical
+      }
+
+      // STEP 5.5: Mark tab free with conversationId (if exists) or folderPath
+      // Move this to the end to ensure we don't clear state if building response fails
+      if (conversationId) {
+        console.log(
+          `[PromptController] 💾 Marking tab free with CONVERSATION:`,
+          conversationId
+        );
+        await this.tabStateManager.markTabFreeWithConversation(
+          tabId,
+          conversationId,
+          folderPath || undefined
+        );
+      } else if (folderPath) {
+        console.log(
+          `[PromptController] 💾 Marking tab free with FOLDER:`,
+          folderPath
+        );
+        await this.tabStateManager.markTabFreeWithFolder(tabId, folderPath);
+      } else {
+        console.log(`[PromptController] 💾 Marking tab free (NO CONTEXT)`);
+        await this.tabStateManager.markTabFree(tabId);
       }
     } catch (error) {
       console.error(`[PromptController] ❌ Error handling response:`, error);
@@ -1427,6 +1436,10 @@ export class PromptController {
       const folderPath = folderResult[folderMappingKey] || null;
 
       if (folderPath !== null) {
+        console.log(
+          `[PromptController] 📂 Found dedicated folderPath for ${requestId}:`,
+          folderPath
+        );
         return folderPath;
       }
 

@@ -176,6 +176,12 @@ export class TabStateCore {
         folderPath: finalFolderPath,
       };
 
+      console.log(`[TabStateCore] 📝 markTabFreeWithConversation:`, {
+        tabId,
+        conversationId,
+        folderPath: finalFolderPath,
+      });
+
       const success = await this.storage.saveTabState(tabId, newState);
       if (success) {
         this.cache.set(tabId, newState);
@@ -208,6 +214,11 @@ export class TabStateCore {
         ...state,
         folderPath: folderPath,
       };
+
+      console.log(`[TabStateCore] 🔗 linkTabToFolder:`, {
+        tabId,
+        folderPath,
+      });
 
       const success = await this.storage.saveTabState(tabId, newState);
       if (success) {
@@ -244,6 +255,12 @@ export class TabStateCore {
         ...state,
         conversationId: conversationId,
       };
+
+      console.log(`[TabStateCore] 🔗 linkTabToConversation:`, {
+        tabId,
+        conversationId,
+        prevConv: state.conversationId,
+      });
 
       const success = await this.storage.saveTabState(tabId, newState);
       if (success) {
