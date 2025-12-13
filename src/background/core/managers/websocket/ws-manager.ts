@@ -24,12 +24,6 @@ export class WSManager {
   public async connect(
     overrideUrl?: string
   ): Promise<{ success: boolean; error?: string }> {
-    console.log(
-      `[WSManager] 🎯 connect() called with overrideUrl: ${
-        overrideUrl || "(none)"
-      }`
-    );
-
     try {
       // Use override URL if provided, otherwise check storage
       const storedProvider = await this.storageManager.get<string>(
@@ -51,37 +45,14 @@ export class WSManager {
       const existingConnection = this.connections.get(portKey);
       if (existingConnection) {
         const currentState = existingConnection.getState();
-        console.log(
-          `[WSManager] 🔍 Existing connection found for port ${port}: status=${currentState.status}`
-        );
-
         if (currentState.status === "connected") {
-          console.log(
-            `[WSManager] ✅ Connection already exists and is connected to port ${port}`
-          );
           return { success: true };
         } else {
-          // Remove disconnected connection
-          console.log(
-            `[WSManager] 🗑️ Removing stale connection for port ${port}`
-          );
           this.connections.delete(portKey);
         }
-      } else {
-        console.log(
-          `[WSManager] ℹ️ No existing connection found for port ${port}`
-        );
       }
 
       const connectionId = `ws-${Date.now()}-${port}`;
-
-      console.log(`[WSManager] 🔌 Creating NEW connection:`, {
-        connectionId,
-        port,
-        wsUrl,
-        apiProvider,
-        totalConnections: this.connections.size,
-      });
 
       const connection = new WSConnection({
         id: connectionId,
@@ -89,21 +60,11 @@ export class WSManager {
         url: wsUrl,
       });
 
-      console.log(
-        `[WSManager] ✅ WSConnection instance created for port ${port}`
-      );
-
-      console.log(
-        `[WSManager] 🚀 Calling connection.connect() for port ${port}...`
-      );
       await connection.connect();
 
       // Add to connections Map
       this.connections.set(portKey, connection);
 
-      console.log(
-        `[WSManager] ✅ Connection established successfully to port ${port}. Total connections: ${this.connections.size}`
-      );
       return { success: true };
     } catch (error) {
       console.error("[WSManager] Connection failed:", error);
@@ -125,25 +86,13 @@ export class WSManager {
       const portKey = `port-${port}`;
       const connection = this.connections.get(portKey);
 
-      console.log(
-        `[WSManager] 🔌 disconnect() called for port ${port}, connection exists: ${!!connection}`
-      );
-
       if (!connection) {
-        console.log(`[WSManager] ℹ️ No connection found for port ${port}`);
         return { success: true };
       }
 
       try {
-        const connId = connection.getState().id;
-        console.log(
-          `[WSManager] 📤 Disconnecting connection: ${connId} (port ${port})`
-        );
         connection.disconnect();
         this.connections.delete(portKey);
-        console.log(
-          `[WSManager] ✅ Connection ${connId} disconnected and removed. Remaining connections: ${this.connections.size}`
-        );
         return { success: true };
       } catch (error) {
         console.error(
@@ -154,28 +103,19 @@ export class WSManager {
       }
     } else {
       // Disconnect all connections
-      console.log(
-        `[WSManager] 🔌 disconnect() called for ALL connections (${this.connections.size} total)`
-      );
 
       if (this.connections.size === 0) {
-        console.log("[WSManager] ℹ️ No connections to disconnect");
         return { success: true };
       }
 
       try {
         const connectionIds: string[] = [];
-        for (const [portKey, connection] of this.connections.entries()) {
+        for (const [, connection] of this.connections.entries()) {
           const connId = connection.getState().id;
           connectionIds.push(connId);
           connection.disconnect();
         }
         this.connections.clear();
-        console.log(
-          `[WSManager] ✅ All connections disconnected: ${connectionIds.join(
-            ", "
-          )}`
-        );
         return { success: true };
       } catch (error) {
         console.error("[WSManager] ❌ Disconnect all failed:", error);
@@ -230,9 +170,6 @@ export class WSManager {
         }
       }
     }
-    console.log(
-      `[WSManager] 📡 Broadcast sent to ${broadcastCount}/${this.connections.size} connections`
-    );
   }
 
   /**
@@ -351,11 +288,6 @@ export class WSManager {
         const newApiProvider = changes.apiProvider.newValue;
         const oldApiProvider = changes.apiProvider.oldValue;
 
-        console.log(`[WSManager] 🔄 apiProvider changed:`, {
-          old: oldApiProvider,
-          new: newApiProvider,
-        });
-
         if (newApiProvider && newApiProvider !== oldApiProvider) {
           try {
             const { port } = this.parseApiProvider(newApiProvider);
@@ -363,9 +295,6 @@ export class WSManager {
 
             // Check if we already have a connection for this provider
             if (!this.connections.has(portKey)) {
-              console.log(
-                `[WSManager] 🆕 New API Provider detected (${newApiProvider}), initiating connection...`
-              );
               this.connect(newApiProvider);
             }
           } catch (error) {

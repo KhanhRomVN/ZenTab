@@ -158,9 +158,6 @@ export class TabStateCore {
     folderPath?: string | null
   ): Promise<boolean> {
     try {
-      console.log(
-        `[TabStateCore] 💾 markTabFreeWithConversation - Tab: ${tabId}, Conv: ${conversationId}, Folder: ${folderPath}`
-      );
       const state = await this.storage.getTabState(tabId);
       if (!state) {
         console.warn(`[TabStateCore] ⚠️ State not found for tab ${tabId}`);
@@ -170,10 +167,6 @@ export class TabStateCore {
       // Preserve existing folderPath if not provided
       const finalFolderPath =
         folderPath !== undefined ? folderPath : state.folderPath;
-
-      console.log(
-        `[TabStateCore] 📝 New State for ${tabId} - Status: free, Folder: ${finalFolderPath}`
-      );
 
       const newState: TabStateData = {
         ...state,

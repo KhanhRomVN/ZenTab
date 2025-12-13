@@ -65,7 +65,6 @@ export class TabBroadcaster {
 
         // WebSocket messages
         if (changes.wsMessages) {
-          console.log("[TabBroadcaster] 🔔 wsMessages changed, handling...");
           this.handleWSMessages(changes.wsMessages);
         }
       }
@@ -172,35 +171,18 @@ export class TabBroadcaster {
   private async handleWSMessages(change: any): Promise<void> {
     const messages = change.newValue || {};
 
-    console.log(
-      "[TabBroadcaster] 📬 Checking wsMessages:",
-      Object.keys(messages).length,
-      "connections"
-    );
-
-    for (const [connId, msgArray] of Object.entries(messages)) {
+    for (const [, msgArray] of Object.entries(messages)) {
       const msgs = msgArray as Array<{ timestamp: number; data: any }>;
       const recentMsgs = msgs.filter((msg) => {
         const age = Date.now() - msg.timestamp;
         return age < 5000;
       });
 
-      console.log(
-        `[TabBroadcaster] 📨 Connection ${connId}: ${recentMsgs.length} recent messages`
-      );
-
       if (recentMsgs.length === 0) continue;
 
       const latestMsg = recentMsgs[recentMsgs.length - 1];
 
-      console.log(
-        `[TabBroadcaster] 🔍 Latest message type: ${latestMsg.data.type}`
-      );
-
       if (latestMsg.data.type === "requestFocusedTabs") {
-        console.log(
-          "[TabBroadcaster] 🎯 requestFocusedTabs detected, broadcasting tabs"
-        );
         await this.broadcastFocusedTabs();
       }
     }
@@ -217,9 +199,6 @@ export class TabBroadcaster {
 
     const hasConnections = await this.wsManager.hasActiveConnections();
     if (!hasConnections) {
-      console.log(
-        "[TabBroadcaster] ⚠️ No active connections, skipping broadcast"
-      );
       return;
     }
 
@@ -228,13 +207,7 @@ export class TabBroadcaster {
     try {
       const focusedTabs = await this.getFocusedTabs();
 
-      console.log(
-        `[TabBroadcaster] 📡 Broadcasting ${focusedTabs.length} tabs:`,
-        focusedTabs.map((t) => ({ tabId: t.tabId, container: t.containerName }))
-      );
-
       if (focusedTabs.length === 0) {
-        console.log("[TabBroadcaster] ⚠️ No tabs to broadcast");
         return;
       }
 
@@ -245,7 +218,6 @@ export class TabBroadcaster {
       };
 
       this.wsManager.broadcastToAll(message);
-      console.log("[TabBroadcaster] ✅ Broadcast sent");
     } catch (error) {
       console.error(
         "[TabBroadcaster] ❌ Error broadcasting focused tabs:",

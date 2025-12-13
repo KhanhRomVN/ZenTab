@@ -215,14 +215,6 @@ export class PromptController {
     conversationId?: string,
     connectionId?: string
   ): Promise<boolean> {
-    console.log(
-      "[PromptController] 🚀 Sending prompt to tab:",
-      tabId,
-      "Request:",
-      requestId,
-      "ConnectionId:",
-      connectionId
-    );
     try {
       // Store connectionId mapping for later retrieval
       if (connectionId) {
@@ -419,6 +411,7 @@ export class PromptController {
       );
 
       // Then send generationStarted
+      await new Promise((resolve) => setTimeout(resolve, 500));
       await this.notifyZenGenerationStarted(tabId, requestId, connectionId);
 
       // Start response polling
@@ -808,9 +801,6 @@ export class PromptController {
       }
 
       // STEP 5.5: Mark tab free with conversationId (if exists) or folderPath
-      console.log(
-        `[PromptController] 🏁 Marking tab ${tabId} free. ConversationId: ${conversationId}, FolderPath: ${folderPath}`
-      );
       if (conversationId) {
         await this.tabStateManager.markTabFreeWithConversation(
           tabId,
