@@ -548,8 +548,6 @@ export class WSConnection {
           try {
             const messageToSend = JSON.stringify(outgoingMessage.data);
 
-            // 🔍 DEBUG: Log outgoing messages
-
             this.ws.send(messageToSend);
           } catch (error) {
             // Silent error

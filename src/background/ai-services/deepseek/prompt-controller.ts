@@ -342,7 +342,6 @@ export class PromptController {
         console.time("clickNewChat");
         await ChatController.clickNewChatButton(tabId);
         await new Promise((resolve) => setTimeout(resolve, 1000));
-        console.timeEnd("clickNewChat");
       }
 
       console.time("fillTextarea");
@@ -613,6 +612,7 @@ export class PromptController {
     return false;
   }
 
+  /**
   /**
    * 🆕 PING to Zen: Gửi ping khi AI bắt đầu generate
    */
