@@ -44,6 +44,8 @@ export class WSConnection {
     this.state.status = "connecting";
     this.notifyStateChange();
 
+    console.log(`[WSConnection] 🔌 Attempting to connect to ${this.state.url}`);
+
     return new Promise<void>((resolve) => {
       try {
         // 🆕 Add clientType=external
@@ -55,6 +57,10 @@ export class WSConnection {
           this.state.status = "connected";
           this.state.lastConnected = Date.now();
           this.lastPingTime = Date.now();
+
+          console.log(
+            `[WSConnection] ✅ Connected successfully to ${this.state.url}`
+          );
 
           this.notifyStateChange();
           this.startHealthMonitor();
@@ -68,6 +74,9 @@ export class WSConnection {
         };
 
         this.ws.onerror = () => {
+          console.error(
+            `[WSConnection] ❌ Connection error for ${this.state.url}`
+          );
           this.state.status = "error";
           this.notifyStateChange();
           this.sendDisconnectSignal();
@@ -96,6 +105,7 @@ export class WSConnection {
           this.handleMessage(event.data);
         };
       } catch (error) {
+        console.error(`[WSConnection] ❌ Exception during connection:`, error);
         this.state.status = "error";
         this.notifyStateChange();
         resolve();
@@ -139,12 +149,15 @@ export class WSConnection {
    */
   public send(data: any): void {
     if (this.ws && this.state.status === "connected") {
-      try {
-        const messageStr = JSON.stringify(data);
-        this.ws.send(messageStr);
-      } catch (error) {
-        // Silent error
-      }
+      console.log(
+        `[WSConnection] 📤 Sending message type: ${data.type || "unknown"}`
+      );
+      const messageStr = JSON.stringify(data);
+      this.ws.send(messageStr);
+    } else {
+      console.warn(
+        `[WSConnection] ⚠️ Cannot send message, status: ${this.state.status}`
+      );
     }
   }
 
@@ -219,6 +232,15 @@ export class WSConnection {
 
       // 🔥 CRITICAL: Handle sendPrompt message
       if (message.type === "sendPrompt") {
+        await this.storeMessage(message);
+        return;
+      }
+
+      // 🔥 FIX: Handle requestFocusedTabs - must store to trigger TabBroadcaster
+      if (message.type === "requestFocusedTabs") {
+        console.log(
+          "[WSConnection] 📨 Received requestFocusedTabs, storing to wsMessages"
+        );
         await this.storeMessage(message);
         return;
       }
@@ -468,6 +490,9 @@ export class WSConnection {
       }
 
       await storageManager.set("wsMessages", messages);
+      console.log(
+        `[WSConnection] 💾 Stored message type: ${sanitizedMessage.type} to wsMessages[${this.state.id}]`
+      );
     } catch (error) {
       console.error("[WSConnection] ❌ Error storing message:", error);
     }

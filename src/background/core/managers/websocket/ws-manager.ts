@@ -52,6 +52,10 @@ export class WSManager {
       const { port, wsUrl } = this.parseApiProvider(apiProvider);
       const connectionId = `ws-${Date.now()}-${port}`;
 
+      console.log(
+        `[WSManager] 🔌 Creating connection to port ${port}, URL: ${wsUrl}`
+      );
+
       this.connection = new WSConnection({
         id: connectionId,
         port: port,
