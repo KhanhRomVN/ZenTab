@@ -32,17 +32,12 @@ export class TabStateManager {
       this.storage,
       this.initializer
     );
-    this.recovery = new TabStateRecovery(
-      this.cache,
-      this.storage,
-      this.initializer
-    );
+    this.recovery = new TabStateRecovery(this.cache, this.storage);
     this.core = new TabStateCore(
       this.cache,
       this.storage,
       this.initializer,
-      this.scanner,
-      this.recovery
+      this.scanner
     );
   }
 

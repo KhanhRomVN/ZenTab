@@ -808,6 +808,9 @@ export class PromptController {
       }
 
       // STEP 5.5: Mark tab free with conversationId (if exists) or folderPath
+      console.log(
+        `[PromptController] 🏁 Marking tab ${tabId} free. ConversationId: ${conversationId}, FolderPath: ${folderPath}`
+      );
       if (conversationId) {
         await this.tabStateManager.markTabFreeWithConversation(
           tabId,
