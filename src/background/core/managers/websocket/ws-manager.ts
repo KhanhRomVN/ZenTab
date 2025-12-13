@@ -25,10 +25,6 @@ export class WSManager {
   public async connect(
     overrideUrl?: string
   ): Promise<{ success: boolean; error?: string }> {
-    console.log(
-      `[WSManager] 🔌 [${Date.now()}] connect() called with overrideUrl:`,
-      overrideUrl
-    );
     if (this.isConnecting) {
       return { success: false, error: "Already connecting" };
     }

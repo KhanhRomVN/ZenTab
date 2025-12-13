@@ -303,7 +303,6 @@ export class MessageHandler {
   ): Promise<void> {
     try {
       const result = await this.wsManager.connect(message.apiProvider);
-      console.log("[MessageHandler] wsManager.connect result:", result);
       sendResponse(result);
     } catch (error) {
       console.error("[MessageHandler] WebSocket connection error:", error);

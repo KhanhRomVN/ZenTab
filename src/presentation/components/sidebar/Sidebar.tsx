@@ -184,28 +184,17 @@ const Sidebar: React.FC = () => {
 
     try {
       const response = await new Promise<any>((resolve) => {
-        const startTime = Date.now();
-        console.log(
-          `[Sidebar] 📤 [${startTime}] Sending connectWebSocket message...`
-        );
         chrome.runtime.sendMessage(
           {
             action: "connectWebSocket",
             apiProvider: `localhost:${port}`,
           },
           (res) => {
-            const endTime = Date.now();
-            console.log(
-              `[Sidebar] 📥 [${endTime}] Callback received for connectWebSocket. Duration: ${
-                endTime - startTime
-              }ms`
-            );
             resolve(res);
           }
         );
       });
 
-      console.log(`[Sidebar] connectWebSocket response raw:`, response);
       if (chrome.runtime.lastError) {
         console.error(
           "[Sidebar] ❌ chrome.runtime.lastError:",
@@ -235,18 +224,13 @@ const Sidebar: React.FC = () => {
   };
 
   const handleRemovePort = async (port: number) => {
-    console.log(`[Sidebar] 🗑️ Requesting to remove port ${port}`);
     try {
       // Disconnect WebSocket via background
-      console.log(`[Sidebar] 🔌 Sending disconnectWebSocket message...`);
-      const response = await chrome.runtime.sendMessage({
+      await chrome.runtime.sendMessage({
         action: "disconnectWebSocket",
       });
-      console.log(`[Sidebar] ✅ disconnectWebSocket response:`, response);
 
-      console.log(`[Sidebar] 🔄 Updating state to remove port ${port}`);
       setPorts((prev) => prev.filter((p) => p.port !== port));
-      // alert(`Removed port ${port}`); // Debug alert
     } catch (error) {
       console.error(`[Sidebar] ❌ Error removing port:`, error);
       alert(`Error removing port: ${error}`);

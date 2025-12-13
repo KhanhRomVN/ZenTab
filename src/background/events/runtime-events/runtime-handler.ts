@@ -63,10 +63,6 @@ export class RuntimeEventHandler {
     sender: any,
     sendResponse: (response?: any) => void
   ): Promise<boolean | undefined> {
-    console.log(
-      `[RuntimeEventHandler] 🕵️ [${Date.now()}] Checking message:`,
-      message.type || message.action
-    );
     // Handle message based on type
     switch (message.type) {
       case "ping":
@@ -95,10 +91,6 @@ export class RuntimeEventHandler {
 
       default:
         // Don't respond to unknown messages - let other listeners handle them
-        console.log(
-          `[RuntimeEventHandler] 🤷 [${Date.now()}] Ignoring unknown message:`,
-          message.action || message.type
-        );
         return false;
     }
   }

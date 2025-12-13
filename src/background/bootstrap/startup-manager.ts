@@ -291,19 +291,9 @@ export class StartupManager {
     // Unified Message Listener
     browserAPI.runtime.onMessage.addListener(
       (message: any, sender: any, sendResponse: any) => {
-        console.log(
-          `[StartupManager] 📨 [${Date.now()}] Message received:`,
-          message.type || message.action,
-          message
-        );
-
         // Wrapper to trace response
         const originalSendResponse = sendResponse;
         sendResponse = (response: any) => {
-          console.log(
-            `[StartupManager] 📤 [${Date.now()}] Sending response:`,
-            response
-          );
           try {
             originalSendResponse(response);
           } catch (error) {
@@ -342,11 +332,6 @@ export class StartupManager {
           }
         })();
 
-        // CRITICAL: Return true IMMEDIATELY to keep message channel open for async response
-        console.log(
-          `[StartupManager] ⏳ [${Date.now()}] Returning true for async handling of:`,
-          message.type || message.action
-        );
         return true;
       }
     );
